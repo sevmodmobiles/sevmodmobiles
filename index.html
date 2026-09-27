@@ -176,6 +176,25 @@
   }
   .success { color: var(--green) !important; font-weight: 600; }
   .error { color: var(--red) !important; font-weight: 600; }
+  .waiting {
+    color: var(--blue) !important;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(66,133,244,0.25);
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .whoami {
     font-size: 14px;
     color: var(--muted);
@@ -395,7 +414,7 @@
 
     <div class="card">
       <h2>По дням</h2>
-      <div id="statsDaysList"><div class="statsEmpty">Загрузка…</div></div>
+      <div id="statsDaysList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
   </div>
 
@@ -481,6 +500,11 @@
   var screenScan = document.getElementById('screenScan');
   var screenStats = document.getElementById('screenStats');
   var regStatus = document.getElementById('regStatus');
+  function setRegStatus(text, kind) {
+    stopWaitIndicator(regStatus);
+    regStatus.textContent = text;
+    regStatus.className = kind || '';
+  }
   var statusEl = document.getElementById('status');
 
   var currentUser = null;
@@ -568,7 +592,7 @@
   }
 
   function loadMyStats() {
-    document.getElementById('statsDaysList').innerHTML = '<div class="statsEmpty">Загрузка…</div>';
+    document.getElementById('statsDaysList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
     if (!currentUser || !currentUser.phone) return;
 
     fetch(API_URL, {
@@ -633,8 +657,7 @@
         captureBtn.style.display = 'block';
       })
       .catch(function (err) {
-        regStatus.textContent = 'Не удалось включить камеру: ' + err;
-        regStatus.className = 'error';
+        setRegStatus('Не удалось включить камеру: ' + err, 'error');
       });
   });
 
@@ -694,45 +717,44 @@
     var phone = regPhoneEl.value.trim();
     var name = [lastName, firstName, middleName].filter(Boolean).join(' ');
     if (!lastName || !firstName || !phone) {
-      regStatus.textContent = 'Заполните фамилию, имя и телефон';
-      regStatus.className = 'error';
+      setRegStatus('Заполните фамилию, имя и телефон', 'error');
       return;
     }
     if (!isValidRuPhone(phone)) {
-      regStatus.textContent = 'Введите номер телефона полностью, в формате +7 (900) 000-00-00';
-      regStatus.className = 'error';
+      setRegStatus('Введите номер телефона полностью, в формате +7 (900) 000-00-00', 'error');
       return;
     }
     if (!capturedPhoto) {
-      regStatus.textContent = 'Сделайте фото лица';
-      regStatus.className = 'error';
+      setRegStatus('Сделайте фото лица', 'error');
       return;
     }
     if (!document.getElementById('consentCheckbox').checked) {
-      regStatus.textContent = 'Необходимо согласие на обработку персональных данных';
-      regStatus.className = 'error';
+      setRegStatus('Необходимо согласие на обработку персональных данных', 'error');
       return;
     }
-    regStatus.textContent = 'Регистрация…';
-    regStatus.className = '';
+    document.getElementById('regBtn').disabled = true;
+    // Регистрация включает загрузку фото на Google Диск, поэтому обычно
+    // идёт дольше, чем отметка прихода/ухода — показываем это в подсказке.
+    startWaitIndicator(regStatus, 'Регистрация');
     fetch(API_URL, {
       method: 'POST',
       body: JSON.stringify({ action: 'register', name: name, phone: phone, photo: capturedPhoto })
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
+        document.getElementById('regBtn').disabled = false;
         if (res.status === 'ok') {
           currentUser = { name: res.name, phone: res.phone };
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentUser)); } catch (e) {}
+          stopWaitIndicator(regStatus);
           showScanScreen();
         } else {
-          regStatus.textContent = 'Ошибка: ' + (res.message || 'неизвестная');
-          regStatus.className = 'error';
+          setRegStatus('Ошибка: ' + (res.message || 'неизвестная'), 'error');
         }
       })
       .catch(function (err) {
-        regStatus.textContent = 'Ошибка соединения: ' + err;
-        regStatus.className = 'error';
+        document.getElementById('regBtn').disabled = false;
+        setRegStatus('Ошибка соединения: ' + err, 'error');
       });
   });
 
@@ -758,8 +780,38 @@
   var html5QrCode = null;
 
   function setStatus(text, kind) {
+    stopWaitIndicator(statusEl);
     statusEl.textContent = text;
     statusEl.className = kind || '';
+  }
+
+  // Индикатор ожидания ответа сервера: крутящийся значок + счётчик секунд,
+  // который сам показывает, сколько реально уже идёт ожидание, вместо
+  // молчаливого "Отправка…", из-за которого непонятно, зависло всё или
+  // просто ждёт. Подсказка меняется, если ответ задерживается дольше обычного.
+  function startWaitIndicator(el, label) {
+    stopWaitIndicator(el);
+    var start = Date.now();
+    function render() {
+      var sec = Math.max(0, Math.round((Date.now() - start) / 1000));
+      var hint = '';
+      if (sec >= 8) {
+        hint = ' — сервер отвечает дольше обычного, ещё немного';
+      } else if (sec >= 3) {
+        hint = ' — обычно занимает несколько секунд';
+      }
+      el.innerHTML = '<span class="spinner"></span><span>' + label + '… ' + sec + ' с' + hint + '</span>';
+      el.className = 'waiting';
+    }
+    render();
+    el._waitTimer = setInterval(render, 1000);
+  }
+
+  function stopWaitIndicator(el) {
+    if (el._waitTimer) {
+      clearInterval(el._waitTimer);
+      el._waitTimer = null;
+    }
   }
 
   document.getElementById('scanBtn').addEventListener('click', function () {
@@ -842,7 +894,9 @@
 
   function sendEvent(eventType) {
     if (!scannedObject || !currentUser) return;
-    setStatus('Отправка…');
+    document.getElementById('inBtn').disabled = true;
+    document.getElementById('outBtn').disabled = true;
+    startWaitIndicator(statusEl, 'Отправка');
     fetch(API_URL, {
       method: 'POST',
       body: JSON.stringify({
