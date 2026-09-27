@@ -787,8 +787,6 @@
         var lbl = document.getElementById('objectLabel');
         lbl.style.display = 'block';
         lbl.textContent = 'Объект: ' + trimmed;
-        document.getElementById('inBtn').style.display = 'block';
-        document.getElementById('outBtn').style.display = 'block';
         checkShiftStatus();
       }
     ).catch(function (err) {
@@ -797,17 +795,36 @@
     });
   });
 
-  // Определяет, начата ли уже смена у текущего пользователя, и отключает
-  // неподходящую кнопку: "Отметить уход" недоступна, пока смена не начата,
-  // и наоборот "Отметить приход" недоступна, если смена уже идёт.
-  function applyShiftButtonState(shiftOpen) {
-    document.getElementById('inBtn').disabled = shiftOpen;
-    document.getElementById('outBtn').disabled = !shiftOpen;
+  // Показывает ровно одну подходящую кнопку в зависимости от того, открыта
+  // ли у сотрудника смена, и если да — на этом объекте или на другом:
+  //  - смена нигде не открыта            -> только "Отметить приход"
+  //  - смена открыта именно на этом объекте -> только "Отметить уход"
+  //  - смена открыта на ДРУГОМ объекте   -> ни одной кнопки, сообщение,
+  //    что сначала нужно закрыть смену там
+  function applyShiftButtonState(shiftOpen, openObjectName) {
+    var inBtn = document.getElementById('inBtn');
+    var outBtn = document.getElementById('outBtn');
+
+    if (!shiftOpen) {
+      inBtn.style.display = 'block';
+      inBtn.disabled = false;
+      outBtn.style.display = 'none';
+      setStatus('');
+    } else if (openObjectName === scannedObject) {
+      inBtn.style.display = 'none';
+      outBtn.style.display = 'block';
+      outBtn.disabled = false;
+      setStatus('');
+    } else {
+      inBtn.style.display = 'none';
+      outBtn.style.display = 'none';
+      setStatus('Вы ещё не закончили работу на объекте «' + openObjectName + '». Сначала отметьте там уход.', 'error');
+    }
   }
 
   function checkShiftStatus() {
     if (!currentUser || !currentUser.phone) {
-      applyShiftButtonState(false);
+      applyShiftButtonState(false, null);
       return;
     }
     fetch(API_URL, {
@@ -816,10 +833,10 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        applyShiftButtonState(res.shiftOpen === true);
+        applyShiftButtonState(res.shiftOpen === true, res.openObjectName || null);
       })
       .catch(function () {
-        applyShiftButtonState(false); // при ошибке связи по умолчанию разрешаем начать смену
+        applyShiftButtonState(false, null); // при ошибке связи по умолчанию разрешаем начать смену
       });
   }
 
@@ -886,26 +903,22 @@
   document.getElementById('dbgScanFound').addEventListener('click', function () {
     showScanScreen();
     document.getElementById('scanBtn').style.display = 'none';
+    scannedObject = 'Befree Балкания Nova';
     var lbl = document.getElementById('objectLabel');
-    lbl.textContent = 'Объект: Befree Балкания Nova';
+    lbl.textContent = 'Объект: ' + scannedObject;
     lbl.style.display = 'block';
-    document.getElementById('inBtn').style.display = 'block';
-    document.getElementById('outBtn').style.display = 'block';
-    applyShiftButtonState(false);
-    document.getElementById('status').textContent = '';
+    applyShiftButtonState(false, null);
     debugPanel.classList.remove('open');
   });
 
   document.getElementById('dbgScanFoundActive').addEventListener('click', function () {
     showScanScreen();
     document.getElementById('scanBtn').style.display = 'none';
+    scannedObject = 'Befree Балкания Nova';
     var lbl = document.getElementById('objectLabel');
-    lbl.textContent = 'Объект: Befree Балкания Nova';
+    lbl.textContent = 'Объект: ' + scannedObject;
     lbl.style.display = 'block';
-    document.getElementById('inBtn').style.display = 'block';
-    document.getElementById('outBtn').style.display = 'block';
-    applyShiftButtonState(true);
-    document.getElementById('status').textContent = '';
+    applyShiftButtonState(true, scannedObject);
     debugPanel.classList.remove('open');
   });
 
