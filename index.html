@@ -571,8 +571,41 @@
   var validObjects = [];
   var validObjectsLoaded = false;
 
-  fetch(API_URL + '?action=objects')
-    .then(function (r) { return r.json(); })
+  // Apps Script иногда (не по нашей вине — особенность инфраструктуры
+  // Google) вместо JSON-ответа на долю секунды отдаёт служебную
+  // HTML-страницу, из-за чего разбор JSON падает с ошибкой вида
+  // "Unexpected token '<'" или fetch обрывается сам. Это не постоянная
+  // поломка, а редкий сбой — поэтому вместо немедленного показа ошибки
+  // пользователю сначала тихо пробуем повторить запрос ещё пару раз.
+  function apiFetch(url, options, attempt) {
+    attempt = attempt || 1;
+    return fetch(url, options)
+      .then(function (r) {
+        return r.text().then(function (text) {
+          try {
+            return JSON.parse(text);
+          } catch (parseErr) {
+            throw new Error('bad-json');
+          }
+        });
+      })
+      .catch(function (err) {
+        if (attempt < 3) {
+          return new Promise(function (resolve) {
+            setTimeout(resolve, 700 * attempt);
+          }).then(function () {
+            return apiFetch(url, options, attempt + 1);
+          });
+        }
+        throw err;
+      });
+  }
+
+  function apiPost(body) {
+    return apiFetch(API_URL, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  apiFetch(API_URL + '?action=objects')
     .then(function (data) {
       validObjects = (data.objects || []).map(function (o) { return String(o).trim(); });
       validObjectsLoaded = true;
@@ -762,11 +795,7 @@
     document.getElementById('statsDaysList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
     if (!currentUser || !currentUser.phone) return;
 
-    fetch(API_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'stats', phone: currentUser.phone })
-    })
-      .then(function (r) { return r.json(); })
+    apiPost({ action: 'stats', phone: currentUser.phone })
       .then(function (res) {
         if (res.status === 'ok') {
           renderStats(res);
@@ -892,11 +921,7 @@
     }
     document.getElementById('loginBtn').disabled = true;
     startWaitIndicator(loginStatus, 'Вход');
-    fetch(API_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'login', phone: phone })
-    })
-      .then(function (r) { return r.json(); })
+    apiPost({ action: 'login', phone: phone })
       .then(function (res) {
         document.getElementById('loginBtn').disabled = false;
         if (res.status === 'ok') {
@@ -964,11 +989,7 @@
     // Регистрация включает загрузку фото на Google Диск, поэтому обычно
     // идёт дольше, чем отметка прихода/ухода — показываем это в подсказке.
     startWaitIndicator(regStatus, 'Регистрация');
-    fetch(API_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'register', name: name, phone: phone, photo: capturedPhoto, googleIdToken: googleIdToken })
-    })
-      .then(function (r) { return r.json(); })
+    apiPost({ action: 'register', name: name, phone: phone, photo: capturedPhoto, googleIdToken: googleIdToken })
       .then(function (res) {
         document.getElementById('regBtn').disabled = false;
         if (res.status === 'ok') {
@@ -1119,11 +1140,7 @@
       if (banner) banner.className = 'shiftBanner';
       return;
     }
-    fetch(API_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'status', phone: currentUser.phone })
-    })
-      .then(function (r) { return r.json(); })
+    apiPost({ action: 'status', phone: currentUser.phone })
       .then(function (res) {
         renderShiftBanner(res.shiftOpen === true, res.openObjectName || null);
       })
@@ -1160,11 +1177,7 @@
       applyActionButtonState(false, null);
       return;
     }
-    fetch(API_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'status', phone: currentUser.phone })
-    })
-      .then(function (r) { return r.json(); })
+    apiPost({ action: 'status', phone: currentUser.phone })
       .then(function (res) {
         var shiftOpen = res.shiftOpen === true;
         var openObjectName = res.openObjectName || null;
@@ -1180,17 +1193,13 @@
     if (!scannedObject || !currentUser) return;
     document.getElementById('actionBtn').style.display = 'none';
     startWaitIndicator(statusEl, 'Отправка');
-    fetch(API_URL, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'log',
-        name: currentUser.name,
-        phone: currentUser.phone,
-        objectName: scannedObject,
-        eventType: eventType
-      })
+    apiPost({
+      action: 'log',
+      name: currentUser.name,
+      phone: currentUser.phone,
+      objectName: scannedObject,
+      eventType: eventType
     })
-      .then(function (r) { return r.json(); })
       .then(function (res) {
         if (res.status === 'ok') {
           setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time, 'success');
