@@ -172,10 +172,10 @@
   }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   #regBtn { background: var(--blue); }
-  #scanBtn { background: var(--blue); }
   #startCamBtn { background: var(--green); }
-  #inBtn { background: var(--green); display: none; }
-  #outBtn { background: var(--red); display: none; }
+  #actionBtn { display: none; }
+  #actionBtn.action-in { background: var(--green); }
+  #actionBtn.action-out { background: var(--red); }
   #myStatsBtn { background: #555; margin-top: 24px; }
   #reader { width: 100%; margin-top: 14px; border-radius: 10px; overflow: hidden; }
   #objectLabel {
@@ -448,13 +448,11 @@
     </div>
 
     <div class="card">
-      <h2>Отсканируйте QR-код на объекте</h2>
+      <h2>Отметка на объекте</h2>
       <div id="shiftStatusBanner" class="shiftBanner"></div>
-      <button id="scanBtn">Сканировать QR-код</button>
+      <button id="actionBtn">Отметить приход</button>
       <div id="reader"></div>
       <div id="objectLabel"></div>
-      <button id="inBtn">Отметить приход</button>
-      <button id="outBtn">Отметить уход</button>
       <div id="status"></div>
       <button id="myStatsBtn" type="button">Мой кабинет</button>
     </div>
@@ -611,7 +609,7 @@
     screenStats.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
-    refreshShiftBanner();
+    checkShiftStatus();
   }
 
   // Экран входа по номеру телефона — стартовый экран для тех, кто уже
@@ -1048,8 +1046,12 @@
     }
   }
 
-  document.getElementById('scanBtn').addEventListener('click', function () {
-    document.getElementById('scanBtn').style.display = 'none';
+  // Кнопка теперь одна — её текст ("Отметить приход" / "Отметить уход")
+  // заранее отражает текущий статус смены (см. applyActionButtonState),
+  // а нажатие сразу запускает камеру. Отдельной кнопки "Сканировать QR-код"
+  // больше нет — сканирование и отметка объединены в одно действие.
+  document.getElementById('actionBtn').addEventListener('click', function () {
+    document.getElementById('actionBtn').style.display = 'none';
     setStatus('');
     html5QrCode = new Html5Qrcode('reader');
     html5QrCode.start(
@@ -1064,7 +1066,17 @@
 
         if (validObjectsLoaded && validObjects.indexOf(trimmed) === -1) {
           setStatus('Этот QR-код не относится ни к одному известному объекту', 'error');
-          document.getElementById('scanBtn').style.display = 'block';
+          document.getElementById('actionBtn').style.display = 'block';
+          scannedObject = null;
+          return;
+        }
+
+        // Смена уже открыта, но на ДРУГОМ объекте — нельзя ни открыть новую,
+        // ни закрыть эту (сервер тоже это проверит, но лучше сразу
+        // предупредить, не тратя время на отправку).
+        if (currentShiftOpen && currentOpenObjectName !== trimmed) {
+          setStatus('Вы ещё не закончили работу на объекте «' + currentOpenObjectName + '». Сначала отметьте там уход.', 'error');
+          document.getElementById('actionBtn').style.display = 'block';
           scannedObject = null;
           return;
         }
@@ -1073,11 +1085,13 @@
         var lbl = document.getElementById('objectLabel');
         lbl.style.display = 'block';
         lbl.textContent = 'Объект: ' + trimmed;
-        checkShiftStatus();
+        // Тип события уже известен по статусу, полученному ДО сканирования —
+        // отдельного подтверждения не требуется, отправляем сразу.
+        sendEvent(currentShiftOpen ? 'Уход' : 'Приход');
       }
     ).catch(function (err) {
       setStatus('Не удалось включить камеру: ' + err, 'error');
-      document.getElementById('scanBtn').style.display = 'block';
+      document.getElementById('actionBtn').style.display = 'block';
     });
   });
 
@@ -1119,36 +1133,31 @@
       });
   }
 
-  // Показывает ровно одну подходящую кнопку в зависимости от того, открыта
-  // ли у сотрудника смена, и если да — на этом объекте или на другом:
-  //  - смена нигде не открыта            -> только "Отметить приход"
-  //  - смена открыта именно на этом объекте -> только "Отметить уход"
-  //  - смена открыта на ДРУГОМ объекте   -> ни одной кнопки, сообщение,
-  //    что сначала нужно закрыть смену там
-  function applyShiftButtonState(shiftOpen, openObjectName) {
-    var inBtn = document.getElementById('inBtn');
-    var outBtn = document.getElementById('outBtn');
+  // Заранее (ещё до сканирования QR-кода) запоминаем статус смены — он
+  // определяет и текст/цвет единственной кнопки, и то, какой eventType
+  // будет отправлен сразу после успешного скана.
+  var currentShiftOpen = false;
+  var currentOpenObjectName = null;
 
-    if (!shiftOpen) {
-      inBtn.style.display = 'block';
-      inBtn.disabled = false;
-      outBtn.style.display = 'none';
-      setStatus('');
-    } else if (openObjectName === scannedObject) {
-      inBtn.style.display = 'none';
-      outBtn.style.display = 'block';
-      outBtn.disabled = false;
-      setStatus('');
+  function applyActionButtonState(shiftOpen, openObjectName) {
+    currentShiftOpen = shiftOpen;
+    currentOpenObjectName = openObjectName;
+    var btn = document.getElementById('actionBtn');
+    btn.style.display = 'block';
+    btn.disabled = false;
+    if (shiftOpen) {
+      btn.textContent = 'Отметить уход';
+      btn.className = 'action-out';
     } else {
-      inBtn.style.display = 'none';
-      outBtn.style.display = 'none';
-      setStatus('Вы ещё не закончили работу на объекте «' + openObjectName + '». Сначала отметьте там уход.', 'error');
+      btn.textContent = 'Отметить приход';
+      btn.className = 'action-in';
     }
+    setStatus('');
   }
 
   function checkShiftStatus() {
     if (!currentUser || !currentUser.phone) {
-      applyShiftButtonState(false, null);
+      applyActionButtonState(false, null);
       return;
     }
     fetch(API_URL, {
@@ -1159,18 +1168,17 @@
       .then(function (res) {
         var shiftOpen = res.shiftOpen === true;
         var openObjectName = res.openObjectName || null;
-        applyShiftButtonState(shiftOpen, openObjectName);
+        applyActionButtonState(shiftOpen, openObjectName);
         renderShiftBanner(shiftOpen, openObjectName);
       })
       .catch(function () {
-        applyShiftButtonState(false, null); // при ошибке связи по умолчанию разрешаем начать смену
+        applyActionButtonState(false, null); // при ошибке связи по умолчанию разрешаем начать смену
       });
   }
 
   function sendEvent(eventType) {
     if (!scannedObject || !currentUser) return;
-    document.getElementById('inBtn').disabled = true;
-    document.getElementById('outBtn').disabled = true;
+    document.getElementById('actionBtn').style.display = 'none';
     startWaitIndicator(statusEl, 'Отправка');
     fetch(API_URL, {
       method: 'POST',
@@ -1189,22 +1197,15 @@
         } else {
           setStatus('Ошибка: ' + (res.message || 'неизвестная'), 'error');
         }
-        document.getElementById('inBtn').style.display = 'none';
-        document.getElementById('outBtn').style.display = 'none';
-        document.getElementById('inBtn').disabled = false;
-        document.getElementById('outBtn').disabled = false;
         document.getElementById('objectLabel').style.display = 'none';
-        document.getElementById('scanBtn').style.display = 'block';
         scannedObject = null;
-        refreshShiftBanner(); // статус мог измениться — обновляем баннер на главном экране
+        checkShiftStatus(); // обновит и баннер, и кнопку с учётом нового статуса
       })
       .catch(function (err) {
         setStatus('Ошибка отправки: ' + err, 'error');
+        document.getElementById('actionBtn').style.display = 'block';
       });
   }
-
-  document.getElementById('inBtn').addEventListener('click', function () { sendEvent('Приход'); });
-  document.getElementById('outBtn').addEventListener('click', function () { sendEvent('Уход'); });
 
   // ===== ТЕСТОВЫЙ РЕЖИМ (для просмотра экранов без камеры/сервера) =====
   // Перед сдачей приложения пользователям этот блок нужно удалить.
@@ -1230,34 +1231,29 @@
 
   document.getElementById('dbgScanStart').addEventListener('click', function () {
     showScanScreen();
-    document.getElementById('scanBtn').style.display = 'block';
     document.getElementById('reader').innerHTML = '';
     document.getElementById('objectLabel').style.display = 'none';
-    document.getElementById('inBtn').style.display = 'none';
-    document.getElementById('outBtn').style.display = 'none';
     document.getElementById('status').textContent = '';
     debugPanel.classList.remove('open');
   });
 
   document.getElementById('dbgScanFound').addEventListener('click', function () {
     showScanScreen();
-    document.getElementById('scanBtn').style.display = 'none';
     scannedObject = 'Befree Балкания Nova';
     var lbl = document.getElementById('objectLabel');
     lbl.textContent = 'Объект: ' + scannedObject;
     lbl.style.display = 'block';
-    applyShiftButtonState(false, null);
+    applyActionButtonState(false, null);
     debugPanel.classList.remove('open');
   });
 
   document.getElementById('dbgScanFoundActive').addEventListener('click', function () {
     showScanScreen();
-    document.getElementById('scanBtn').style.display = 'none';
     scannedObject = 'Befree Балкания Nova';
     var lbl = document.getElementById('objectLabel');
     lbl.textContent = 'Объект: ' + scannedObject;
     lbl.style.display = 'block';
-    applyShiftButtonState(true, scannedObject);
+    applyActionButtonState(true, scannedObject);
     debugPanel.classList.remove('open');
   });
 
