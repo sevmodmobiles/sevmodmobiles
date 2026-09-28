@@ -318,8 +318,8 @@
   .lateBadge.late { color: var(--red); background: rgba(234, 67, 53, 0.12); }
   .lateBadge.onTime { color: var(--green); background: rgba(52, 168, 83, 0.12); }
   .dayRow .dayRight { text-align: right; }
-  .dayRow .dayHours { font-weight: 600; }
-  .dayRow .dayPay { font-size: 12px; color: var(--muted); }
+  .dayRow .dayPay { font-weight: 600; }
+  .dayRow .dayHoursInline { font-weight: 600; color: var(--text); }
 
   /* ===== Тестовый режим ===== */
   #debugToggle {
@@ -787,13 +787,15 @@
           badgeHtml = '<span class="lateBadge onTime">✓ вовремя</span>';
         }
       }
-      var timesText = arrivalHtml + ' – ' + (d.departure || '—');
+      // Время смены и отработанные часы теперь в одной строке (внизу),
+      // а наверху справа, на месте часов, — сумма к оплате за эту смену.
+      var timesText = arrivalHtml + ' – ' + (d.departure || '—') +
+        ' · <span class="dayHoursInline">' + (d.hours || '—') + '</span>';
 
       row.innerHTML =
         '<div class="dayRowTop">' +
           '<div class="dayDate">' + d.date + '</div>' +
-          '<div class="dayRight"><div class="dayHours">' + (d.hours || '—') + '</div>' +
-          '<div class="dayPay">' + (d.pay ? d.pay + ' ₽' : '') + '</div></div>' +
+          '<div class="dayRight"><div class="dayPay">' + (d.pay ? d.pay + ' ₽' : '—') + '</div></div>' +
         '</div>' +
         '<div class="dayRowBottom">' +
           '<div class="dayTimes">' + timesText + '</div>' +
