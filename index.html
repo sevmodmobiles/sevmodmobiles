@@ -331,7 +331,11 @@
   .dayRow .dayHoursInline { font-weight: 600; color: var(--text); }
 
   /* ===== Тестовый режим ===== */
+  /* Скрыта по умолчанию — видна только тому, кто знает секретную ссылку
+     (см. проверку localStorage в скрипте ниже). Обычные сотрудники её
+     никогда не увидят. */
   #debugToggle {
+    display: none;
     position: fixed;
     right: 16px;
     bottom: 16px;
@@ -344,10 +348,10 @@
     border: none;
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
     z-index: 1000;
-    display: flex;
     align-items: center;
     justify-content: center;
   }
+  #debugToggle.debugVisible { display: flex; }
   #debugPanel {
     display: none;
     position: fixed;
@@ -1289,9 +1293,30 @@
   }
 
   // ===== ТЕСТОВЫЙ РЕЖИМ (для просмотра экранов без камеры/сервера) =====
-  // Перед сдачей приложения пользователям этот блок нужно удалить.
+  // Кнопка 🧪 скрыта от всех по умолчанию. Чтобы включить её на СВОЁМ
+  // устройстве — один раз открыть сайт со специальной добавкой в конце
+  // адреса: ?debug=sevmod (например: https://.../index.html?debug=sevmod).
+  // После этого выбор запоминается в localStorage именно этого браузера —
+  // повторять не нужно, и другие люди, открывая обычную ссылку без этой
+  // добавки, кнопку никогда не увидят.
+  var DEBUG_SECRET = 'sevmod';
+  var DEBUG_STORAGE_KEY = 'attendance_debug_unlocked_v1';
   var debugToggle = document.getElementById('debugToggle');
   var debugPanel = document.getElementById('debugPanel');
+  (function initDebugVisibility() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('debug') === DEBUG_SECRET) {
+        localStorage.setItem(DEBUG_STORAGE_KEY, '1');
+      }
+      if (localStorage.getItem(DEBUG_STORAGE_KEY) === '1') {
+        debugToggle.classList.add('debugVisible');
+      }
+    } catch (e) {
+      // localStorage недоступен (приватный режим и т.п.) — просто не
+      // показываем кнопку, это не критично
+    }
+  })();
   debugToggle.addEventListener('click', function () {
     debugPanel.classList.toggle('open');
   });
