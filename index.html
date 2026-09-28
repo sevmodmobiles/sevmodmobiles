@@ -1245,8 +1245,15 @@
     // почти мгновенно, а вот подтверждающий ответ иногда идёт ещё 10-15
     // секунд из-за особенностей инфраструктуры Apps Script (см. пояснения
     // в чате). Ждать все эти секунды с пустым экраном хуже, чем сразу
-    // показать ожидаемый результат и тихо проверить его в фоне — а если
-    // сервер в итоге откажет, показать это заметно (см. showSendFailure).
+    // показать ожидаемый результат — включая баннер статуса смены и кнопку
+    // следующего действия — а если сервер в итоге откажет, заметно
+    // откатить это (см. showSendFailure).
+    var optimisticShiftOpen = (eventTypeAtSend === 'Приход');
+    var optimisticOpenObjectName = optimisticShiftOpen ? objectAtSend : null;
+    renderShiftBanner(optimisticShiftOpen, optimisticOpenObjectName);
+    // applyActionButtonState сама очищает статус (setStatus('')) — поэтому
+    // сообщение "Записано" выставляем ПОСЛЕ неё, а не до.
+    applyActionButtonState(optimisticShiftOpen, optimisticOpenObjectName);
     setStatus('Записано: ' + currentUser.name + ', ' + eventTypeAtSend + ' (объект: ' + objectAtSend + ')', 'success');
 
     apiPost({
@@ -1258,9 +1265,9 @@
     })
       .then(function (res) {
         if (res.status === 'ok') {
-          // Подтверждено — просто уточняем точное серверное время.
+          // Подтверждено — просто уточняем точное серверное время, статус
+          // и кнопка уже показывают верную картину (обновили оптимистично).
           setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time, 'success');
-          checkShiftStatus(); // обновит баннер и кнопку с учётом нового статуса
         } else {
           showSendFailure(res.message || 'сервер отклонил отметку без пояснения');
         }
