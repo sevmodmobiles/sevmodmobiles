@@ -197,6 +197,18 @@
   }
   .success { color: var(--green) !important; font-weight: 600; }
   .error { color: var(--red) !important; font-weight: 600; }
+  .failAlert {
+    text-align: left;
+    background: rgba(234,67,53,0.1);
+    border: 2px solid var(--red);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .failAlertTitle { font-weight: 700; margin-bottom: 6px; }
+  .failAlert button {
+    background: var(--red);
+    margin-top: 10px;
+  }
   .waiting {
     color: var(--blue) !important;
     font-weight: 600;
@@ -1196,30 +1208,65 @@
       });
   }
 
+  // ПЛАН Б: что делать, если "оптимистичный" успех (показанный сразу, не
+  // дожидаясь сервера) не подтвердился. Показываем это заметно и
+  // однозначно — тихо промолчать здесь нельзя, от этого зависит табель.
+  // Требуем явного "Понятно", чтобы человек точно это увидел, и сразу же
+  // перепроверяем реальный статус смены на сервере.
+  function showSendFailure(message) {
+    if (navigator.vibrate) {
+      try { navigator.vibrate([200, 100, 200]); } catch (e) {}
+    }
+    stopWaitIndicator(statusEl);
+    statusEl.className = 'error';
+    statusEl.innerHTML =
+      '<div class="failAlert">' +
+        '<div class="failAlertTitle">⚠️ Не подтверждено сервером</div>' +
+        '<div>' + message + '</div>' +
+        '<div>Проверьте статус смены — возможно, отметку нужно повторить.</div>' +
+        '<button id="ackFailBtn" type="button">Понятно, проверить статус</button>' +
+      '</div>';
+    document.getElementById('ackFailBtn').addEventListener('click', function () {
+      setStatus('');
+      checkShiftStatus();
+    });
+  }
+
   function sendEvent(eventType) {
     if (!scannedObject || !currentUser) return;
     document.getElementById('actionBtn').style.display = 'none';
-    startWaitIndicator(statusEl, 'Отправка');
+
+    var objectAtSend = scannedObject;
+    var eventTypeAtSend = eventType;
+    document.getElementById('objectLabel').style.display = 'none';
+    scannedObject = null;
+
+    // Оптимистичный интерфейс: запись в таблицу на сервере происходит
+    // почти мгновенно, а вот подтверждающий ответ иногда идёт ещё 10-15
+    // секунд из-за особенностей инфраструктуры Apps Script (см. пояснения
+    // в чате). Ждать все эти секунды с пустым экраном хуже, чем сразу
+    // показать ожидаемый результат и тихо проверить его в фоне — а если
+    // сервер в итоге откажет, показать это заметно (см. showSendFailure).
+    setStatus('Записано: ' + currentUser.name + ', ' + eventTypeAtSend + ' (объект: ' + objectAtSend + ')', 'success');
+
     apiPost({
       action: 'log',
       name: currentUser.name,
       phone: currentUser.phone,
-      objectName: scannedObject,
-      eventType: eventType
+      objectName: objectAtSend,
+      eventType: eventTypeAtSend
     })
       .then(function (res) {
         if (res.status === 'ok') {
+          // Подтверждено — просто уточняем точное серверное время.
           setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time, 'success');
+          checkShiftStatus(); // обновит баннер и кнопку с учётом нового статуса
         } else {
-          setStatus('Ошибка: ' + (res.message || 'неизвестная'), 'error');
+          showSendFailure(res.message || 'сервер отклонил отметку без пояснения');
         }
-        document.getElementById('objectLabel').style.display = 'none';
-        scannedObject = null;
-        checkShiftStatus(); // обновит и баннер, и кнопку с учётом нового статуса
       })
       .catch(function (err) {
-        setStatus('Ошибка отправки: ' + err, 'error');
-        document.getElementById('actionBtn').style.display = 'block';
+        showSendFailure('не удалось получить подтверждение от сервера (' + err + ')');
       });
   }
 
