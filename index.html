@@ -75,7 +75,7 @@
     max-width: 440px;
     margin-bottom: 14px;
   }
-  #camPreview, #photoPreview {
+  #photoPreview {
     width: 100%;
     height: 220px;
     object-fit: cover;
@@ -84,7 +84,63 @@
     margin-bottom: 10px;
     display: none;
   }
-  #camPreview { transform: scaleX(-1); }
+  /* Камера теперь открывается во весь экран (как обычная камера телефона),
+     а не встроенным блоком внутри формы — так кнопка "Сделать фото" всегда
+     видна и не уезжает за пределы экрана на длинной форме регистрации. */
+  #cameraOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 3000;
+  }
+  #cameraOverlay.open { display: block; }
+  #cameraOverlay #camPreview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    display: block;
+    background: #000;
+  }
+  #camCloseBtn {
+    position: absolute;
+    top: max(16px, env(safe-area-inset-top));
+    left: 16px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 20px;
+    line-height: 1;
+    border: none;
+    margin: 0;
+  }
+  .camHint {
+    position: absolute;
+    top: max(16px, env(safe-area-inset-top));
+    left: 60px;
+    right: 16px;
+    text-align: center;
+    color: #fff;
+    font-size: 14px;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  }
+  #captureBtn {
+    position: absolute;
+    bottom: max(28px, env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    background: #fff;
+    border: 4px solid rgba(255,255,255,0.45);
+    padding: 0;
+    margin: 0;
+  }
+  #captureBtn:active { background: #ddd; }
   .consentRow {
     display: flex;
     align-items: flex-start;
@@ -436,11 +492,9 @@
         <input id="regPhone" type="tel" inputmode="numeric" placeholder="+7 (___) ___-__-__" autocomplete="tel" maxlength="18">
 
         <label>Фото лица</label>
-        <video id="camPreview" autoplay playsinline muted></video>
         <canvas id="camCanvas" style="display:none;"></canvas>
         <img id="photoPreview" alt="Ваше фото">
-        <button id="startCamBtn" type="button">Включить камеру</button>
-        <button id="captureBtn" type="button" style="display:none;">Сделать фото</button>
+        <button id="startCamBtn" type="button">📷 Сделать фото</button>
         <button id="retakeBtn" type="button" style="display:none; background:var(--muted);">Переснять</button>
 
         <div class="consentRow">
@@ -531,6 +585,13 @@
     <button id="dbgScanFoundActive" type="button">Сканирование (объект найден, смена уже идёт)</button>
     <button id="dbgStats" type="button">Мой кабинет (с примером данных)</button>
     <button id="dbgPolicy" type="button">Показать политику (модалка)</button>
+  </div>
+
+  <div id="cameraOverlay">
+    <video id="camPreview" autoplay playsinline muted></video>
+    <button id="camCloseBtn" type="button" aria-label="Отмена">✕</button>
+    <div class="camHint">Наведите камеру на лицо и нажмите кнопку внизу</div>
+    <button id="captureBtn" type="button" aria-label="Сделать фото"></button>
   </div>
 
   <div id="policyModal" class="modalOverlay">
@@ -861,27 +922,44 @@
   var regPhoneEl = document.getElementById('regPhone');
 
   // --- Фото лица ---
+  // Камера открывается на весь экран (как обычная камера в телефоне),
+  // а не встроенным блоком в длинной форме регистрации — раньше кнопку
+  // "Сделать фото" было легко не заметить, если она уезжала за пределы
+  // видимой области экрана.
   var camPreview = document.getElementById('camPreview');
   var camCanvas = document.getElementById('camCanvas');
   var photoPreview = document.getElementById('photoPreview');
   var startCamBtn = document.getElementById('startCamBtn');
   var captureBtn = document.getElementById('captureBtn');
   var retakeBtn = document.getElementById('retakeBtn');
+  var cameraOverlay = document.getElementById('cameraOverlay');
+  var camCloseBtn = document.getElementById('camCloseBtn');
   var capturedPhoto = null;
   var camStream = null;
 
+  function closeCameraOverlay() {
+    if (camStream) {
+      camStream.getTracks().forEach(function (t) { t.stop(); });
+      camStream = null;
+    }
+    cameraOverlay.classList.remove('open');
+  }
+
   startCamBtn.addEventListener('click', function () {
+    cameraOverlay.classList.add('open');
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
       .then(function (stream) {
         camStream = stream;
         camPreview.srcObject = stream;
-        camPreview.style.display = 'block';
-        startCamBtn.style.display = 'none';
-        captureBtn.style.display = 'block';
       })
       .catch(function (err) {
+        closeCameraOverlay();
         setRegStatus('Не удалось включить камеру: ' + err, 'error');
       });
+  });
+
+  camCloseBtn.addEventListener('click', function () {
+    closeCameraOverlay();
   });
 
   captureBtn.addEventListener('click', function () {
@@ -893,9 +971,8 @@
     ctx.drawImage(camPreview, 0, 0, camCanvas.width, camCanvas.height);
     capturedPhoto = camCanvas.toDataURL('image/jpeg', 0.7);
 
-    if (camStream) camStream.getTracks().forEach(function (t) { t.stop(); });
-    camPreview.style.display = 'none';
-    captureBtn.style.display = 'none';
+    closeCameraOverlay();
+    startCamBtn.style.display = 'none';
     photoPreview.src = capturedPhoto;
     photoPreview.style.display = 'block';
     retakeBtn.style.display = 'block';
