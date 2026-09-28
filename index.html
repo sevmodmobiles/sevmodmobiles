@@ -1177,6 +1177,13 @@
       applyActionButtonState(false, null);
       return;
     }
+    // Пока идёт проверка статуса (а из-за "холодного старта" Apps Script
+    // это иногда не доли секунды, а несколько секунд), кнопка раньше просто
+    // не была видна — выглядело как будто экран завис. Теперь сразу
+    // показываем живой индикатор ожидания, как при отправке отметки.
+    var btn = document.getElementById('actionBtn');
+    btn.style.display = 'none';
+    startWaitIndicator(statusEl, 'Проверка статуса');
     apiPost({ action: 'status', phone: currentUser.phone })
       .then(function (res) {
         var shiftOpen = res.shiftOpen === true;
