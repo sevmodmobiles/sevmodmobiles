@@ -127,6 +127,22 @@
     font-size: 14px;
     text-shadow: 0 1px 3px rgba(0,0,0,0.7);
   }
+  /* Силуэт-подсказка: овал, по которому нужно "поймать" лицо. Всё, что
+     снаружи овала, слегка затемняется — это и есть подсказка, куда
+     наводить камеру, без какой-либо реальной обработки изображения. */
+  .camFaceGuide {
+    position: absolute;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    max-width: 260px;
+    aspect-ratio: 3 / 4;
+    border: 3px solid rgba(255,255,255,0.9);
+    border-radius: 50%;
+    box-shadow: 0 0 0 2000px rgba(0,0,0,0.45);
+    pointer-events: none;
+  }
   #captureBtn {
     position: absolute;
     bottom: max(28px, env(safe-area-inset-bottom));
@@ -589,8 +605,9 @@
 
   <div id="cameraOverlay">
     <video id="camPreview" autoplay playsinline muted></video>
+    <div class="camFaceGuide"></div>
     <button id="camCloseBtn" type="button" aria-label="Отмена">✕</button>
-    <div class="camHint">Наведите камеру на лицо и нажмите кнопку внизу</div>
+    <div class="camHint">Совместите лицо с овалом и нажмите кнопку внизу</div>
     <button id="captureBtn" type="button" aria-label="Сделать фото"></button>
   </div>
 
