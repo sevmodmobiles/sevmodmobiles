@@ -184,6 +184,25 @@
     justify-content: center;
     gap: 8px;
   }
+  .shiftBanner {
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    display: none;
+  }
+  .shiftBanner.shiftBanner-open {
+    display: block;
+    color: var(--green);
+    background: rgba(52,168,83,0.12);
+  }
+  .shiftBanner.shiftBanner-closed {
+    display: block;
+    color: var(--muted);
+    background: rgba(107,114,128,0.12);
+  }
   .spinner {
     display: inline-block;
     width: 14px;
@@ -371,6 +390,7 @@
 
     <div class="card">
       <h2>Отсканируйте QR-код на объекте</h2>
+      <div id="shiftStatusBanner" class="shiftBanner"></div>
       <button id="scanBtn">Сканировать QR-код</button>
       <div id="reader"></div>
       <div id="objectLabel"></div>
@@ -518,6 +538,7 @@
     screenStats.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
+    refreshShiftBanner();
   }
 
   function showRegScreen() {
@@ -847,6 +868,44 @@
     });
   });
 
+  // Показывает на главном экране (ещё до сканирования QR-кода), открыта
+  // ли сейчас у сотрудника смена, и если да — на каком объекте. Это то,
+  // что видно сразу при входе в приложение, а не только после сканирования.
+  function renderShiftBanner(shiftOpen, openObjectName) {
+    var banner = document.getElementById('shiftStatusBanner');
+    if (!banner) return;
+    if (shiftOpen) {
+      banner.textContent = '🟢 Смена открыта: ' + openObjectName;
+      banner.className = 'shiftBanner shiftBanner-open';
+    } else {
+      banner.textContent = '⚪ Смена сейчас не открыта';
+      banner.className = 'shiftBanner shiftBanner-closed';
+    }
+  }
+
+  // Запрашивает актуальный статус смены и обновляет баннер — независимо от
+  // того, сканировал ли сотрудник в этот момент QR-код (в отличие от
+  // checkShiftStatus, которая ещё и управляет кнопками "Приход"/"Уход").
+  function refreshShiftBanner() {
+    var banner = document.getElementById('shiftStatusBanner');
+    if (!currentUser || !currentUser.phone) {
+      if (banner) banner.className = 'shiftBanner';
+      return;
+    }
+    fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'status', phone: currentUser.phone })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        renderShiftBanner(res.shiftOpen === true, res.openObjectName || null);
+      })
+      .catch(function () {
+        // при ошибке связи баннер просто не обновляем, чтобы не показывать
+        // неверную информацию — останется прежнее (последнее известное) значение
+      });
+  }
+
   // Показывает ровно одну подходящую кнопку в зависимости от того, открыта
   // ли у сотрудника смена, и если да — на этом объекте или на другом:
   //  - смена нигде не открыта            -> только "Отметить приход"
@@ -885,7 +944,10 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        applyShiftButtonState(res.shiftOpen === true, res.openObjectName || null);
+        var shiftOpen = res.shiftOpen === true;
+        var openObjectName = res.openObjectName || null;
+        applyShiftButtonState(shiftOpen, openObjectName);
+        renderShiftBanner(shiftOpen, openObjectName);
       })
       .catch(function () {
         applyShiftButtonState(false, null); // при ошибке связи по умолчанию разрешаем начать смену
@@ -921,6 +983,7 @@
         document.getElementById('objectLabel').style.display = 'none';
         document.getElementById('scanBtn').style.display = 'block';
         scannedObject = null;
+        refreshShiftBanner(); // статус мог измениться — обновляем баннер на главном экране
       })
       .catch(function (err) {
         setStatus('Ошибка отправки: ' + err, 'error');
