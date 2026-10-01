@@ -486,6 +486,77 @@
   .adminTaskCard .adminTaskName { font-weight: 600; }
   .adminTaskCard .adminTaskText { color: var(--text); margin-top: 2px; }
   .adminTaskCard .adminTaskMeta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .adminTaskCard.adminTaskCardDone {
+    background: rgba(52, 168, 83, 0.08);
+    border-radius: 10px;
+    padding: 10px;
+    margin: 4px 0;
+    border-bottom: none;
+    cursor: pointer;
+  }
+  .adminTaskCard.adminTaskCardClickable { cursor: pointer; }
+  .adminTaskStatusTag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .adminTaskStatusTag.stNew { color: var(--muted); background: rgba(107, 114, 128, 0.12); }
+  .adminTaskStatusTag.stProgress { color: var(--blue); background: rgba(66, 133, 244, 0.12); }
+  .adminTaskStatusTag.stDone { color: var(--green); background: rgba(52, 168, 83, 0.14); }
+  .adminTaskDetail {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    font-size: 13px;
+  }
+
+  /* Превью выбранных, но ещё не отправленных фото (постановка задачи,
+     фото "до"/"после" у сотрудника) — просто ряд квадратных миниатюр. */
+  .photoPreviewRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 14px;
+  }
+  .photoPreviewRow img {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  /* Уже загруженные фото (сетка побольше, для просмотра результата) */
+  .photoGrid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .photoGrid a { display: block; }
+  .photoGrid img {
+    width: 110px;
+    height: 110px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    display: block;
+  }
+
+  .taskStatusBadge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 11px;
+    border-radius: 20px;
+  }
+  .taskStatusBadge.stNew { color: var(--muted); background: rgba(107, 114, 128, 0.12); }
+  .taskStatusBadge.stProgress { color: var(--blue); background: rgba(66, 133, 244, 0.12); }
+  .taskStatusBadge.stDone { color: var(--green); background: rgba(52, 168, 83, 0.14); }
 
   /* Красная точка/счётчик на кнопке "Мои задачи" — видна, только когда
      есть хотя бы одна невыполненная задача. */
@@ -655,6 +726,10 @@
       <div id="status"></div>
       <button id="myTasksBtn" type="button" style="background:var(--muted); position:relative;">Мои задачи<span id="myTasksBadge" class="taskBadge" style="display:none;"></span></button>
       <button id="myStatsBtn" type="button">Мой кабинет</button>
+      <!-- Видна только на этом устройстве и только после того, как вход
+           через Google здесь уже подтвердил права администратора — см.
+           ADMIN_FLAG_KEY в скрипте. До этого кнопки нет вообще. -->
+      <button id="adminPanelBtn" type="button" style="display:none; background:var(--blue);">Админ панель</button>
     </div>
   </div>
 
@@ -669,6 +744,69 @@
     </div>
     <div class="card">
       <div id="tasksList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Экран деталей одной задачи — текст, объект, фото задачи, и дальше
+       пошагово: "Приступить к выполнению" (фото ДО) -> "Подтвердить
+       выполнение" (фото ПОСЛЕ + комментарий). Какой именно шаг сейчас
+       виден, решает статус задачи (см. renderTaskDetail в скрипте). -->
+  <div id="screenTaskDetail">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Задача</h1>
+      <div class="switchUser"><a id="taskDetailBackLink">← Мои задачи</a></div>
+    </div>
+    <div class="card">
+      <div id="taskDetailLoading" class="statsEmpty"><span class="spinner"></span> Загрузка…</div>
+      <div id="taskDetailBody" style="display:none;">
+        <div id="taskDetailStatusBadge" class="taskStatusBadge"></div>
+        <h2 id="taskDetailObjectTitle" style="margin-top:8px;"></h2>
+        <div id="taskDetailText" class="taskText"></div>
+        <div id="taskDetailTaskPhotos" class="photoGrid"></div>
+        <div id="taskDetailMeta" class="taskDate"></div>
+
+        <div id="taskDetailBeforeSection" style="display:none; margin-top:16px;">
+          <h3>Фото до начала работ</h3>
+          <div id="taskDetailBeforePhotos" class="photoGrid"></div>
+          <div id="taskDetailStartedMeta" class="taskDate"></div>
+        </div>
+
+        <div id="taskDetailAfterSection" style="display:none; margin-top:16px;">
+          <h3>Фото после выполнения</h3>
+          <div id="taskDetailAfterPhotos" class="photoGrid"></div>
+          <div id="taskDetailCommentBlock" style="display:none; margin-top:8px;">
+            <div class="taskDate">Комментарий сотрудника:</div>
+            <div id="taskDetailComment" class="taskText"></div>
+          </div>
+          <div id="taskDetailCompletedMeta" class="taskDate"></div>
+        </div>
+
+        <!-- Шаг 1: приступить к выполнению -->
+        <div id="taskStartAction" style="display:none; margin-top:16px;">
+          <button id="taskStartBtn" type="button">Приступить к выполнению</button>
+        </div>
+        <div id="taskStartForm" style="display:none; margin-top:16px;">
+          <label>Сфотографируйте объект ДО начала работ</label>
+          <input id="taskBeforePhotoInput" type="file" accept="image/*" capture="environment" multiple>
+          <div id="taskBeforePhotoPreview" class="photoPreviewRow"></div>
+          <button id="taskStartSubmitBtn" type="button">Подтвердить начало</button>
+          <div id="taskStartStatus" style="margin-top:10px;"></div>
+        </div>
+
+        <!-- Шаг 2: подтвердить выполнение -->
+        <div id="taskCompleteAction" style="display:none; margin-top:16px;">
+          <button id="taskCompleteBtn" type="button" class="taskDoneBtn">Подтвердить выполнение</button>
+        </div>
+        <div id="taskCompleteForm" style="display:none; margin-top:16px;">
+          <label>Сфотографируйте результат выполненных работ</label>
+          <input id="taskAfterPhotoInput" type="file" accept="image/*" capture="environment" multiple>
+          <div id="taskAfterPhotoPreview" class="photoPreviewRow"></div>
+          <label for="taskCompleteCommentInput">Комментарий (если были доп. работы)</label>
+          <textarea id="taskCompleteCommentInput" rows="2" placeholder="Необязательно"></textarea>
+          <button id="taskCompleteSubmitBtn" type="button" class="taskDoneBtn">Отправить</button>
+          <div id="taskCompleteStatus" style="margin-top:10px;"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -741,12 +879,16 @@
         <input id="taskAssigneeInput" type="text" list="adminTaskAssigneeDatalist" placeholder="Начните вводить имя…" autocomplete="off">
         <datalist id="adminTaskAssigneeDatalist"></datalist>
 
+        <label for="taskObjectInput">Объект</label>
+        <input id="taskObjectInput" type="text" list="taskObjectDatalist" placeholder="Начните вводить название объекта…" autocomplete="off">
+        <datalist id="taskObjectDatalist"></datalist>
+
         <label for="taskTextInput">Текст задачи</label>
         <textarea id="taskTextInput" rows="3" placeholder="Опишите, что нужно сделать"></textarea>
 
-        <label>Фото (необязательно)</label>
-        <input id="taskPhotoInput" type="file" accept="image/*">
-        <img id="taskPhotoPreview" alt="" style="display:none; width:100%; max-height:200px; object-fit:cover; border-radius:10px; margin-bottom:14px;">
+        <label>Фото задачи (необязательно, можно несколько)</label>
+        <input id="taskPhotoInput" type="file" accept="image/*" multiple>
+        <div id="taskPhotoPreview" class="photoPreviewRow"></div>
 
         <button id="taskCreateBtn" type="button">Поставить задачу</button>
         <div id="taskCreateStatus" style="margin-top:10px;"></div>
@@ -937,6 +1079,14 @@
     .then(function (data) {
       validObjects = (data.objects || []).map(function (o) { return String(o).trim(); });
       validObjectsLoaded = true;
+      // Тот же список объектов используется в форме постановки задачи
+      // (поле "Объект") — админ выбирает из подсказки, а не вводит вручную.
+      var objectDatalist = document.getElementById('taskObjectDatalist');
+      if (objectDatalist) {
+        objectDatalist.innerHTML = validObjects.map(function (o) {
+          return '<option value="' + escapeHtml(o) + '">';
+        }).join('');
+      }
     })
     .catch(function () { validObjectsLoaded = false; });
 
@@ -946,6 +1096,7 @@
   var screenStats = document.getElementById('screenStats');
   var screenAdmin = document.getElementById('screenAdmin');
   var screenTasks = document.getElementById('screenTasks');
+  var screenTaskDetail = document.getElementById('screenTaskDetail');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
     stopWaitIndicator(regStatus);
@@ -972,10 +1123,12 @@
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
     refreshTasksBadge();
+    updateAdminPanelButtonVisibility();
   }
 
   // Красная точка-счётчик на кнопке "Мои задачи" — показывает, сколько
@@ -1013,6 +1166,7 @@
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
     screenLogin.style.display = 'block';
   }
 
@@ -1022,6 +1176,7 @@
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
   }
@@ -1053,6 +1208,34 @@
   // Какой из двух гейтов сейчас на экране, определяем по видимости.
   var adminGoogleIdToken = null;
   var adminAssigneeMap = {};
+
+  // --- "Однократный" вход в админку на этом устройстве ---
+  // Сам Google-токен живёт недолго и каждый раз заново проверяется
+  // сервером (это не меняем — так безопаснее), но, чтобы не заставлять
+  // администратора каждый раз вручную нажимать кнопку Google, мы:
+  // 1) запоминаем на этом устройстве, что именно этот номер телефона уже
+  //    подтверждал права администратора — и сразу показываем кнопку
+  //    "Админ панель" на главном экране;
+  // 2) при заходе в панель сначала тихо пробуем переподтвердить вход через
+  //    Google (без клика — google.accounts.id.prompt()), и только если это
+  //    не сработало (например, сессия Google в браузере истекла) — остаётся
+  //    обычная кнопка входа как запасной вариант.
+  var ADMIN_FLAG_KEY = 'attendance_admin_confirmed_v1';
+
+  function isAdminFlaggedForCurrentUser() {
+    try {
+      var saved = localStorage.getItem(ADMIN_FLAG_KEY);
+      return !!(saved && currentUser && currentUser.phone && saved === currentUser.phone);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function updateAdminPanelButtonVisibility() {
+    var btn = document.getElementById('adminPanelBtn');
+    if (!btn) return;
+    btn.style.display = isAdminFlaggedForCurrentUser() ? 'block' : 'none';
+  }
 
   function handleGoogleCredential(response) {
     var email = '';
@@ -1091,7 +1274,11 @@
     }
     google.accounts.id.initialize({
       client_id: GOOGLE_CLIENT_ID,
-      callback: handleGoogleCredential
+      callback: handleGoogleCredential,
+      // auto_select позволяет google.accounts.id.prompt() тихо, без видимой
+      // кнопки, переподтвердить уже знакомый браузеру Google-аккаунт —
+      // этим пользуется "однократный" вход в админку (см. showAdminScreen).
+      auto_select: true
     });
     google.accounts.id.renderButton(
       document.getElementById('googleSignInButton'),
@@ -1118,6 +1305,7 @@
     screenScan.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
@@ -1130,9 +1318,18 @@
     screenScan.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenStats.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
+  }
+
+  // Единое отображение статуса — переиспользуется и в списке у сотрудника,
+  // и в обзоре у админа.
+  function taskStatusTag(status) {
+    if (status === 'Выполнена') return { cls: 'stDone', label: 'Выполнено' };
+    if (status === 'В работе') return { cls: 'stProgress', label: 'В работе' };
+    return { cls: 'stNew', label: 'Новая' };
   }
 
   function loadMyTasks() {
@@ -1151,35 +1348,20 @@
           return;
         }
         listEl.innerHTML = res.tasks.map(function (t) {
+          var tag = taskStatusTag(t.status);
           return (
-            '<div class="taskCard">' +
-              (t.photoUrl ? '<img class="taskPhoto" src="' + escapeHtml(t.photoUrl) + '" alt="">' : '') +
+            '<div class="taskCard adminTaskCardClickable" data-id="' + escapeHtml(t.id) + '">' +
+              '<div><span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
+              (t.objectName ? ' <b>' + escapeHtml(t.objectName) + '</b>' : '') + '</div>' +
               '<div class="taskText">' + escapeHtml(t.text) + '</div>' +
               '<div class="taskDate">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
-              '<button type="button" class="taskDoneBtn" data-id="' + escapeHtml(t.id) + '">Выполнено</button>' +
             '</div>'
           );
         }).join('');
 
-        listEl.querySelectorAll('.taskDoneBtn').forEach(function (btn) {
-          btn.addEventListener('click', function () {
-            btn.disabled = true;
-            btn.textContent = '…';
-            apiPost({ action: 'completeTask', phone: phone, taskId: btn.getAttribute('data-id') })
-              .then(function (res) {
-                if (res.status === 'ok') {
-                  loadMyTasks();
-                } else {
-                  btn.disabled = false;
-                  btn.textContent = 'Выполнено';
-                  alert(res.message || 'Не удалось отметить задачу');
-                }
-              })
-              .catch(function (err) {
-                btn.disabled = false;
-                btn.textContent = 'Выполнено';
-                alert('Ошибка соединения: ' + err);
-              });
+        listEl.querySelectorAll('.taskCard').forEach(function (card) {
+          card.addEventListener('click', function () {
+            showTaskDetailScreen(card.getAttribute('data-id'));
           });
         });
       })
@@ -1187,6 +1369,212 @@
         listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
       });
   }
+
+  // --- Экран деталей одной задачи (у сотрудника) ---
+
+  // Читает несколько файлов (FileList) как base64 и отдаёт массив строк
+  // через callback — используется и для фото задачи у админа, и для фото
+  // "до"/"после" у сотрудника, чтобы не дублировать код.
+  function readFilesAsBase64(fileList, callback) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) { callback([]); return; }
+    var results = new Array(files.length);
+    var remaining = files.length;
+    files.forEach(function (file, idx) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        results[idx] = reader.result;
+        remaining--;
+        if (remaining === 0) callback(results);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function renderPhotoPreview(containerEl, base64List) {
+    containerEl.innerHTML = (base64List || []).map(function (b64) {
+      return '<img src="' + b64 + '" alt="">';
+    }).join('');
+  }
+
+  function renderPhotoGrid(containerEl, urls) {
+    if (!urls || !urls.length) {
+      containerEl.innerHTML = '';
+      containerEl.style.display = 'none';
+      return;
+    }
+    containerEl.style.display = 'flex';
+    containerEl.innerHTML = urls.map(function (url) {
+      return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(url) + '" alt=""></a>';
+    }).join('');
+  }
+
+  var taskBeforePhotosBase64 = [];
+  var taskAfterPhotosBase64 = [];
+  var currentTaskId = null;
+
+  function showTaskDetailScreen(taskId) {
+    currentTaskId = taskId;
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'block';
+    document.getElementById('taskDetailLoading').style.display = 'block';
+    document.getElementById('taskDetailBody').style.display = 'none';
+    loadTaskDetail();
+  }
+
+  function loadTaskDetail() {
+    var phone = currentUser ? currentUser.phone : '';
+    apiPost({ action: 'getTaskById', phone: phone, taskId: currentTaskId })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          document.getElementById('taskDetailLoading').textContent = res.message || 'Не удалось загрузить задачу';
+          return;
+        }
+        document.getElementById('taskDetailLoading').style.display = 'none';
+        document.getElementById('taskDetailBody').style.display = 'block';
+        renderTaskDetail(res.task);
+      })
+      .catch(function (err) {
+        document.getElementById('taskDetailLoading').textContent = 'Ошибка соединения: ' + err;
+      });
+  }
+
+  function renderTaskDetail(t) {
+    var tag = taskStatusTag(t.status);
+    var badge = document.getElementById('taskDetailStatusBadge');
+    badge.className = 'taskStatusBadge ' + tag.cls;
+    badge.textContent = tag.label;
+    document.getElementById('taskDetailObjectTitle').textContent = t.objectName || 'Задача';
+    document.getElementById('taskDetailText').textContent = t.text;
+    renderPhotoGrid(document.getElementById('taskDetailTaskPhotos'), t.taskPhotos);
+    document.getElementById('taskDetailMeta').textContent = 'Поставлена: ' + (t.createdAt || '');
+
+    var beforeSection = document.getElementById('taskDetailBeforeSection');
+    var afterSection = document.getElementById('taskDetailAfterSection');
+    var startAction = document.getElementById('taskStartAction');
+    var startForm = document.getElementById('taskStartForm');
+    var completeAction = document.getElementById('taskCompleteAction');
+    var completeForm = document.getElementById('taskCompleteForm');
+
+    beforeSection.style.display = 'none';
+    afterSection.style.display = 'none';
+    startAction.style.display = 'none';
+    startForm.style.display = 'none';
+    completeAction.style.display = 'none';
+    completeForm.style.display = 'none';
+
+    if (t.status === 'Актуальна') {
+      startAction.style.display = 'block';
+    } else if (t.status === 'В работе') {
+      beforeSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailBeforePhotos'), t.beforePhotos);
+      document.getElementById('taskDetailStartedMeta').textContent = 'Начато: ' + (t.startedAt || '');
+      completeAction.style.display = 'block';
+    } else { // Выполнена
+      beforeSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailBeforePhotos'), t.beforePhotos);
+      document.getElementById('taskDetailStartedMeta').textContent = 'Начато: ' + (t.startedAt || '');
+      afterSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailAfterPhotos'), t.afterPhotos);
+      var commentBlock = document.getElementById('taskDetailCommentBlock');
+      if (t.comment) {
+        commentBlock.style.display = 'block';
+        document.getElementById('taskDetailComment').textContent = t.comment;
+      } else {
+        commentBlock.style.display = 'none';
+      }
+      document.getElementById('taskDetailCompletedMeta').textContent = 'Выполнено: ' + (t.completedAt || '');
+    }
+  }
+
+  document.getElementById('taskDetailBackLink').addEventListener('click', function () {
+    showTasksScreen();
+  });
+
+  document.getElementById('taskStartBtn').addEventListener('click', function () {
+    document.getElementById('taskStartAction').style.display = 'none';
+    document.getElementById('taskStartForm').style.display = 'block';
+  });
+
+  document.getElementById('taskBeforePhotoInput').addEventListener('change', function (e) {
+    readFilesAsBase64(e.target.files, function (list) {
+      taskBeforePhotosBase64 = list;
+      renderPhotoPreview(document.getElementById('taskBeforePhotoPreview'), list);
+    });
+  });
+
+  document.getElementById('taskStartSubmitBtn').addEventListener('click', function () {
+    var statusEl5 = document.getElementById('taskStartStatus');
+    var btn = document.getElementById('taskStartSubmitBtn');
+    var phone = currentUser ? currentUser.phone : '';
+    btn.disabled = true;
+    statusEl5.textContent = 'Отправка…';
+    statusEl5.className = '';
+    apiPost({ action: 'startTask', phone: phone, taskId: currentTaskId, photos: taskBeforePhotosBase64 })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          taskBeforePhotosBase64 = [];
+          document.getElementById('taskBeforePhotoInput').value = '';
+          loadTaskDetail();
+          refreshTasksBadge();
+        } else {
+          statusEl5.textContent = res.message || 'Не удалось сохранить';
+          statusEl5.className = 'error';
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        statusEl5.textContent = 'Ошибка соединения: ' + err;
+        statusEl5.className = 'error';
+      });
+  });
+
+  document.getElementById('taskCompleteBtn').addEventListener('click', function () {
+    document.getElementById('taskCompleteAction').style.display = 'none';
+    document.getElementById('taskCompleteForm').style.display = 'block';
+  });
+
+  document.getElementById('taskAfterPhotoInput').addEventListener('change', function (e) {
+    readFilesAsBase64(e.target.files, function (list) {
+      taskAfterPhotosBase64 = list;
+      renderPhotoPreview(document.getElementById('taskAfterPhotoPreview'), list);
+    });
+  });
+
+  document.getElementById('taskCompleteSubmitBtn').addEventListener('click', function () {
+    var statusEl6 = document.getElementById('taskCompleteStatus');
+    var btn = document.getElementById('taskCompleteSubmitBtn');
+    var phone = currentUser ? currentUser.phone : '';
+    var comment = document.getElementById('taskCompleteCommentInput').value.trim();
+    btn.disabled = true;
+    statusEl6.textContent = 'Отправка…';
+    statusEl6.className = '';
+    apiPost({ action: 'completeTask', phone: phone, taskId: currentTaskId, photos: taskAfterPhotosBase64, comment: comment })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          taskAfterPhotosBase64 = [];
+          document.getElementById('taskAfterPhotoInput').value = '';
+          document.getElementById('taskCompleteCommentInput').value = '';
+          loadTaskDetail();
+          refreshTasksBadge();
+        } else {
+          statusEl6.textContent = res.message || 'Не удалось сохранить';
+          statusEl6.className = 'error';
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        statusEl6.textContent = 'Ошибка соединения: ' + err;
+        statusEl6.className = 'error';
+      });
+  });
 
   // --- Панель администратора ---
   // Доступ проверяется на backend (adminAuth_ в Code.gs) по email из
@@ -1198,12 +1586,18 @@
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
     screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
     screenAdmin.style.display = 'block';
     document.getElementById('adminGate').style.display = 'block';
     document.getElementById('adminContent').style.display = 'none';
     document.getElementById('adminAccessStatus').textContent = '';
     if (adminGoogleIdToken) {
       checkAdminAccess();
+    } else if (isAdminFlaggedForCurrentUser() && window.google && google.accounts && google.accounts.id) {
+      // Это устройство уже подтверждало права этого человека раньше —
+      // пробуем войти тихо, без нажатия кнопки. Если не получится, кнопка
+      // Google ниже на экране остаётся рабочим запасным вариантом.
+      try { google.accounts.id.prompt(); } catch (e) {}
     }
   }
 
@@ -1217,12 +1611,25 @@
           statusEl2.textContent = '';
           document.getElementById('adminGate').style.display = 'none';
           document.getElementById('adminContent').style.display = 'block';
+          try {
+            if (currentUser && currentUser.phone) {
+              localStorage.setItem(ADMIN_FLAG_KEY, currentUser.phone);
+            }
+          } catch (e) {}
+          updateAdminPanelButtonVisibility();
           loadAdminEmployees();
           loadAdminList();
           loadAdminTasks();
         } else {
           statusEl2.textContent = res.message || 'Нет доступа';
           statusEl2.className = 'error';
+          // Права реально проверены и подтверждены НЕТ — если раньше тут
+          // стоял флаг "однократного" входа (например, админа сняли
+          // галочкой в таблице), убираем его и прячем кнопку на главном
+          // экране, чтобы не вводить в заблуждение.
+          adminGoogleIdToken = null;
+          try { localStorage.removeItem(ADMIN_FLAG_KEY); } catch (e) {}
+          updateAdminPanelButtonVisibility();
         }
       })
       .catch(function (err) {
@@ -1338,6 +1745,39 @@
       });
   }
 
+  var adminTasksById = {};
+
+  // Карточку задачи можно развернуть кликом — детали (фото до/после,
+  // комментарий) рисуются из уже загруженных данных, без нового запроса.
+  function adminTaskDetailHtml(t) {
+    var html = '';
+    if (t.taskPhotos && t.taskPhotos.length) {
+      html += '<div class="taskDate">Фото задачи:</div><div class="photoGrid" style="display:flex;">' +
+        t.taskPhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+        '</div>';
+    }
+    if (t.status !== 'Актуальна') {
+      html += '<div class="taskDate" style="margin-top:6px;">Начато: ' + escapeHtml(t.startedAt || '—') + '</div>';
+      if (t.beforePhotos && t.beforePhotos.length) {
+        html += '<div class="taskDate">Фото до:</div><div class="photoGrid" style="display:flex;">' +
+          t.beforePhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+          '</div>';
+      }
+    }
+    if (t.status === 'Выполнена') {
+      html += '<div class="taskDate" style="margin-top:6px;">Выполнено: ' + escapeHtml(t.completedAt || '—') + '</div>';
+      if (t.afterPhotos && t.afterPhotos.length) {
+        html += '<div class="taskDate">Фото после:</div><div class="photoGrid" style="display:flex;">' +
+          t.afterPhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+          '</div>';
+      }
+      if (t.comment) {
+        html += '<div class="taskDate" style="margin-top:4px;">Комментарий сотрудника:</div><div class="adminTaskText">' + escapeHtml(t.comment) + '</div>';
+      }
+    }
+    return html;
+  }
+
   function loadAdminTasks() {
     var listEl = document.getElementById('adminTasksList');
     if (!listEl) return;
@@ -1349,42 +1789,55 @@
           return;
         }
         if (!res.tasks || !res.tasks.length) {
-          listEl.innerHTML = '<div class="statsEmpty">Активных задач нет</div>';
+          listEl.innerHTML = '<div class="statsEmpty">Задач пока нет</div>';
           return;
         }
+        adminTasksById = {};
+        res.tasks.forEach(function (t) { adminTasksById[t.id] = t; });
+
         listEl.innerHTML = res.tasks.map(function (t) {
+          var tag = taskStatusTag(t.status);
+          var doneClass = t.status === 'Выполнена' ? ' adminTaskCardDone' : '';
           return (
-            '<div class="adminTaskCard">' +
-              '<div class="adminTaskName">' + escapeHtml(t.name) + '</div>' +
+            '<div class="adminTaskCard adminTaskCardClickable' + doneClass + '" data-id="' + escapeHtml(t.id) + '">' +
+              '<div class="adminTaskName">' + escapeHtml(t.name) +
+                '<span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
+              '</div>' +
+              '<div class="adminTaskMeta">' + escapeHtml(t.objectName || '') + '</div>' +
               '<div class="adminTaskText">' + escapeHtml(t.text) + '</div>' +
               '<div class="adminTaskMeta">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
+              '<div class="adminTaskDetail" style="display:none;"></div>' +
             '</div>'
           );
         }).join('');
+
+        listEl.querySelectorAll('.adminTaskCard').forEach(function (card) {
+          card.addEventListener('click', function () {
+            var detailEl = card.querySelector('.adminTaskDetail');
+            var isOpen = detailEl.style.display !== 'none';
+            if (isOpen) {
+              detailEl.style.display = 'none';
+              return;
+            }
+            var t = adminTasksById[card.getAttribute('data-id')];
+            if (t) detailEl.innerHTML = adminTaskDetailHtml(t);
+            detailEl.style.display = 'block';
+          });
+        });
       })
       .catch(function (err) {
         listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
       });
   }
 
-  var taskPhotoBase64 = null;
+  var taskCreatePhotosBase64 = [];
   var taskPhotoInputEl = document.getElementById('taskPhotoInput');
   if (taskPhotoInputEl) {
-    taskPhotoInputEl.addEventListener('change', function () {
-      var file = taskPhotoInputEl.files && taskPhotoInputEl.files[0];
-      var preview = document.getElementById('taskPhotoPreview');
-      if (!file) {
-        taskPhotoBase64 = null;
-        preview.style.display = 'none';
-        return;
-      }
-      var reader = new FileReader();
-      reader.onload = function () {
-        taskPhotoBase64 = reader.result;
-        preview.src = taskPhotoBase64;
-        preview.style.display = 'block';
-      };
-      reader.readAsDataURL(file);
+    taskPhotoInputEl.addEventListener('change', function (e) {
+      readFilesAsBase64(e.target.files, function (list) {
+        taskCreatePhotosBase64 = list;
+        renderPhotoPreview(document.getElementById('taskPhotoPreview'), list);
+      });
     });
   }
 
@@ -1393,11 +1846,18 @@
     taskCreateBtnEl.addEventListener('click', function () {
       var statusEl4 = document.getElementById('taskCreateStatus');
       var assigneeInput = document.getElementById('taskAssigneeInput');
+      var objectInput = document.getElementById('taskObjectInput');
       var textInput = document.getElementById('taskTextInput');
       var assignee = adminAssigneeMap[assigneeInput.value.trim()];
 
       if (!assignee) {
         statusEl4.textContent = 'Выберите исполнителя из списка предложенных вариантов';
+        statusEl4.className = 'error';
+        return;
+      }
+      var objectName = objectInput.value.trim();
+      if (!objectName || (validObjectsLoaded && validObjects.indexOf(objectName) === -1)) {
+        statusEl4.textContent = 'Выберите объект из списка предложенных вариантов';
         statusEl4.className = 'error';
         return;
       }
@@ -1416,8 +1876,9 @@
         googleIdToken: adminGoogleIdToken,
         phone: assignee.phone,
         name: assignee.name,
+        objectName: objectName,
         text: text,
-        photo: taskPhotoBase64
+        photos: taskCreatePhotosBase64
       })
         .then(function (res) {
           taskCreateBtnEl.disabled = false;
@@ -1425,10 +1886,11 @@
             statusEl4.textContent = 'Задача поставлена';
             statusEl4.className = '';
             assigneeInput.value = '';
+            objectInput.value = '';
             textInput.value = '';
-            taskPhotoBase64 = null;
+            taskCreatePhotosBase64 = [];
             taskPhotoInputEl.value = '';
-            document.getElementById('taskPhotoPreview').style.display = 'none';
+            document.getElementById('taskPhotoPreview').innerHTML = '';
             loadAdminTasks();
           } else {
             statusEl4.textContent = res.message || 'Не удалось поставить задачу';
@@ -1558,6 +2020,9 @@
     showScanScreen();
   });
   document.getElementById('goToAdminLink').addEventListener('click', function () {
+    showAdminScreen();
+  });
+  document.getElementById('adminPanelBtn').addEventListener('click', function () {
     showAdminScreen();
   });
   document.getElementById('adminBackLink').addEventListener('click', function () {
@@ -1781,6 +2246,11 @@
       if (currentUser && currentUser.phone) {
         try { localStorage.removeItem(statsCacheKey(currentUser.phone)); } catch (e) {}
       }
+      // Устройство переходит к другому человеку — "однократный" доступ в
+      // админку сбрасываем, чтобы новый пользователь не увидел чужую
+      // кнопку "Админ панель" и не получил доступ без собственного входа.
+      try { localStorage.removeItem(ADMIN_FLAG_KEY); } catch (e) {}
+      adminGoogleIdToken = null;
       currentUser = null;
       document.getElementById('regLastName').value = '';
       document.getElementById('regFirstName').value = '';
