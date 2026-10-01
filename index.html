@@ -288,6 +288,36 @@
     background: var(--red);
     margin-top: 10px;
   }
+  .geoAlertBox {
+    text-align: center;
+    background: rgba(234,67,53,0.14);
+    border: 3px solid var(--red);
+    border-radius: 12px;
+    padding: 18px 14px;
+    animation: geoAlertShake 0.5s;
+    box-shadow: 0 0 0 4px rgba(234,67,53,0.12);
+  }
+  .geoAlertIcon { font-size: 40px; line-height: 1; margin-bottom: 6px; }
+  .geoAlertTitle {
+    font-weight: 800;
+    font-size: 17px;
+    letter-spacing: 0.5px;
+    color: var(--red);
+    margin-bottom: 8px;
+  }
+  .geoAlertText { font-weight: 600; margin-bottom: 8px; }
+  .geoAlertNote { font-size: 12px; opacity: 0.8; margin-bottom: 10px; }
+  .geoAlertBox button {
+    background: var(--red);
+    font-weight: 700;
+  }
+  @keyframes geoAlertShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
   .waiting {
     color: var(--blue) !important;
     font-weight: 600;
@@ -1073,6 +1103,26 @@
 
   function apiPost(body) {
     return apiFetch(API_URL, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  // GPS-координаты телефона в момент отметки — нужны серверу, чтобы
+  // сверить их с адресом объекта и отсечь попытки отметиться по
+  // сфотографированному где-то ещё QR-коду издалека (см. logEvent на
+  // бэкенде). Запрашивается заранее (см. actionBtn click) и кешируется на
+  // несколько секунд, чтобы к моменту реальной отметки результат уже был
+  // готов и не добавлял заметной задержки.
+  var geoPositionPromise = null;
+  function getGeoPositionPromise() {
+    return new Promise(function (resolve) {
+      if (!navigator.geolocation) { resolve(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+        },
+        function () { resolve(null); },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000 }
+      );
+    });
   }
 
   apiFetch(API_URL + '?action=objects')
@@ -2313,6 +2363,10 @@
   document.getElementById('actionBtn').addEventListener('click', function () {
     document.getElementById('actionBtn').style.display = 'none';
     setStatus('');
+    // Запрашиваем геолокацию сразу, параллельно со сканированием QR —
+    // к моменту успешного скана (и вызова sendEvent) результат обычно уже
+    // готов, и заметной дополнительной задержки не добавляется.
+    geoPositionPromise = getGeoPositionPromise();
     html5QrCode = new Html5Qrcode('reader');
     html5QrCode.start(
       { facingMode: 'environment' },
@@ -2473,8 +2527,8 @@
     // секунд из-за особенностей инфраструктуры Apps Script (см. пояснения
     // в чате). Ждать все эти секунды с пустым экраном хуже, чем сразу
     // показать ожидаемый результат — включая баннер статуса смены и кнопку
-    // следующего действия — а если сервер в итоге откажет, заметно
-    // откатить это (см. showSendFailure).
+    // следующего действия — а если сервер в итоге откажет (в том числе
+    // из-за GPS-проверки — см. showGeoBlockedAlert), заметно откатить это.
     var optimisticShiftOpen = (eventTypeAtSend === 'Приход');
     var optimisticOpenObjectName = optimisticShiftOpen ? objectAtSend : null;
     renderShiftBanner(optimisticShiftOpen, optimisticOpenObjectName);
@@ -2483,36 +2537,65 @@
     applyActionButtonState(optimisticShiftOpen, optimisticOpenObjectName);
     setStatus('Записано: ' + currentUser.name + ', ' + eventTypeAtSend + ' (объект: ' + objectAtSend + ')', 'success');
 
-    apiPost({
-      action: 'log',
-      name: currentUser.name,
-      phone: currentUser.phone,
-      objectName: objectAtSend,
-      eventType: eventTypeAtSend
-    })
-      .then(function (res) {
-        if (res.status === 'ok') {
-          // Подтверждено — просто уточняем точное серверное время, статус
-          // и кнопка уже показывают верную картину (обновили оптимистично).
-          setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time, 'success');
-          if (eventTypeAtSend === 'Уход') {
-            // Смена только что закрыта — в фоне сразу подтягиваем свежую
-            // статистику и сохраняем её на телефоне. Так при следующем
-            // открытии "Личного кабинета" (даже в другой день) он сразу
-            // покажет эту смену, без ожидания сервера.
-            refreshStatsCache(currentUser.phone, function (fresh) {
-              if (screenStats.style.display === 'block') {
-                renderStats(fresh);
-              }
-            });
-          }
-        } else {
-          showSendFailure(res.message || 'сервер отклонил отметку без пояснения');
-        }
+    (geoPositionPromise || getGeoPositionPromise()).then(function (geo) {
+      apiPost({
+        action: 'log',
+        name: currentUser.name,
+        phone: currentUser.phone,
+        objectName: objectAtSend,
+        eventType: eventTypeAtSend,
+        geo: geo
       })
-      .catch(function (err) {
-        showSendFailure('не удалось получить подтверждение от сервера (' + err + ')');
-      });
+        .then(function (res) {
+          if (res.status === 'ok') {
+            // Подтверждено — просто уточняем точное серверное время, статус
+            // и кнопка уже показывают верную картину (обновили оптимистично).
+            setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time, 'success');
+            if (eventTypeAtSend === 'Уход') {
+              // Смена только что закрыта — в фоне сразу подтягиваем свежую
+              // статистику и сохраняем её на телефоне. Так при следующем
+              // открытии "Личного кабинета" (даже в другой день) он сразу
+              // покажет эту смену, без ожидания сервера.
+              refreshStatsCache(currentUser.phone, function (fresh) {
+                if (screenStats.style.display === 'block') {
+                  renderStats(fresh);
+                }
+              });
+            }
+          } else if (res.reason === 'geo_blocked') {
+            showGeoBlockedAlert(res.message || 'Вы находитесь не на объекте.');
+          } else {
+            showSendFailure(res.message || 'сервер отклонил отметку без пояснения');
+          }
+        })
+        .catch(function (err) {
+          showSendFailure('не удалось получить подтверждение от сервера (' + err + ')');
+        });
+    });
+  }
+
+  // Специальный, подчёркнуто тревожный экран — именно для случая попытки
+  // отметиться далеко от объекта (а не обычного сбоя сети/сервера, для
+  // которого есть showSendFailure). Цель — чтобы человек, один раз увидев
+  // это, больше не пытался отметиться по фото QR-кода из другого места.
+  function showGeoBlockedAlert(message) {
+    if (navigator.vibrate) {
+      try { navigator.vibrate([250, 100, 250, 100, 400]); } catch (e) {}
+    }
+    stopWaitIndicator(statusEl);
+    statusEl.className = 'error geoBlockedAlert';
+    statusEl.innerHTML =
+      '<div class="geoAlertBox">' +
+        '<div class="geoAlertIcon">🚫</div>' +
+        '<div class="geoAlertTitle">ОТМЕТКА НЕ ЗАСЧИТАНА</div>' +
+        '<div class="geoAlertText">' + message + '</div>' +
+        '<div class="geoAlertNote">Система фиксирует такие попытки. Отметиться можно только находясь непосредственно на объекте.</div>' +
+        '<button id="geoAlertAckBtn" type="button">Понятно</button>' +
+      '</div>';
+    document.getElementById('geoAlertAckBtn').addEventListener('click', function () {
+      setStatus('');
+      checkShiftStatus();
+    });
   }
 
   // ===== ТЕСТОВЫЙ РЕЖИМ (для просмотра экранов без камеры/сервера) =====
