@@ -487,6 +487,25 @@
   .adminTaskCard .adminTaskText { color: var(--text); margin-top: 2px; }
   .adminTaskCard .adminTaskMeta { color: var(--muted); font-size: 11px; margin-top: 4px; }
 
+  /* Красная точка/счётчик на кнопке "Мои задачи" — видна, только когда
+     есть хотя бы одна невыполненная задача. */
+  .taskBadge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 10px;
+    background: var(--red);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 20px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--card-bg, #fff);
+  }
+
   /* ===== Тестовый режим ===== */
   /* Скрыта по умолчанию — видна только тому, кто знает секретную ссылку
      (см. проверку localStorage в скрипте ниже). Обычные сотрудники её
@@ -634,7 +653,7 @@
       <div id="reader"></div>
       <div id="objectLabel"></div>
       <div id="status"></div>
-      <button id="myTasksBtn" type="button" style="background:var(--muted);">Мои задачи</button>
+      <button id="myTasksBtn" type="button" style="background:var(--muted); position:relative;">Мои задачи<span id="myTasksBadge" class="taskBadge" style="display:none;"></span></button>
       <button id="myStatsBtn" type="button">Мой кабинет</button>
     </div>
   </div>
@@ -739,11 +758,7 @@
       <div class="card">
         <h2>Администраторы</h2>
         <div id="adminAdminsList"></div>
-        <label for="adminNewEmailInput" style="margin-top:12px;">Добавить администратора</label>
-        <input id="adminNewEmailInput" type="text" list="adminEmailsDatalist" placeholder="Начните вводить email…" autocomplete="off">
-        <datalist id="adminEmailsDatalist"></datalist>
-        <button id="adminAddBtn" type="button" style="margin-top:10px;">Добавить</button>
-        <div id="adminAddStatus" style="margin-top:10px;"></div>
+        <div class="statsEmpty" style="margin-top:10px; text-align:left;">Чтобы назначить или убрать администратора — поставьте или снимите галочку в столбце «Админ» листа «Сотрудники» в таблице.</div>
       </div>
     </div>
   </div>
@@ -960,6 +975,31 @@
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
+    refreshTasksBadge();
+  }
+
+  // Красная точка-счётчик на кнопке "Мои задачи" — показывает, сколько
+  // сейчас невыполненных задач, и сама исчезает, когда их не осталось.
+  function updateTasksBadge(count) {
+    var badge = document.getElementById('myTasksBadge');
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = count > 9 ? '9+' : String(count);
+      badge.style.display = 'block';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  function refreshTasksBadge() {
+    if (!currentUser || !currentUser.phone) { updateTasksBadge(0); return; }
+    apiPost({ action: 'getMyTasks', phone: currentUser.phone })
+      .then(function (res) {
+        updateTasksBadge(res.status === 'ok' && res.tasks ? res.tasks.length : 0);
+      })
+      .catch(function () {
+        // при сбое связи бейдж просто не трогаем — не критично
+      });
   }
 
   // Экран входа по номеру телефона — стартовый экран для тех, кто уже
@@ -1105,6 +1145,7 @@
           listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
           return;
         }
+        updateTasksBadge(res.tasks ? res.tasks.length : 0);
         if (!res.tasks || !res.tasks.length) {
           listEl.innerHTML = '<div class="statsEmpty">У вас нет актуальных задач</div>';
           return;
@@ -1269,9 +1310,11 @@
       });
   }
 
+  // Список администраторов теперь только для просмотра — назначаются они
+  // галочкой в столбце "Админ" листа "Сотрудники" прямо в таблице, а не
+  // через приложение (кнопок добавить/убрать здесь больше нет).
   function loadAdminList() {
     var listEl = document.getElementById('adminAdminsList');
-    var datalistEl = document.getElementById('adminEmailsDatalist');
     listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
     apiPost({ action: 'adminGetAdminList', googleIdToken: adminGoogleIdToken })
       .then(function (res) {
@@ -1286,28 +1329,8 @@
               '<div class="adminAdminEmail">' + escapeHtml(email) +
                 (isBootstrap ? '<span class="adminBadgeYou">(основной)</span>' : '') +
               '</div>' +
-              (isBootstrap ? '' : '<button type="button" class="adminAdminRemoveBtn" data-email="' + escapeHtml(email) + '">Убрать</button>') +
             '</div>'
           );
-        }).join('');
-
-        listEl.querySelectorAll('.adminAdminRemoveBtn').forEach(function (btn) {
-          btn.addEventListener('click', function () {
-            if (!confirm('Убрать права администратора у ' + btn.getAttribute('data-email') + '?')) return;
-            apiPost({ action: 'adminRemoveAdmin', googleIdToken: adminGoogleIdToken, targetEmail: btn.getAttribute('data-email') })
-              .then(function (res) {
-                if (res.status === 'ok') {
-                  loadAdminList();
-                } else {
-                  alert(res.message || 'Не удалось убрать');
-                }
-              })
-              .catch(function (err) { alert('Ошибка соединения: ' + err); });
-          });
-        });
-
-        datalistEl.innerHTML = (res.allEmails || []).map(function (email) {
-          return '<option value="' + escapeHtml(email) + '">';
         }).join('');
       })
       .catch(function (err) {
@@ -1540,35 +1563,6 @@
   document.getElementById('adminBackLink').addEventListener('click', function () {
     showScanScreen();
   });
-  document.getElementById('adminAddBtn').addEventListener('click', function () {
-    var input = document.getElementById('adminNewEmailInput');
-    var email = input.value.trim();
-    var statusEl3 = document.getElementById('adminAddStatus');
-    if (!email) {
-      statusEl3.textContent = 'Введите email';
-      statusEl3.className = 'error';
-      return;
-    }
-    statusEl3.textContent = 'Добавление…';
-    statusEl3.className = '';
-    apiPost({ action: 'adminAddAdmin', googleIdToken: adminGoogleIdToken, newEmail: email })
-      .then(function (res) {
-        if (res.status === 'ok') {
-          statusEl3.textContent = 'Добавлено';
-          statusEl3.className = '';
-          input.value = '';
-          loadAdminList();
-        } else {
-          statusEl3.textContent = res.message || 'Не удалось добавить';
-          statusEl3.className = 'error';
-        }
-      })
-      .catch(function (err) {
-        statusEl3.textContent = 'Ошибка соединения: ' + err;
-        statusEl3.className = 'error';
-      });
-  });
-
   if (currentUser && currentUser.name && currentUser.phone) {
     showScanScreen();
   } else {
