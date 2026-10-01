@@ -434,6 +434,20 @@
   .dayRow .dayHoursInline { font-weight: 600; color: var(--text); }
 
   /* ===== Панель администратора ===== */
+  .shiftTimesRow { display: flex; gap: 10px; margin-top: 10px; }
+  .shiftTimesRow > div { flex: 1; min-width: 0; }
+  .shiftTimesRow label { font-size: 12px; }
+  .shiftTimesRow input { margin-top: 2px; }
+  .adminObjRow { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .adminObjRow:last-child { border-bottom: none; }
+  .adminObjName { font-weight: 600; }
+  .adminObjAddress { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .adminObjGeoStatus { font-size: 12px; margin-top: 2px; }
+  .adminObjForm { margin-top: 8px; }
+  .adminObjForm label { font-size: 12px; }
+  .adminObjSaveRow { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .adminObjSaveRow button { margin: 0; padding: 8px 12px; width: auto; font-size: 13px; }
+  .adminObjSaveStatus { font-size: 12px; }
   .adminEmpRow {
     display: flex;
     align-items: center;
@@ -937,6 +951,10 @@
       </div>
 
       <div class="card">
+        <button id="goToAdminObjectsBtn" type="button">Объекты</button>
+      </div>
+
+      <div class="card">
         <h2>Администраторы</h2>
         <div id="adminAdminsList"></div>
         <div class="statsEmpty" style="margin-top:10px; text-align:left;">Чтобы назначить или убрать администратора — поставьте или снимите галочку в столбце «Админ» листа «Сотрудники» в таблице.</div>
@@ -955,6 +973,56 @@
     </div>
     <div class="card">
       <div id="adminEmployeesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Экран "Объекты" — список объектов с адресом/статусом геокодирования,
+       расписанием смен и ответственным прорабом + форма добавления нового.
+       Сам адрес после добавления по-прежнему меняется повторным вводом
+       здесь же или прямо в таблице (переезд геокодирует заново). -->
+  <div id="screenAdminObjects">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Объекты</h1>
+      <div class="switchUser"><a id="adminObjectsBackLink">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <h2>Добавить объект</h2>
+      <label for="objectNameInput">Название объекта</label>
+      <input id="objectNameInput" type="text" placeholder="Например: ЖК Самолёт, корпус 2">
+      <label for="objectAddressInput" style="margin-top:10px;">Адрес (с указанием города)</label>
+      <input id="objectAddressInput" type="text" placeholder="Например: Самара, ул. Ленина, 10">
+
+      <div class="shiftTimesRow">
+        <div>
+          <label for="objectShift1StartInput">Смена 1, начало</label>
+          <input id="objectShift1StartInput" type="time">
+        </div>
+        <div>
+          <label for="objectShift1EndInput">Смена 1, конец</label>
+          <input id="objectShift1EndInput" type="time">
+        </div>
+      </div>
+      <div class="shiftTimesRow">
+        <div>
+          <label for="objectShift2StartInput">Смена 2, начало</label>
+          <input id="objectShift2StartInput" type="time">
+        </div>
+        <div>
+          <label for="objectShift2EndInput">Смена 2, конец</label>
+          <input id="objectShift2EndInput" type="time">
+        </div>
+      </div>
+
+      <label for="objectForemanInput" style="margin-top:10px;">Ответственный прораб</label>
+      <input id="objectForemanInput" type="text" list="objectForemanDatalist" placeholder="Начните вводить имя…" autocomplete="off">
+      <datalist id="objectForemanDatalist"></datalist>
+
+      <button id="objectAddBtn" type="button" style="margin-top:10px; background:var(--green);">Добавить объект</button>
+      <div id="objectAddStatus"></div>
+    </div>
+    <div class="card">
+      <h2>Список объектов</h2>
+      <div id="adminObjectsList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
   </div>
 
@@ -1169,6 +1237,7 @@
   var screenStats = document.getElementById('screenStats');
   var screenAdmin = document.getElementById('screenAdmin');
   var screenAdminRates = document.getElementById('screenAdminRates');
+  var screenAdminObjects = document.getElementById('screenAdminObjects');
   var screenTaskManage = document.getElementById('screenTaskManage');
   var screenTasks = document.getElementById('screenTasks');
   var screenTaskDetail = document.getElementById('screenTaskDetail');
@@ -1241,6 +1310,7 @@
         case 'taskDetail': showTaskDetailScreen(state.taskId); break;
         case 'admin': showAdminScreen(); break;
         case 'adminRates': showAdminRatesScreen(); break;
+        case 'adminObjects': showAdminObjectsScreen(); break;
         case 'taskManage': showTaskManageScreen(); break;
         default: showScanScreen();
       }
@@ -1255,6 +1325,7 @@
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
@@ -1301,6 +1372,7 @@
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
@@ -1314,6 +1386,7 @@
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
@@ -1447,6 +1520,7 @@
     screenScan.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
@@ -1463,6 +1537,7 @@
     screenScan.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenStats.style.display = 'none';
     screenTaskDetail.style.display = 'none';
@@ -1569,6 +1644,7 @@
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'block';
@@ -1741,6 +1817,7 @@
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
     screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
@@ -1758,6 +1835,7 @@
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
     screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenTaskManage.style.display = 'block';
@@ -1773,12 +1851,141 @@
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
     pushScreenState('adminRates');
+  }
+
+  // --- Экран "Объекты" (подэкран панели администратора) ---
+  function showAdminObjectsScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenAdminObjects.style.display = 'block';
+    loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
+    loadAdminObjects();
+    pushScreenState('adminObjects');
+  }
+
+  function loadAdminObjects() {
+    var listEl = document.getElementById('adminObjectsList');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetObjects', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        renderAdminObjectsList(res);
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  // Та же карта "label -> {phone, name}", что и для "Исполнителя" на форме
+  // задачи (наполняется в loadAdminEmployees) — используется, чтобы по
+  // введённому в поле "Ответственный прораб" тексту найти телефон сотрудника.
+  function resolveForemanPhoneFromInput_(inputEl) {
+    var typed = inputEl.value.trim();
+    if (!typed) return '';
+    if (adminAssigneeMap[typed]) return adminAssigneeMap[typed].phone;
+    return typed; // возможно, ввели телефон напрямую — бэкенд сам проверит
+  }
+
+  function renderAdminObjectsList(res) {
+    var listEl = document.getElementById('adminObjectsList');
+    if (res.status !== 'ok') {
+      listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
+      return;
+    }
+    if (!res.objects || !res.objects.length) {
+      listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного объекта</div>';
+      return;
+    }
+    listEl.innerHTML = res.objects.map(function (obj, idx) {
+      var addressLine = obj.address
+        ? escapeHtml(obj.address)
+        : '<span style="color:var(--muted);">адрес не указан</span>';
+      // "OK: ..." показываем зелёным (адрес распознан и GPS-проверка для
+      // объекта работает), иначе — тревожным цветом (адрес ещё не указан
+      // или геокодер не смог его распознать — см. geoStatus в Code.gs).
+      var isOk = obj.geoStatus && obj.geoStatus.indexOf('OK') === 0;
+      var statusLine = obj.geoStatus
+        ? '<div class="adminObjGeoStatus" style="color:' + (isOk ? 'var(--green)' : 'var(--red)') + ';">' + escapeHtml(obj.geoStatus) + '</div>'
+        : '';
+      var foremanValue = obj.foremanPhone ? (obj.foremanName ? (obj.foremanName + ' — ' + obj.foremanPhone) : obj.foremanPhone) : '';
+      var s1Id = 'objShift1Start' + idx, e1Id = 'objShift1End' + idx;
+      var s2Id = 'objShift2Start' + idx, e2Id = 'objShift2End' + idx;
+      var fId = 'objForeman' + idx, statusId = 'objSaveStatus' + idx;
+      return (
+        '<div class="adminObjRow">' +
+          '<div class="adminObjName">' + escapeHtml(obj.name) + '</div>' +
+          '<div class="adminObjAddress">' + addressLine + '</div>' +
+          statusLine +
+          '<div class="adminObjForm">' +
+            '<div class="shiftTimesRow">' +
+              '<div><label for="' + s1Id + '">Смена 1, начало</label><input id="' + s1Id + '" type="time" value="' + escapeHtml(obj.shift1Start) + '"></div>' +
+              '<div><label for="' + e1Id + '">Смена 1, конец</label><input id="' + e1Id + '" type="time" value="' + escapeHtml(obj.shift1End) + '"></div>' +
+            '</div>' +
+            '<div class="shiftTimesRow">' +
+              '<div><label for="' + s2Id + '">Смена 2, начало</label><input id="' + s2Id + '" type="time" value="' + escapeHtml(obj.shift2Start) + '"></div>' +
+              '<div><label for="' + e2Id + '">Смена 2, конец</label><input id="' + e2Id + '" type="time" value="' + escapeHtml(obj.shift2End) + '"></div>' +
+            '</div>' +
+            '<label for="' + fId + '" style="margin-top:8px;">Ответственный прораб</label>' +
+            '<input id="' + fId + '" type="text" list="objectForemanDatalist" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
+            '<div class="adminObjSaveRow">' +
+              '<button type="button" class="adminObjSaveBtn" data-name="' + escapeHtml(obj.name) + '" data-idx="' + idx + '">Сохранить</button>' +
+              '<span class="adminObjSaveStatus" id="' + statusId + '"></span>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    listEl.querySelectorAll('.adminObjSaveBtn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = btn.getAttribute('data-idx');
+        var objectName = btn.getAttribute('data-name');
+        var statusEl = document.getElementById('objSaveStatus' + idx);
+        var foremanInput = document.getElementById('objForeman' + idx);
+        btn.disabled = true;
+        statusEl.textContent = 'Сохраняем…';
+        statusEl.style.color = 'var(--muted)';
+        apiPost({
+          action: 'adminUpdateObjectShifts',
+          phone: currentUser && currentUser.phone,
+          objectName: objectName,
+          shift1Start: document.getElementById('objShift1Start' + idx).value,
+          shift1End: document.getElementById('objShift1End' + idx).value,
+          shift2Start: document.getElementById('objShift2Start' + idx).value,
+          shift2End: document.getElementById('objShift2End' + idx).value,
+          foremanPhone: resolveForemanPhoneFromInput_(foremanInput)
+        })
+          .then(function (res) {
+            btn.disabled = false;
+            if (res.status === 'ok') {
+              statusEl.textContent = 'Сохранено ✓';
+              statusEl.style.color = 'var(--green)';
+              renderAdminObjectsList(res);
+            } else {
+              statusEl.textContent = res.message || 'Не удалось сохранить';
+              statusEl.style.color = 'var(--red)';
+            }
+          })
+          .catch(function (err) {
+            btn.disabled = false;
+            statusEl.textContent = 'Ошибка соединения: ' + err;
+            statusEl.style.color = 'var(--red)';
+          });
+      });
+    });
   }
 
   function loadAdminEmployees() {
@@ -1795,23 +2002,27 @@
           adminAssigneeMap = {};
           var emptyDatalist = document.getElementById('adminTaskAssigneeDatalist');
           if (emptyDatalist) emptyDatalist.innerHTML = '';
+          var emptyForemanDatalist = document.getElementById('objectForemanDatalist');
+          if (emptyForemanDatalist) emptyForemanDatalist.innerHTML = '';
           return;
         }
 
-        // Заодно наполняем список "Исполнитель" на форме постановки задачи —
-        // ввод первых букв имени сузит варианты через нативный <datalist>.
-        // Так как <datalist> не даёт отдельно хранить "значение" и
-        // "подпись", в сам список кладём "ФИО — телефон", а телефон для
-        // отправки на сервер достаём из этой карты по точному совпадению.
+        // Заодно наполняем список "Исполнитель" на форме постановки задачи
+        // и список "Ответственный прораб" на экране "Объекты" — ввод первых
+        // букв имени сузит варианты через нативный <datalist>. Так как
+        // <datalist> не даёт отдельно хранить "значение" и "подпись", в сам
+        // список кладём "ФИО — телефон", а телефон для отправки на сервер
+        // достаём из этой карты (общей для обоих мест) по точному совпадению.
         adminAssigneeMap = {};
+        var optionsHtml = res.employees.map(function (emp) {
+          var label = emp.name + ' — ' + emp.phone;
+          adminAssigneeMap[label] = { phone: emp.phone, name: emp.name };
+          return '<option value="' + escapeHtml(label) + '">';
+        }).join('');
         var assigneeDatalist = document.getElementById('adminTaskAssigneeDatalist');
-        if (assigneeDatalist) {
-          assigneeDatalist.innerHTML = res.employees.map(function (emp) {
-            var label = emp.name + ' — ' + emp.phone;
-            adminAssigneeMap[label] = { phone: emp.phone, name: emp.name };
-            return '<option value="' + escapeHtml(label) + '">';
-          }).join('');
-        }
+        if (assigneeDatalist) assigneeDatalist.innerHTML = optionsHtml;
+        var foremanDatalist = document.getElementById('objectForemanDatalist');
+        if (foremanDatalist) foremanDatalist.innerHTML = optionsHtml;
 
         listEl.innerHTML = res.employees.map(function (emp, idx) {
           var inputId = 'adminRateInput' + idx;
@@ -2182,6 +2393,66 @@
   });
   document.getElementById('adminRatesBackLink').addEventListener('click', function () {
     showAdminScreen();
+  });
+  document.getElementById('goToAdminObjectsBtn').addEventListener('click', function () {
+    showAdminObjectsScreen();
+  });
+  document.getElementById('adminObjectsBackLink').addEventListener('click', function () {
+    showAdminScreen();
+  });
+  var objectAddStatusEl = document.getElementById('objectAddStatus');
+  function setObjectAddStatus(text, kind) {
+    stopWaitIndicator(objectAddStatusEl);
+    objectAddStatusEl.textContent = text;
+    objectAddStatusEl.className = kind || '';
+  }
+  document.getElementById('objectAddBtn').addEventListener('click', function () {
+    var btn = document.getElementById('objectAddBtn');
+    var nameInput = document.getElementById('objectNameInput');
+    var addressInput = document.getElementById('objectAddressInput');
+    var shift1StartInput = document.getElementById('objectShift1StartInput');
+    var shift1EndInput = document.getElementById('objectShift1EndInput');
+    var shift2StartInput = document.getElementById('objectShift2StartInput');
+    var shift2EndInput = document.getElementById('objectShift2EndInput');
+    var foremanInput = document.getElementById('objectForemanInput');
+    var name = nameInput.value.trim();
+    if (!name) {
+      setObjectAddStatus('Укажите название объекта', 'error');
+      return;
+    }
+    btn.disabled = true;
+    startWaitIndicator(objectAddStatusEl, 'Добавляем…');
+    apiPost({
+      action: 'adminAddObject',
+      phone: currentUser && currentUser.phone,
+      name: name,
+      address: addressInput.value.trim(),
+      shift1Start: shift1StartInput.value,
+      shift1End: shift1EndInput.value,
+      shift2Start: shift2StartInput.value,
+      shift2End: shift2EndInput.value,
+      foremanPhone: resolveForemanPhoneFromInput_(foremanInput)
+    })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          setObjectAddStatus('Объект добавлен', 'success');
+          nameInput.value = '';
+          addressInput.value = '';
+          shift1StartInput.value = '';
+          shift1EndInput.value = '';
+          shift2StartInput.value = '';
+          shift2EndInput.value = '';
+          foremanInput.value = '';
+          renderAdminObjectsList(res);
+        } else {
+          setObjectAddStatus(res.message || 'Не удалось добавить объект', 'error');
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        setObjectAddStatus('Ошибка соединения: ' + err, 'error');
+      });
   });
   if (currentUser && currentUser.name && currentUser.phone) {
     showScanScreen();
