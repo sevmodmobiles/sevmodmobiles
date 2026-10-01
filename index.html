@@ -226,7 +226,7 @@
   .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 4px; }
   h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
   label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-  input, select {
+  input, select, textarea {
     width: 100%;
     padding: 13px;
     font-size: 16px;
@@ -235,7 +235,9 @@
     background: var(--card);
     color: var(--text);
     margin-bottom: 14px;
+    font-family: inherit;
   }
+  textarea { resize: vertical; }
   button {
     width: 100%;
     padding: 15px;
@@ -338,6 +340,8 @@
   .switchUser a { color: var(--muted); text-decoration: underline; cursor: pointer; }
   #screenScan { display: none; }
   #screenStats { display: none; }
+  #screenAdmin { display: none; }
+  #screenTasks { display: none; }
   #screenReg { display: none; }
 
   .statsGrid {
@@ -397,6 +401,91 @@
   .dayRow .dayRight { text-align: right; }
   .dayRow .dayPay { font-weight: 600; }
   .dayRow .dayHoursInline { font-weight: 600; color: var(--text); }
+
+  /* ===== Панель администратора ===== */
+  .adminEmpRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .adminEmpRow:last-child { border-bottom: none; }
+  .adminEmpInfo { min-width: 0; }
+  .adminEmpName { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adminEmpPhone { font-size: 12px; color: var(--muted); }
+  .adminEmpRateForm { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .adminEmpRateForm input {
+    width: 84px;
+    margin: 0;
+    padding: 8px 10px;
+    text-align: right;
+  }
+  .adminEmpRateForm button {
+    margin: 0;
+    padding: 8px 12px;
+    width: auto;
+    font-size: 13px;
+  }
+  .adminEmpSaved { color: var(--green); font-size: 12px; }
+  .adminAdminRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .adminAdminRow:last-child { border-bottom: none; }
+  .adminAdminEmail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adminAdminRemoveBtn {
+    margin: 0;
+    padding: 6px 10px;
+    width: auto;
+    font-size: 12px;
+    background: var(--red);
+    flex-shrink: 0;
+  }
+  .adminBadgeYou {
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: 6px;
+  }
+
+  /* ===== Задачи (разовые работы) ===== */
+  .taskCard {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .taskCard:last-child { border-bottom: none; }
+  .taskText { white-space: pre-wrap; margin-bottom: 8px; }
+  .taskPhoto {
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    display: block;
+  }
+  .taskDate { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .taskDoneBtn {
+    margin: 0;
+    width: auto;
+    padding: 8px 14px;
+    font-size: 13px;
+    background: var(--green);
+  }
+  .taskStatusDone { color: var(--green); font-size: 12px; font-weight: 600; }
+  .adminTaskCard {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .adminTaskCard:last-child { border-bottom: none; }
+  .adminTaskCard .adminTaskName { font-weight: 600; }
+  .adminTaskCard .adminTaskText { color: var(--text); margin-top: 2px; }
+  .adminTaskCard .adminTaskMeta { color: var(--muted); font-size: 11px; margin-top: 4px; }
 
   /* ===== Тестовый режим ===== */
   /* Скрыта по умолчанию — видна только тому, кто знает секретную ссылку
@@ -545,7 +634,22 @@
       <div id="reader"></div>
       <div id="objectLabel"></div>
       <div id="status"></div>
+      <button id="myTasksBtn" type="button" style="background:var(--muted);">Мои задачи</button>
       <button id="myStatsBtn" type="button">Мой кабинет</button>
+    </div>
+  </div>
+
+  <!-- Экран "Мои задачи" — разовые поручения от администратора, не
+       привязанные к обычным сменам. Виден всем, но если у сотрудника
+       нет ни одной актуальной задачи, экран просто говорит об этом. -->
+  <div id="screenTasks">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Мои задачи</h1>
+      <div class="whoami">Вы вошли как: <b id="tasksWhoamiName"></b></div>
+      <div class="switchUser"><a id="tasksBackLink">← Главный экран</a></div>
+    </div>
+    <div class="card">
+      <div id="tasksList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
   </div>
 
@@ -555,6 +659,7 @@
       <h1 style="margin-top:0;">Мой кабинет</h1>
       <div class="whoami">Вы вошли как: <b id="statsWhoamiName"></b></div>
       <div class="switchUser"><a id="backToScanLink">← Главный экран</a></div>
+      <div class="switchUser" style="margin-top:6px;"><a id="goToAdminLink">Панель администратора</a></div>
     </div>
 
     <div class="statsGrid">
@@ -583,6 +688,63 @@
     <div class="card">
       <h2>По дням</h2>
       <div id="statsDaysList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Экран администратора: ставки сотрудников + управление списком
+       администраторов. Доступ проверяется на backend по email из
+       Google-аккаунта (см. adminAuth_ в Code.gs) — сама по себе ссылка
+       на этот экран ничего не даёт без подтверждённых прав. -->
+  <div id="screenAdmin">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Панель администратора</h1>
+      <div class="switchUser"><a id="adminBackLink">← Главный экран</a></div>
+    </div>
+
+    <div class="card" id="adminGate">
+      <p class="googleGateText">
+        Войдите через Google-аккаунт, у которого есть права администратора.
+      </p>
+      <div id="adminGoogleSignInButton"></div>
+      <div id="adminGoogleSignInError" class="error" style="margin-top:10px;"></div>
+      <div id="adminAccessStatus" style="margin-top:10px;"></div>
+    </div>
+
+    <div id="adminContent" style="display:none;">
+      <div class="card">
+        <h2>Ставки сотрудников</h2>
+        <div id="adminEmployeesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Поставить задачу</h2>
+        <label for="taskAssigneeInput">Исполнитель</label>
+        <input id="taskAssigneeInput" type="text" list="adminTaskAssigneeDatalist" placeholder="Начните вводить имя…" autocomplete="off">
+        <datalist id="adminTaskAssigneeDatalist"></datalist>
+
+        <label for="taskTextInput">Текст задачи</label>
+        <textarea id="taskTextInput" rows="3" placeholder="Опишите, что нужно сделать"></textarea>
+
+        <label>Фото (необязательно)</label>
+        <input id="taskPhotoInput" type="file" accept="image/*">
+        <img id="taskPhotoPreview" alt="" style="display:none; width:100%; max-height:200px; object-fit:cover; border-radius:10px; margin-bottom:14px;">
+
+        <button id="taskCreateBtn" type="button">Поставить задачу</button>
+        <div id="taskCreateStatus" style="margin-top:10px;"></div>
+
+        <h2 style="margin-top:20px;">Активные задачи</h2>
+        <div id="adminTasksList"><div class="statsEmpty">Загрузка…</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Администраторы</h2>
+        <div id="adminAdminsList"></div>
+        <label for="adminNewEmailInput" style="margin-top:12px;">Добавить администратора</label>
+        <input id="adminNewEmailInput" type="text" list="adminEmailsDatalist" placeholder="Начните вводить email…" autocomplete="off">
+        <datalist id="adminEmailsDatalist"></datalist>
+        <button id="adminAddBtn" type="button" style="margin-top:10px;">Добавить</button>
+        <div id="adminAddStatus" style="margin-top:10px;"></div>
+      </div>
     </div>
   </div>
 
@@ -663,6 +825,58 @@
   var API_URL = 'https://script.google.com/macros/s/AKfycbzWDeFOuO9xkmHW9Q0xoAS6jBJpd-yhVGxE6hMts1FoPDnWUROKP4MaB9mx7NjbdDTA/exec';
   var STORAGE_KEY = 'attendance_user_v1';
 
+  // --- Кэш "Личного кабинета" (статистики) в памяти телефона ---
+  // Данные за прошедшие дни не меняются, поэтому при каждом открытии
+  // экрана незачем заново ждать сервер: сразу показываем последнее, что
+  // уже сохранено на телефоне, а свежие данные подгружаем в фоне и тихо
+  // обновляем экран, если что-то изменилось. Отдельно, сразу после
+  // отметки "Уход" (конец смены), заново запрашиваем статистику и
+  // сохраняем её — чтобы при следующем открытии приложения кабинет был
+  // актуален уже "из коробки", без необходимости ждать загрузку.
+  var STATS_CACHE_KEY_PREFIX = 'attendance_stats_cache_v1_';
+
+  function statsCacheKey(phone) {
+    return STATS_CACHE_KEY_PREFIX + String(phone || '');
+  }
+
+  function loadStatsCache(phone) {
+    try {
+      var raw = localStorage.getItem(statsCacheKey(phone));
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveStatsCache(phone, data) {
+    try {
+      localStorage.setItem(statsCacheKey(phone), JSON.stringify(data));
+    } catch (e) {
+      // localStorage недоступен (приватный режим, переполнен и т.п.) —
+      // не критично, просто не кэшируем
+    }
+  }
+
+  // Тихо обновляет кэш статистики в фоне (не трогает интерфейс, если на
+  // экране статистики сейчас никто не смотрит, и аккуратно перерисовывает
+  // его, если смотрит). Используется и при открытии кабинета, и сразу
+  // после закрытия смены.
+  function refreshStatsCache(phone, afterUpdate) {
+    if (!phone) return;
+    apiPost({ action: 'stats', phone: phone })
+      .then(function (res) {
+        if (res.status === 'ok') {
+          saveStatsCache(phone, res);
+          if (afterUpdate) afterUpdate(res);
+        }
+      })
+      .catch(function () {
+        // фоновое обновление — при ошибке связи просто оставляем
+        // последние сохранённые данные как есть, без сообщения об ошибке
+      });
+  }
+
   // ЗАМЕНИТЕ на свой Client ID из Google Cloud Console (см. инструкцию).
   // Это не секрет — такой идентификатор открыто передаётся в браузер,
   // но он должен совпадать с тем, что backend проверяет в Code.gs.
@@ -715,6 +929,8 @@
   var screenReg = document.getElementById('screenReg');
   var screenScan = document.getElementById('screenScan');
   var screenStats = document.getElementById('screenStats');
+  var screenAdmin = document.getElementById('screenAdmin');
+  var screenTasks = document.getElementById('screenTasks');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
     stopWaitIndicator(regStatus);
@@ -739,6 +955,8 @@
     screenLogin.style.display = 'none';
     screenReg.style.display = 'none';
     screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenTasks.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
@@ -753,6 +971,8 @@
     screenReg.style.display = 'none';
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenTasks.style.display = 'none';
     screenLogin.style.display = 'block';
   }
 
@@ -760,6 +980,8 @@
     screenLogin.style.display = 'none';
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenTasks.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
   }
@@ -785,14 +1007,29 @@
     }
   }
 
+  // Одна и та же кнопка/колбэк Google используется в двух местах формы
+  // (регистрация и вход в админку) — это просто "кто сейчас вошёл в
+  // Google в этом браузере", а не что-то специфичное для регистрации.
+  // Какой из двух гейтов сейчас на экране, определяем по видимости.
+  var adminGoogleIdToken = null;
+  var adminAssigneeMap = {};
+
   function handleGoogleCredential(response) {
-    googleIdToken = response.credential;
     var email = '';
     try {
       var base64 = response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
       var payload = JSON.parse(atob(base64));
       email = payload.email || '';
     } catch (e) {}
+
+    var adminGate = document.getElementById('adminGate');
+    if (adminGate && adminGate.style.display !== 'none') {
+      adminGoogleIdToken = response.credential;
+      checkAdminAccess();
+      return;
+    }
+
+    googleIdToken = response.credential;
     document.getElementById('googleConfirmedEmail').textContent = email
       ? ('Подтверждено через Google: ' + email)
       : 'Вход через Google подтверждён';
@@ -806,6 +1043,10 @@
       if (errEl) {
         errEl.textContent = 'Не удалось загрузить вход через Google. Проверьте интернет-соединение и обновите страницу.';
       }
+      var adminErrEl = document.getElementById('adminGoogleSignInError');
+      if (adminErrEl) {
+        adminErrEl.textContent = 'Не удалось загрузить вход через Google. Проверьте интернет-соединение и обновите страницу.';
+      }
       return;
     }
     google.accounts.id.initialize({
@@ -816,6 +1057,13 @@
       document.getElementById('googleSignInButton'),
       { theme: 'outline', size: 'large', text: 'signup_with', locale: 'ru', width: 280 }
     );
+    var adminBtnEl = document.getElementById('adminGoogleSignInButton');
+    if (adminBtnEl) {
+      google.accounts.id.renderButton(
+        adminBtnEl,
+        { theme: 'outline', size: 'large', text: 'signin_with', locale: 'ru', width: 280 }
+      );
+    }
   }
 
   if (document.readyState === 'complete') {
@@ -828,9 +1076,356 @@
     screenLogin.style.display = 'none';
     screenReg.style.display = 'none';
     screenScan.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenTasks.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
+  }
+
+  // --- Мои задачи (разовые поручения) ---
+  function showTasksScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenTasks.style.display = 'block';
+    document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
+    loadMyTasks();
+  }
+
+  function loadMyTasks() {
+    var listEl = document.getElementById('tasksList');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    var phone = currentUser ? currentUser.phone : '';
+    apiPost({ action: 'getMyTasks', phone: phone })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        if (!res.tasks || !res.tasks.length) {
+          listEl.innerHTML = '<div class="statsEmpty">У вас нет актуальных задач</div>';
+          return;
+        }
+        listEl.innerHTML = res.tasks.map(function (t) {
+          return (
+            '<div class="taskCard">' +
+              (t.photoUrl ? '<img class="taskPhoto" src="' + escapeHtml(t.photoUrl) + '" alt="">' : '') +
+              '<div class="taskText">' + escapeHtml(t.text) + '</div>' +
+              '<div class="taskDate">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
+              '<button type="button" class="taskDoneBtn" data-id="' + escapeHtml(t.id) + '">Выполнено</button>' +
+            '</div>'
+          );
+        }).join('');
+
+        listEl.querySelectorAll('.taskDoneBtn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            btn.disabled = true;
+            btn.textContent = '…';
+            apiPost({ action: 'completeTask', phone: phone, taskId: btn.getAttribute('data-id') })
+              .then(function (res) {
+                if (res.status === 'ok') {
+                  loadMyTasks();
+                } else {
+                  btn.disabled = false;
+                  btn.textContent = 'Выполнено';
+                  alert(res.message || 'Не удалось отметить задачу');
+                }
+              })
+              .catch(function (err) {
+                btn.disabled = false;
+                btn.textContent = 'Выполнено';
+                alert('Ошибка соединения: ' + err);
+              });
+          });
+        });
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  // --- Панель администратора ---
+  // Доступ проверяется на backend (adminAuth_ в Code.gs) по email из
+  // подтверждённого Google-токена — сам по себе переход на этот экран
+  // ничего не даёт без реальных прав.
+  function showAdminScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenAdmin.style.display = 'block';
+    document.getElementById('adminGate').style.display = 'block';
+    document.getElementById('adminContent').style.display = 'none';
+    document.getElementById('adminAccessStatus').textContent = '';
+    if (adminGoogleIdToken) {
+      checkAdminAccess();
+    }
+  }
+
+  function checkAdminAccess() {
+    var statusEl2 = document.getElementById('adminAccessStatus');
+    statusEl2.textContent = 'Проверка прав…';
+    statusEl2.className = '';
+    apiPost({ action: 'adminCheckAccess', googleIdToken: adminGoogleIdToken })
+      .then(function (res) {
+        if (res.status === 'ok') {
+          statusEl2.textContent = '';
+          document.getElementById('adminGate').style.display = 'none';
+          document.getElementById('adminContent').style.display = 'block';
+          loadAdminEmployees();
+          loadAdminList();
+          loadAdminTasks();
+        } else {
+          statusEl2.textContent = res.message || 'Нет доступа';
+          statusEl2.className = 'error';
+        }
+      })
+      .catch(function (err) {
+        statusEl2.textContent = 'Ошибка соединения: ' + err;
+        statusEl2.className = 'error';
+      });
+  }
+
+  function loadAdminEmployees() {
+    var listEl = document.getElementById('adminEmployeesList');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetEmployees', googleIdToken: adminGoogleIdToken })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + (res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        if (!res.employees || !res.employees.length) {
+          listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного сотрудника</div>';
+          adminAssigneeMap = {};
+          var emptyDatalist = document.getElementById('adminTaskAssigneeDatalist');
+          if (emptyDatalist) emptyDatalist.innerHTML = '';
+          return;
+        }
+
+        // Заодно наполняем список "Исполнитель" на форме постановки задачи —
+        // ввод первых букв имени сузит варианты через нативный <datalist>.
+        // Так как <datalist> не даёт отдельно хранить "значение" и
+        // "подпись", в сам список кладём "ФИО — телефон", а телефон для
+        // отправки на сервер достаём из этой карты по точному совпадению.
+        adminAssigneeMap = {};
+        var assigneeDatalist = document.getElementById('adminTaskAssigneeDatalist');
+        if (assigneeDatalist) {
+          assigneeDatalist.innerHTML = res.employees.map(function (emp) {
+            var label = emp.name + ' — ' + emp.phone;
+            adminAssigneeMap[label] = { phone: emp.phone, name: emp.name };
+            return '<option value="' + escapeHtml(label) + '">';
+          }).join('');
+        }
+
+        listEl.innerHTML = res.employees.map(function (emp, idx) {
+          var inputId = 'adminRateInput' + idx;
+          return (
+            '<div class="adminEmpRow">' +
+              '<div class="adminEmpInfo">' +
+                '<div class="adminEmpName">' + escapeHtml(emp.name) + '</div>' +
+                '<div class="adminEmpPhone">' + escapeHtml(emp.phone) + '</div>' +
+              '</div>' +
+              '<div class="adminEmpRateForm">' +
+                '<input id="' + inputId + '" type="number" inputmode="numeric" min="0" step="1" value="' + (emp.rate || 0) + '" data-phone="' + escapeHtml(emp.phone) + '">' +
+                '<button type="button" class="adminSaveRateBtn" data-input="' + inputId + '" data-phone="' + escapeHtml(emp.phone) + '">Сохранить</button>' +
+              '</div>' +
+            '</div>'
+          );
+        }).join('');
+
+        listEl.querySelectorAll('.adminSaveRateBtn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var input = document.getElementById(btn.getAttribute('data-input'));
+            var phone = btn.getAttribute('data-phone');
+            var rate = input.value;
+            btn.disabled = true;
+            btn.textContent = '…';
+            apiPost({ action: 'adminSetRate', googleIdToken: adminGoogleIdToken, phone: phone, rate: rate })
+              .then(function (res) {
+                btn.disabled = false;
+                if (res.status === 'ok') {
+                  btn.textContent = 'Сохранено ✓';
+                  setTimeout(function () { btn.textContent = 'Сохранить'; }, 1500);
+                } else {
+                  btn.textContent = 'Сохранить';
+                  alert(res.message || 'Не удалось сохранить');
+                }
+              })
+              .catch(function (err) {
+                btn.disabled = false;
+                btn.textContent = 'Сохранить';
+                alert('Ошибка соединения: ' + err);
+              });
+          });
+        });
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  function loadAdminList() {
+    var listEl = document.getElementById('adminAdminsList');
+    var datalistEl = document.getElementById('adminEmailsDatalist');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetAdminList', googleIdToken: adminGoogleIdToken })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + (res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        listEl.innerHTML = res.admins.map(function (email) {
+          var isBootstrap = email.toLowerCase() === (res.bootstrapAdmin || '').toLowerCase();
+          return (
+            '<div class="adminAdminRow">' +
+              '<div class="adminAdminEmail">' + escapeHtml(email) +
+                (isBootstrap ? '<span class="adminBadgeYou">(основной)</span>' : '') +
+              '</div>' +
+              (isBootstrap ? '' : '<button type="button" class="adminAdminRemoveBtn" data-email="' + escapeHtml(email) + '">Убрать</button>') +
+            '</div>'
+          );
+        }).join('');
+
+        listEl.querySelectorAll('.adminAdminRemoveBtn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            if (!confirm('Убрать права администратора у ' + btn.getAttribute('data-email') + '?')) return;
+            apiPost({ action: 'adminRemoveAdmin', googleIdToken: adminGoogleIdToken, targetEmail: btn.getAttribute('data-email') })
+              .then(function (res) {
+                if (res.status === 'ok') {
+                  loadAdminList();
+                } else {
+                  alert(res.message || 'Не удалось убрать');
+                }
+              })
+              .catch(function (err) { alert('Ошибка соединения: ' + err); });
+          });
+        });
+
+        datalistEl.innerHTML = (res.allEmails || []).map(function (email) {
+          return '<option value="' + escapeHtml(email) + '">';
+        }).join('');
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  function loadAdminTasks() {
+    var listEl = document.getElementById('adminTasksList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetTasks', googleIdToken: adminGoogleIdToken })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        if (!res.tasks || !res.tasks.length) {
+          listEl.innerHTML = '<div class="statsEmpty">Активных задач нет</div>';
+          return;
+        }
+        listEl.innerHTML = res.tasks.map(function (t) {
+          return (
+            '<div class="adminTaskCard">' +
+              '<div class="adminTaskName">' + escapeHtml(t.name) + '</div>' +
+              '<div class="adminTaskText">' + escapeHtml(t.text) + '</div>' +
+              '<div class="adminTaskMeta">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
+            '</div>'
+          );
+        }).join('');
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  var taskPhotoBase64 = null;
+  var taskPhotoInputEl = document.getElementById('taskPhotoInput');
+  if (taskPhotoInputEl) {
+    taskPhotoInputEl.addEventListener('change', function () {
+      var file = taskPhotoInputEl.files && taskPhotoInputEl.files[0];
+      var preview = document.getElementById('taskPhotoPreview');
+      if (!file) {
+        taskPhotoBase64 = null;
+        preview.style.display = 'none';
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        taskPhotoBase64 = reader.result;
+        preview.src = taskPhotoBase64;
+        preview.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  var taskCreateBtnEl = document.getElementById('taskCreateBtn');
+  if (taskCreateBtnEl) {
+    taskCreateBtnEl.addEventListener('click', function () {
+      var statusEl4 = document.getElementById('taskCreateStatus');
+      var assigneeInput = document.getElementById('taskAssigneeInput');
+      var textInput = document.getElementById('taskTextInput');
+      var assignee = adminAssigneeMap[assigneeInput.value.trim()];
+
+      if (!assignee) {
+        statusEl4.textContent = 'Выберите исполнителя из списка предложенных вариантов';
+        statusEl4.className = 'error';
+        return;
+      }
+      var text = textInput.value.trim();
+      if (!text) {
+        statusEl4.textContent = 'Введите текст задачи';
+        statusEl4.className = 'error';
+        return;
+      }
+
+      statusEl4.textContent = 'Постановка задачи…';
+      statusEl4.className = '';
+      taskCreateBtnEl.disabled = true;
+      apiPost({
+        action: 'adminCreateTask',
+        googleIdToken: adminGoogleIdToken,
+        phone: assignee.phone,
+        name: assignee.name,
+        text: text,
+        photo: taskPhotoBase64
+      })
+        .then(function (res) {
+          taskCreateBtnEl.disabled = false;
+          if (res.status === 'ok') {
+            statusEl4.textContent = 'Задача поставлена';
+            statusEl4.className = '';
+            assigneeInput.value = '';
+            textInput.value = '';
+            taskPhotoBase64 = null;
+            taskPhotoInputEl.value = '';
+            document.getElementById('taskPhotoPreview').style.display = 'none';
+            loadAdminTasks();
+          } else {
+            statusEl4.textContent = res.message || 'Не удалось поставить задачу';
+            statusEl4.className = 'error';
+          }
+        })
+        .catch(function (err) {
+          taskCreateBtnEl.disabled = false;
+          statusEl4.textContent = 'Ошибка соединения: ' + err;
+          statusEl4.className = 'error';
+        });
+    });
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   function renderStats(data) {
@@ -893,29 +1488,85 @@
   }
 
   function loadMyStats() {
-    document.getElementById('statsDaysList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
     if (!currentUser || !currentUser.phone) return;
+    var phone = currentUser.phone;
 
-    apiPost({ action: 'stats', phone: currentUser.phone })
+    // Сначала — то, что уже лежит в памяти телефона: экран заполняется
+    // мгновенно, без спиннера и ожидания сервера.
+    var cached = loadStatsCache(phone);
+    if (cached) {
+      renderStats(cached);
+    } else {
+      document.getElementById('statsDaysList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    }
+
+    // Параллельно (в фоне, если есть что показать сразу) — свежие данные
+    // с сервера, которыми тихо заменяем экран и обновляем кэш на будущее.
+    apiPost({ action: 'stats', phone: phone })
       .then(function (res) {
         if (res.status === 'ok') {
+          saveStatsCache(phone, res);
           renderStats(res);
-        } else {
+        } else if (!cached) {
           document.getElementById('statsDaysList').innerHTML =
             '<div class="statsEmpty">' + (res.message || 'Не удалось загрузить статистику') + '</div>';
         }
       })
       .catch(function () {
-        document.getElementById('statsDaysList').innerHTML =
-          '<div class="statsEmpty">Ошибка соединения</div>';
+        if (!cached) {
+          document.getElementById('statsDaysList').innerHTML =
+            '<div class="statsEmpty">Ошибка соединения</div>';
+        }
+        // если кэш уже показан — при сбое связи просто оставляем его на
+        // экране, не перекрываем сообщением об ошибке
       });
   }
 
   document.getElementById('myStatsBtn').addEventListener('click', function () {
     showStatsScreen();
   });
+  document.getElementById('myTasksBtn').addEventListener('click', function () {
+    showTasksScreen();
+  });
+  document.getElementById('tasksBackLink').addEventListener('click', function () {
+    showScanScreen();
+  });
   document.getElementById('backToScanLink').addEventListener('click', function () {
     showScanScreen();
+  });
+  document.getElementById('goToAdminLink').addEventListener('click', function () {
+    showAdminScreen();
+  });
+  document.getElementById('adminBackLink').addEventListener('click', function () {
+    showScanScreen();
+  });
+  document.getElementById('adminAddBtn').addEventListener('click', function () {
+    var input = document.getElementById('adminNewEmailInput');
+    var email = input.value.trim();
+    var statusEl3 = document.getElementById('adminAddStatus');
+    if (!email) {
+      statusEl3.textContent = 'Введите email';
+      statusEl3.className = 'error';
+      return;
+    }
+    statusEl3.textContent = 'Добавление…';
+    statusEl3.className = '';
+    apiPost({ action: 'adminAddAdmin', googleIdToken: adminGoogleIdToken, newEmail: email })
+      .then(function (res) {
+        if (res.status === 'ok') {
+          statusEl3.textContent = 'Добавлено';
+          statusEl3.className = '';
+          input.value = '';
+          loadAdminList();
+        } else {
+          statusEl3.textContent = res.message || 'Не удалось добавить';
+          statusEl3.className = 'error';
+        }
+      })
+      .catch(function (err) {
+        statusEl3.textContent = 'Ошибка соединения: ' + err;
+        statusEl3.className = 'error';
+      });
   });
 
   if (currentUser && currentUser.name && currentUser.phone) {
@@ -1133,6 +1784,9 @@
   document.getElementById('switchUserLink').addEventListener('click', function () {
     if (confirm('Сменить пользователя на этом устройстве? Нужно будет войти по номеру телефона (или зарегистрироваться, если вы новый сотрудник).')) {
       try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      if (currentUser && currentUser.phone) {
+        try { localStorage.removeItem(statsCacheKey(currentUser.phone)); } catch (e) {}
+      }
       currentUser = null;
       document.getElementById('regLastName').value = '';
       document.getElementById('regFirstName').value = '';
@@ -1379,6 +2033,17 @@
           // Подтверждено — просто уточняем точное серверное время, статус
           // и кнопка уже показывают верную картину (обновили оптимистично).
           setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time, 'success');
+          if (eventTypeAtSend === 'Уход') {
+            // Смена только что закрыта — в фоне сразу подтягиваем свежую
+            // статистику и сохраняем её на телефоне. Так при следующем
+            // открытии "Личного кабинета" (даже в другой день) он сразу
+            // покажет эту смену, без ожидания сервера.
+            refreshStatsCache(currentUser.phone, function (fresh) {
+              if (screenStats.style.display === 'block') {
+                renderStats(fresh);
+              }
+            });
+          }
         } else {
           showSendFailure(res.message || 'сервер отклонил отметку без пояснения');
         }
