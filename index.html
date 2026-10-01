@@ -755,10 +755,12 @@
       <div id="objectLabel"></div>
       <div id="status"></div>
       <button id="myTasksBtn" type="button" style="background:var(--muted); position:relative;">Мои задачи<span id="myTasksBadge" class="taskBadge" style="display:none;"></span></button>
+      <!-- Обе кнопки ниже видны только тем, у кого стоит галочка "Админ" в
+           листе "Сотрудники" — проверяется автоматически при входе на этот
+           экран (см. refreshAdminStatus в скрипте), без отдельного входа
+           через Google. Обычный сотрудник их не видит вообще. -->
+      <button id="taskManageBtn" type="button" style="display:none; background:var(--blue);">Поставить задачу</button>
       <button id="myStatsBtn" type="button">Мой кабинет</button>
-      <!-- Видна только на этом устройстве и только после того, как вход
-           через Google здесь уже подтвердил права администратора — см.
-           ADMIN_FLAG_KEY в скрипте. До этого кнопки нет вообще. -->
       <button id="adminPanelBtn" type="button" style="display:none; background:var(--blue);">Админ панель</button>
     </div>
   </div>
@@ -840,6 +842,44 @@
     </div>
   </div>
 
+  <!-- Экран "Поставить задачу" — раньше был частью панели администратора,
+       теперь вынесен на главный экран (кнопка видна только админу, см.
+       taskManageBtn), чтобы не приходилось заходить в полную админку ради
+       одной задачи. Доступ проверяется на backend по номеру телефона (см.
+       adminAuth_ в Code.gs) — отдельного входа через Google здесь больше
+       нет, открывается сразу. -->
+  <div id="screenTaskManage">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Поставить задачу</h1>
+      <div class="switchUser"><a id="taskManageBackLink">← Главный экран</a></div>
+    </div>
+
+    <div id="taskManageContent">
+      <div class="card">
+        <label for="taskAssigneeInput">Исполнитель</label>
+        <input id="taskAssigneeInput" type="text" list="adminTaskAssigneeDatalist" placeholder="Начните вводить имя…" autocomplete="off">
+        <datalist id="adminTaskAssigneeDatalist"></datalist>
+
+        <label for="taskObjectInput">Объект</label>
+        <input id="taskObjectInput" type="text" list="taskObjectDatalist" placeholder="Начните вводить название объекта…" autocomplete="off">
+        <datalist id="taskObjectDatalist"></datalist>
+
+        <label for="taskTextInput">Текст задачи</label>
+        <textarea id="taskTextInput" rows="3" placeholder="Опишите, что нужно сделать"></textarea>
+
+        <label>Фото задачи (необязательно, можно несколько)</label>
+        <input id="taskPhotoInput" type="file" accept="image/*" multiple>
+        <div id="taskPhotoPreview" class="photoPreviewRow"></div>
+
+        <button id="taskCreateBtn" type="button">Поставить задачу</button>
+        <div id="taskCreateStatus" style="margin-top:10px;"></div>
+
+        <h2 style="margin-top:20px;">Активные задачи</h2>
+        <div id="adminTasksList"><div class="statsEmpty">Загрузка…</div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Экран личного кабинета -->
   <div id="screenStats">
     <div class="card logo-card">
@@ -879,52 +919,20 @@
   </div>
 
   <!-- Экран администратора: ставки сотрудников + управление списком
-       администраторов. Доступ проверяется на backend по email из
-       Google-аккаунта (см. adminAuth_ в Code.gs) — сама по себе ссылка
-       на этот экран ничего не даёт без подтверждённых прав. -->
+       администраторов. Доступ проверяется на backend по номеру телефона,
+       с которым человек уже вошёл в приложение (см. adminAuth_ в Code.gs,
+       смотрит на галочку "Админ" в "Сотрудники") — сама по себе ссылка на
+       этот экран ничего не даёт без реальных прав, никакого отдельного
+       входа через Google здесь больше не требуется. -->
   <div id="screenAdmin">
     <div class="card logo-card">
       <h1 style="margin-top:0;">Панель администратора</h1>
       <div class="switchUser"><a id="adminBackLink">← Главный экран</a></div>
     </div>
 
-    <div class="card" id="adminGate">
-      <p class="googleGateText">
-        Войдите через Google-аккаунт, у которого есть права администратора.
-      </p>
-      <div id="adminGoogleSignInButton"></div>
-      <div id="adminGoogleSignInError" class="error" style="margin-top:10px;"></div>
-      <div id="adminAccessStatus" style="margin-top:10px;"></div>
-    </div>
-
-    <div id="adminContent" style="display:none;">
+    <div id="adminContent">
       <div class="card">
-        <h2>Ставки сотрудников</h2>
-        <div id="adminEmployeesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
-      </div>
-
-      <div class="card">
-        <h2>Поставить задачу</h2>
-        <label for="taskAssigneeInput">Исполнитель</label>
-        <input id="taskAssigneeInput" type="text" list="adminTaskAssigneeDatalist" placeholder="Начните вводить имя…" autocomplete="off">
-        <datalist id="adminTaskAssigneeDatalist"></datalist>
-
-        <label for="taskObjectInput">Объект</label>
-        <input id="taskObjectInput" type="text" list="taskObjectDatalist" placeholder="Начните вводить название объекта…" autocomplete="off">
-        <datalist id="taskObjectDatalist"></datalist>
-
-        <label for="taskTextInput">Текст задачи</label>
-        <textarea id="taskTextInput" rows="3" placeholder="Опишите, что нужно сделать"></textarea>
-
-        <label>Фото задачи (необязательно, можно несколько)</label>
-        <input id="taskPhotoInput" type="file" accept="image/*" multiple>
-        <div id="taskPhotoPreview" class="photoPreviewRow"></div>
-
-        <button id="taskCreateBtn" type="button">Поставить задачу</button>
-        <div id="taskCreateStatus" style="margin-top:10px;"></div>
-
-        <h2 style="margin-top:20px;">Активные задачи</h2>
-        <div id="adminTasksList"><div class="statsEmpty">Загрузка…</div></div>
+        <button id="goToAdminRatesBtn" type="button">Ставки сотрудников</button>
       </div>
 
       <div class="card">
@@ -932,6 +940,20 @@
         <div id="adminAdminsList"></div>
         <div class="statsEmpty" style="margin-top:10px; text-align:left;">Чтобы назначить или убрать администратора — поставьте или снимите галочку в столбце «Админ» листа «Сотрудники» в таблице.</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Экран "Ставки сотрудников" — вынесен из общего списка панели
+       администратора в отдельный подэкран, чтобы сама панель администратора
+       не была перегружена. Открывается кнопкой "Ставки сотрудников" из
+       панели администратора. -->
+  <div id="screenAdminRates">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Ставки сотрудников</h1>
+      <div class="switchUser"><a id="adminRatesBackLink">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <div id="adminEmployeesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
   </div>
 
@@ -1145,6 +1167,8 @@
   var screenScan = document.getElementById('screenScan');
   var screenStats = document.getElementById('screenStats');
   var screenAdmin = document.getElementById('screenAdmin');
+  var screenAdminRates = document.getElementById('screenAdminRates');
+  var screenTaskManage = document.getElementById('screenTaskManage');
   var screenTasks = document.getElementById('screenTasks');
   var screenTaskDetail = document.getElementById('screenTaskDetail');
   var regStatus = document.getElementById('regStatus');
@@ -1172,13 +1196,15 @@
     screenReg.style.display = 'none';
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
     refreshTasksBadge();
-    updateAdminPanelButtonVisibility();
+    refreshAdminStatus();
   }
 
   // Красная точка-счётчик на кнопке "Мои задачи" — показывает, сколько
@@ -1215,6 +1241,8 @@
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenLogin.style.display = 'block';
@@ -1225,6 +1253,8 @@
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenReg.style.display = 'block';
@@ -1252,38 +1282,62 @@
     }
   }
 
-  // Одна и та же кнопка/колбэк Google используется в двух местах формы
-  // (регистрация и вход в админку) — это просто "кто сейчас вошёл в
-  // Google в этом браузере", а не что-то специфичное для регистрации.
-  // Какой из двух гейтов сейчас на экране, определяем по видимости.
-  var adminGoogleIdToken = null;
   var adminAssigneeMap = {};
 
-  // --- Кнопка "Админ панель" на главном экране этого устройства ---
-  // Сам Google-токен живёт недолго и каждый раз заново проверяется
-  // сервером (это не меняем — так безопаснее). Запоминаем на этом
-  // устройстве, что именно этот номер телефона уже подтверждал права
-  // администратора — и сразу показываем кнопку "Админ панель" на главном
-  // экране, минуя "Мой кабинет". Войти всё равно нужно по кнопке Google
-  // (один клик — браузер обычно уже помнит аккаунт) — автоматический
-  // тихий вход без клика (google.accounts.id.prompt() с auto_select)
-  // пробовали, но убрали: это ломало обычную регистрацию, вызывая
-  // непредсказуемые всплывающие предложения входа на любом экране.
-  var ADMIN_FLAG_KEY = 'attendance_admin_confirmed_v1';
+  // --- Кнопки "Админ панель" / "Поставить задачу" на главном экране ---
+  // Раньше права администратора подтверждались отдельным входом через
+  // Google при каждом открытии админки. Теперь прав достаточно того, что
+  // уже видно на backend по номеру телефона (галочка "Админ" в
+  // "Сотрудники", см. adminAuth_/isAdminPhone_ в Code.gs) — отдельного
+  // подтверждения больше не требуется, кнопки появляются сами.
+  //
+  // Чтобы кнопки не "моргали" (сначала скрыты, потом появляются после
+  // ответа сервера), сразу показываем то, что помним с прошлого раза на
+  // этом телефоне (кэш в localStorage), и тут же тихо перепроверяем на
+  // сервере — если права с тех пор забрали, кнопки корректно спрячутся.
+  var ADMIN_STATUS_CACHE_PREFIX = 'attendance_admin_status_v2_';
 
-  function isAdminFlaggedForCurrentUser() {
+  function adminStatusCacheKey(phone) {
+    return ADMIN_STATUS_CACHE_PREFIX + String(phone || '');
+  }
+
+  function loadAdminStatusCache(phone) {
     try {
-      var saved = localStorage.getItem(ADMIN_FLAG_KEY);
-      return !!(saved && currentUser && currentUser.phone && saved === currentUser.phone);
+      return localStorage.getItem(adminStatusCacheKey(phone)) === '1';
     } catch (e) {
       return false;
     }
   }
 
-  function updateAdminPanelButtonVisibility() {
+  function saveAdminStatusCache(phone, isAdmin) {
+    try {
+      localStorage.setItem(adminStatusCacheKey(phone), isAdmin ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function updateAdminButtonsVisibility(isAdmin) {
     var btn = document.getElementById('adminPanelBtn');
-    if (!btn) return;
-    btn.style.display = isAdminFlaggedForCurrentUser() ? 'block' : 'none';
+    if (btn) btn.style.display = isAdmin ? 'block' : 'none';
+    var taskBtn = document.getElementById('taskManageBtn');
+    if (taskBtn) taskBtn.style.display = isAdmin ? 'block' : 'none';
+  }
+
+  function refreshAdminStatus() {
+    if (!currentUser || !currentUser.phone) {
+      updateAdminButtonsVisibility(false);
+      return;
+    }
+    updateAdminButtonsVisibility(loadAdminStatusCache(currentUser.phone));
+    apiPost({ action: 'adminCheckAccess', phone: currentUser.phone })
+      .then(function (res) {
+        var isAdmin = res.status === 'ok';
+        saveAdminStatusCache(currentUser.phone, isAdmin);
+        updateAdminButtonsVisibility(isAdmin);
+      })
+      .catch(function () {
+        // сбой связи — оставляем то, что уже показано из кэша, не прячем
+        // кнопки из-за временного обрыва сети
+      });
   }
 
   function handleGoogleCredential(response) {
@@ -1293,13 +1347,6 @@
       var payload = JSON.parse(atob(base64));
       email = payload.email || '';
     } catch (e) {}
-
-    var adminGate = document.getElementById('adminGate');
-    if (adminGate && adminGate.style.display !== 'none') {
-      adminGoogleIdToken = response.credential;
-      checkAdminAccess();
-      return;
-    }
 
     googleIdToken = response.credential;
     document.getElementById('googleConfirmedEmail').textContent = email
@@ -1315,10 +1362,6 @@
       if (errEl) {
         errEl.textContent = 'Не удалось загрузить вход через Google. Проверьте интернет-соединение и обновите страницу.';
       }
-      var adminErrEl = document.getElementById('adminGoogleSignInError');
-      if (adminErrEl) {
-        adminErrEl.textContent = 'Не удалось загрузить вход через Google. Проверьте интернет-соединение и обновите страницу.';
-      }
       return;
     }
     google.accounts.id.initialize({
@@ -1329,13 +1372,6 @@
       document.getElementById('googleSignInButton'),
       { theme: 'outline', size: 'large', text: 'signup_with', locale: 'ru', width: 280 }
     );
-    var adminBtnEl = document.getElementById('adminGoogleSignInButton');
-    if (adminBtnEl) {
-      google.accounts.id.renderButton(
-        adminBtnEl,
-        { theme: 'outline', size: 'large', text: 'signin_with', locale: 'ru', width: 280 }
-      );
-    }
   }
 
   if (document.readyState === 'complete') {
@@ -1349,6 +1385,8 @@
     screenReg.style.display = 'none';
     screenScan.style.display = 'none';
     screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenStats.style.display = 'block';
@@ -1362,6 +1400,8 @@
     screenReg.style.display = 'none';
     screenScan.style.display = 'none';
     screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
     screenStats.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenTasks.style.display = 'block';
@@ -1465,6 +1505,8 @@
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
     screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'block';
     document.getElementById('taskDetailLoading').style.display = 'block';
@@ -1622,74 +1664,60 @@
   });
 
   // --- Панель администратора ---
-  // Доступ проверяется на backend (adminAuth_ в Code.gs) по email из
-  // подтверждённого Google-токена — сам по себе переход на этот экран
-  // ничего не даёт без реальных прав.
+  // Доступ проверяется на backend (adminAuth_ в Code.gs) по номеру
+  // телефона, с которым человек уже вошёл в приложение — смотрит на
+  // галочку "Админ" в листе "Сотрудники". Никакого отдельного входа через
+  // Google здесь больше нет: кнопка "Админ панель" на главном экране и
+  // так видна только тем, у кого права уже подтверждены (см.
+  // refreshAdminStatus), а сами данные на этом экране в любом случае
+  // перепроверяются сервером при каждой загрузке.
   function showAdminScreen() {
     screenLogin.style.display = 'none';
     screenReg.style.display = 'none';
     screenScan.style.display = 'none';
     screenStats.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenAdmin.style.display = 'block';
-    document.getElementById('adminGate').style.display = 'block';
-    document.getElementById('adminContent').style.display = 'none';
-    document.getElementById('adminAccessStatus').textContent = '';
-    if (adminGoogleIdToken) {
-      checkAdminAccess();
-    }
-    // Тихий, автоматический google.accounts.id.prompt() здесь намеренно
-    // убран — он ломал обычную регистрацию (Google начинал сам,
-    // непредсказуемо, предлагать/зацикливать вход на ЛЮБОМ экране, не
-    // только в админке, так как подписка на него общая для всей
-    // страницы). Кнопка "Админ панель" на главном экране (см.
-    // isAdminFlaggedForCurrentUser) по-прежнему появляется сразу, а здесь
-    // просто остаётся обычная кнопка входа через Google — один клик,
-    // без лишних полей.
+    loadAdminList();
   }
 
-  function checkAdminAccess() {
-    var statusEl2 = document.getElementById('adminAccessStatus');
-    statusEl2.textContent = 'Проверка прав…';
-    statusEl2.className = '';
-    apiPost({ action: 'adminCheckAccess', googleIdToken: adminGoogleIdToken })
-      .then(function (res) {
-        if (res.status === 'ok') {
-          statusEl2.textContent = '';
-          document.getElementById('adminGate').style.display = 'none';
-          document.getElementById('adminContent').style.display = 'block';
-          try {
-            if (currentUser && currentUser.phone) {
-              localStorage.setItem(ADMIN_FLAG_KEY, currentUser.phone);
-            }
-          } catch (e) {}
-          updateAdminPanelButtonVisibility();
-          loadAdminEmployees();
-          loadAdminList();
-          loadAdminTasks();
-        } else {
-          statusEl2.textContent = res.message || 'Нет доступа';
-          statusEl2.className = 'error';
-          // Права реально проверены и подтверждены НЕТ — если раньше тут
-          // стоял флаг "однократного" входа (например, админа сняли
-          // галочкой в таблице), убираем его и прячем кнопку на главном
-          // экране, чтобы не вводить в заблуждение.
-          adminGoogleIdToken = null;
-          try { localStorage.removeItem(ADMIN_FLAG_KEY); } catch (e) {}
-          updateAdminPanelButtonVisibility();
-        }
-      })
-      .catch(function (err) {
-        statusEl2.textContent = 'Ошибка соединения: ' + err;
-        statusEl2.className = 'error';
-      });
+  // --- Экран "Поставить задачу" (вынесен из панели администратора на
+  // главный экран) — доступ так же проверяется по номеру телефона. ---
+  function showTaskManageScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenTaskManage.style.display = 'block';
+    loadAdminEmployees(); // наполняет даталист "Исполнитель"
+    loadAdminTasks();
+  }
+
+  // --- Экран "Ставки сотрудников" (подэкран панели администратора) ---
+  function showAdminRatesScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenAdminRates.style.display = 'block';
+    loadAdminEmployees();
   }
 
   function loadAdminEmployees() {
     var listEl = document.getElementById('adminEmployeesList');
     listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
-    apiPost({ action: 'adminGetEmployees', googleIdToken: adminGoogleIdToken })
+    apiPost({ action: 'adminGetEmployees', phone: currentUser && currentUser.phone })
       .then(function (res) {
         if (res.status !== 'ok') {
           listEl.innerHTML = '<div class="statsEmpty">' + (res.message || 'Ошибка загрузки') + '</div>';
@@ -1741,7 +1769,7 @@
             var rate = input.value;
             btn.disabled = true;
             btn.textContent = '…';
-            apiPost({ action: 'adminSetRate', googleIdToken: adminGoogleIdToken, phone: phone, rate: rate })
+            apiPost({ action: 'adminSetRate', phone: currentUser && currentUser.phone, targetPhone: phone, rate: rate })
               .then(function (res) {
                 btn.disabled = false;
                 if (res.status === 'ok') {
@@ -1771,7 +1799,7 @@
   function loadAdminList() {
     var listEl = document.getElementById('adminAdminsList');
     listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
-    apiPost({ action: 'adminGetAdminList', googleIdToken: adminGoogleIdToken })
+    apiPost({ action: 'adminGetAdminList', phone: currentUser && currentUser.phone })
       .then(function (res) {
         if (res.status !== 'ok') {
           listEl.innerHTML = '<div class="statsEmpty">' + (res.message || 'Ошибка загрузки') + '</div>';
@@ -1830,7 +1858,7 @@
     var listEl = document.getElementById('adminTasksList');
     if (!listEl) return;
     listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
-    apiPost({ action: 'adminGetTasks', googleIdToken: adminGoogleIdToken })
+    apiPost({ action: 'adminGetTasks', phone: currentUser && currentUser.phone })
       .then(function (res) {
         if (res.status !== 'ok') {
           listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
@@ -1921,8 +1949,8 @@
       taskCreateBtnEl.disabled = true;
       apiPost({
         action: 'adminCreateTask',
-        googleIdToken: adminGoogleIdToken,
-        phone: assignee.phone,
+        phone: currentUser && currentUser.phone,
+        targetPhone: assignee.phone,
         name: assignee.name,
         objectName: objectName,
         text: text,
@@ -2075,6 +2103,18 @@
   });
   document.getElementById('adminBackLink').addEventListener('click', function () {
     showScanScreen();
+  });
+  document.getElementById('taskManageBtn').addEventListener('click', function () {
+    showTaskManageScreen();
+  });
+  document.getElementById('taskManageBackLink').addEventListener('click', function () {
+    showScanScreen();
+  });
+  document.getElementById('goToAdminRatesBtn').addEventListener('click', function () {
+    showAdminRatesScreen();
+  });
+  document.getElementById('adminRatesBackLink').addEventListener('click', function () {
+    showAdminScreen();
   });
   if (currentUser && currentUser.name && currentUser.phone) {
     showScanScreen();
@@ -2293,12 +2333,11 @@
       try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       if (currentUser && currentUser.phone) {
         try { localStorage.removeItem(statsCacheKey(currentUser.phone)); } catch (e) {}
+        // Кэш "видел ли этот телефон кнопки админа" — привязан к номеру,
+        // так что новому человеку он и так не покажется, но на всякий
+        // случай подчищаем за уходящим пользователем.
+        try { localStorage.removeItem(adminStatusCacheKey(currentUser.phone)); } catch (e) {}
       }
-      // Устройство переходит к другому человеку — "однократный" доступ в
-      // админку сбрасываем, чтобы новый пользователь не увидел чужую
-      // кнопку "Админ панель" и не получил доступ без собственного входа.
-      try { localStorage.removeItem(ADMIN_FLAG_KEY); } catch (e) {}
-      adminGoogleIdToken = null;
       currentUser = null;
       document.getElementById('regLastName').value = '';
       document.getElementById('regFirstName').value = '';
