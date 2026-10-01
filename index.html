@@ -252,6 +252,7 @@
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   #regBtn { background: var(--blue); }
   #startCamBtn { background: var(--green); }
+  #taskCreateBtn { background: var(--green); }
   #actionBtn { display: none; }
   #actionBtn.action-in { background: var(--green); }
   #actionBtn.action-out { background: var(--red); }
@@ -759,7 +760,7 @@
            листе "Сотрудники" — проверяется автоматически при входе на этот
            экран (см. refreshAdminStatus в скрипте), без отдельного входа
            через Google. Обычный сотрудник их не видит вообще. -->
-      <button id="taskManageBtn" type="button" style="display:none; background:var(--blue);">Поставить задачу</button>
+      <button id="taskManageBtn" type="button" style="display:none; background:var(--green);">Поставить задачу</button>
       <button id="myStatsBtn" type="button">Мой кабинет</button>
       <button id="adminPanelBtn" type="button" style="display:none; background:var(--blue);">Админ панель</button>
     </div>
@@ -1191,6 +1192,63 @@
     if (saved) currentUser = JSON.parse(saved);
   } catch (e) { currentUser = null; }
 
+  // --- Кнопка "назад" (аппаратная/жест на Android, а также обычная кнопка
+  // "назад" браузера) — переключает экраны внутри приложения вместо того,
+  // чтобы сразу закрывать вкладку/приложение. Работает через обычный
+  // History API: каждый show*Screen() сам "отмечается" в истории браузера
+  // (pushScreenState ниже), а переход по кнопке "назад" ловится через
+  // popstate и просто показывает нужный экран — страница при этом
+  // физически не перезагружается, это тот же самый открытый сайт.
+  var isBackNavigation = false;
+  var hasPushedInitialScreenState = false;
+
+  function pushScreenState(name, params) {
+    // Если show*Screen() сейчас вызван ИЗ обработчика popstate (то есть
+    // браузер уже сам переместил указатель истории назад/вперёд) — заново
+    // ничего не пушим, иначе история будет расти в обе стороны одновременно.
+    if (isBackNavigation) return;
+    var state = Object.assign({ screen: name }, params || {});
+    if (!hasPushedInitialScreenState) {
+      // Самый первый показанный экран — не "новая" запись в истории, а
+      // замена текущей. Так кнопка "назад" с первого же экрана приложения
+      // ведёт туда, куда вела бы и без этого (закрывает приложение/вкладку),
+      // а не крутится на месте.
+      history.replaceState(state, '', '#' + name);
+      hasPushedInitialScreenState = true;
+    } else {
+      history.pushState(state, '', '#' + name);
+    }
+  }
+
+  window.addEventListener('popstate', function (e) {
+    isBackNavigation = true;
+    try {
+      var state = e.state;
+      if (!state || !state.screen) {
+        if (currentUser && currentUser.name && currentUser.phone) {
+          showScanScreen();
+        } else {
+          showLoginScreen();
+        }
+        return;
+      }
+      switch (state.screen) {
+        case 'scan': showScanScreen(); break;
+        case 'login': showLoginScreen(); break;
+        case 'reg': showRegScreen(); break;
+        case 'stats': showStatsScreen(); break;
+        case 'tasks': showTasksScreen(); break;
+        case 'taskDetail': showTaskDetailScreen(state.taskId); break;
+        case 'admin': showAdminScreen(); break;
+        case 'adminRates': showAdminRatesScreen(); break;
+        case 'taskManage': showTaskManageScreen(); break;
+        default: showScanScreen();
+      }
+    } finally {
+      isBackNavigation = false;
+    }
+  });
+
   function showScanScreen() {
     screenLogin.style.display = 'none';
     screenReg.style.display = 'none';
@@ -1205,6 +1263,7 @@
     checkShiftStatus();
     refreshTasksBadge();
     refreshAdminStatus();
+    pushScreenState('scan');
   }
 
   // Красная точка-счётчик на кнопке "Мои задачи" — показывает, сколько
@@ -1246,6 +1305,7 @@
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenLogin.style.display = 'block';
+    pushScreenState('login');
   }
 
   function showRegScreen() {
@@ -1259,6 +1319,7 @@
     screenTaskDetail.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
+    pushScreenState('reg');
   }
 
   // --- Подтверждение личности через Google перед регистрацией ---
@@ -1392,6 +1453,7 @@
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
+    pushScreenState('stats');
   }
 
   // --- Мои задачи (разовые поручения) ---
@@ -1407,6 +1469,7 @@
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
+    pushScreenState('tasks');
   }
 
   // Единое отображение статуса — переиспользуется и в списке у сотрудника,
@@ -1512,6 +1575,7 @@
     document.getElementById('taskDetailLoading').style.display = 'block';
     document.getElementById('taskDetailBody').style.display = 'none';
     loadTaskDetail();
+    pushScreenState('taskDetail', { taskId: taskId });
   }
 
   function loadTaskDetail() {
@@ -1682,6 +1746,7 @@
     screenTaskDetail.style.display = 'none';
     screenAdmin.style.display = 'block';
     loadAdminList();
+    pushScreenState('admin');
   }
 
   // --- Экран "Поставить задачу" (вынесен из панели администратора на
@@ -1698,6 +1763,7 @@
     screenTaskManage.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
+    pushScreenState('taskManage');
   }
 
   // --- Экран "Ставки сотрудников" (подэкран панели администратора) ---
@@ -1712,6 +1778,7 @@
     screenTaskDetail.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
+    pushScreenState('adminRates');
   }
 
   function loadAdminEmployees() {
