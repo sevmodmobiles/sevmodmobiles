@@ -439,6 +439,37 @@
   .dayRow .dayPay { font-weight: 600; }
   .dayRow .dayHoursInline { font-weight: 600; color: var(--text); }
 
+  /* ===== Свой выпадающий список подсказок (замена нативному <datalist>) =====
+     Нативный <datalist> на разных устройствах/браузерах показывается
+     по-разному (где-то обычным списком, где-то горизонтальной карусельной
+     лентой над клавиатурой) и это никак не стилизовать — поэтому везде,
+     где раньше был list="...", теперь свой список (initAutocomplete),
+     который выглядит одинаково на всех устройствах. */
+  .autocompleteWrap { position: relative; }
+  .autocompleteList {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    margin-top: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  }
+  .autocompleteItem {
+    padding: 10px 14px;
+    font-size: 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .autocompleteItem:last-child { border-bottom: none; }
+  .autocompleteItem:hover, .autocompleteItem:active { background: var(--bg); }
+
   /* ===== Панель администратора ===== */
   .shiftTimesRow { display: flex; gap: 10px; margin-top: 10px; }
   .shiftTimesRow > div { flex: 1; min-width: 0; }
@@ -903,12 +934,10 @@
     <div id="taskManageContent">
       <div class="card">
         <label for="taskAssigneeInput">Исполнитель</label>
-        <input id="taskAssigneeInput" type="text" list="adminTaskAssigneeDatalist" placeholder="Начните вводить имя…" autocomplete="off">
-        <datalist id="adminTaskAssigneeDatalist"></datalist>
+        <input id="taskAssigneeInput" type="text" placeholder="Начните вводить имя…" autocomplete="off">
 
         <label for="taskObjectInput">Объект</label>
-        <input id="taskObjectInput" type="text" list="taskObjectDatalist" placeholder="Начните вводить название объекта…" autocomplete="off">
-        <datalist id="taskObjectDatalist"></datalist>
+        <input id="taskObjectInput" type="text" placeholder="Начните вводить название объекта…" autocomplete="off">
 
         <label for="taskTextInput">Текст задачи</label>
         <textarea id="taskTextInput" rows="3" placeholder="Опишите, что нужно сделать"></textarea>
@@ -1039,16 +1068,14 @@
       </div>
 
       <label for="objectForemanInput" style="margin-top:10px;">Ответственный прораб</label>
-      <input id="objectForemanInput" type="text" list="objectForemanDatalist" placeholder="Начните вводить имя…" autocomplete="off">
-      <datalist id="objectForemanDatalist"></datalist>
+      <input id="objectForemanInput" type="text" placeholder="Начните вводить имя…" autocomplete="off">
 
       <button id="objectAddBtn" type="button" style="margin-top:10px; background:var(--green);">Добавить объект</button>
       <div id="objectAddStatus"></div>
     </div>
     <div class="card">
       <h2>Найти объект</h2>
-      <input id="objectSearchInput" type="text" list="objectSearchDatalist" placeholder="Начните вводить название…" autocomplete="off">
-      <datalist id="objectSearchDatalist"></datalist>
+      <input id="objectSearchInput" type="text" placeholder="Начните вводить название…" autocomplete="off">
       <a id="objectsShowAllLink" class="smallLinkBtn">Все объекты ▾</a>
       <div id="adminObjectsList" style="display:none;"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
@@ -1248,14 +1275,9 @@
     .then(function (data) {
       validObjects = (data.objects || []).map(function (o) { return String(o).trim(); });
       validObjectsLoaded = true;
-      // Тот же список объектов используется в форме постановки задачи
-      // (поле "Объект") — админ выбирает из подсказки, а не вводит вручную.
-      var objectDatalist = document.getElementById('taskObjectDatalist');
-      if (objectDatalist) {
-        objectDatalist.innerHTML = validObjects.map(function (o) {
-          return '<option value="' + escapeHtml(o) + '">';
-        }).join('');
-      }
+      // Тот же список объектов используется в подсказках поля "Объект" на
+      // форме постановки задачи — initAutocomplete для taskObjectInput
+      // читает validObjects напрямую, отдельно наполнять нечего.
     })
     .catch(function () { validObjectsLoaded = false; });
 
@@ -1939,7 +1961,6 @@
   // здесь показываем в обратном порядке (последний добавленный — сверху).
   function renderAdminObjectsList(res) {
     var listEl = document.getElementById('adminObjectsList');
-    var searchDatalist = document.getElementById('objectSearchDatalist');
     lastAdminObjectsResponse = res;
     if (res.status !== 'ok') {
       listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
@@ -1947,14 +1968,12 @@
     }
     if (!res.objects || !res.objects.length) {
       listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного объекта</div>';
-      searchDatalist.innerHTML = '';
       return;
     }
 
-    searchDatalist.innerHTML = res.objects.map(function (obj) {
-      return '<option value="' + escapeHtml(obj.name) + '">';
-    }).join('');
-
+    // Подсказки поля поиска читаются прямо из lastAdminObjectsResponse
+    // (см. initAutocomplete для objectSearchInput) — отдельный список
+    // подсказок здесь поддерживать не нужно.
     var reversed = res.objects.slice().reverse();
     listEl.innerHTML = reversed.map(function (obj, idx) {
       var addressLine = obj.address
@@ -1991,7 +2010,7 @@
               '<div><label for="' + e2Id + '">Смена 2, конец</label><input id="' + e2Id + '" type="time" value="' + escapeHtml(obj.shift2End) + '"></div>' +
             '</div>' +
             '<label for="' + fId + '" style="margin-top:8px;">Ответственный прораб</label>' +
-            '<input id="' + fId + '" type="text" list="objectForemanDatalist" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
+            '<input id="' + fId + '" type="text" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
             '<div class="adminObjSaveRow">' +
               '<button type="button" class="adminObjSaveBtn" data-name="' + escapeHtml(obj.name) + '" data-idx="' + idx + '">Сохранить</button>' +
               '<span class="adminObjSaveStatus" id="' + statusId + '"></span>' +
@@ -2000,6 +2019,10 @@
         '</details>'
       );
     }).join('');
+
+    listEl.querySelectorAll('input[id^="objForeman"]').forEach(function (input) {
+      initAutocomplete(input, function () { return Object.keys(adminAssigneeMap); });
+    });
 
     listEl.querySelectorAll('.adminObjSaveBtn').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -2056,29 +2079,19 @@
         if (!res.employees || !res.employees.length) {
           listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного сотрудника</div>';
           adminAssigneeMap = {};
-          var emptyDatalist = document.getElementById('adminTaskAssigneeDatalist');
-          if (emptyDatalist) emptyDatalist.innerHTML = '';
-          var emptyForemanDatalist = document.getElementById('objectForemanDatalist');
-          if (emptyForemanDatalist) emptyForemanDatalist.innerHTML = '';
           return;
         }
 
-        // Заодно наполняем список "Исполнитель" на форме постановки задачи
-        // и список "Ответственный прораб" на экране "Объекты" — ввод первых
-        // букв имени сузит варианты через нативный <datalist>. Так как
-        // <datalist> не даёт отдельно хранить "значение" и "подпись", в сам
-        // список кладём "ФИО — телефон", а телефон для отправки на сервер
-        // достаём из этой карты (общей для обоих мест) по точному совпадению.
+        // Заодно наполняем общую карту "label -> {phone, name}" для подсказок
+        // "Исполнитель" (форма задачи) и "Ответственный прораб" (экран
+        // "Объекты") — сам выпадающий список рисует initAutocomplete,
+        // подсказки читает прямо из adminAssigneeMap (см. ниже, где вызван
+        // initAutocomplete для соответствующих полей).
         adminAssigneeMap = {};
-        var optionsHtml = res.employees.map(function (emp) {
+        res.employees.forEach(function (emp) {
           var label = emp.name + ' — ' + emp.phone;
           adminAssigneeMap[label] = { phone: emp.phone, name: emp.name };
-          return '<option value="' + escapeHtml(label) + '">';
-        }).join('');
-        var assigneeDatalist = document.getElementById('adminTaskAssigneeDatalist');
-        if (assigneeDatalist) assigneeDatalist.innerHTML = optionsHtml;
-        var foremanDatalist = document.getElementById('objectForemanDatalist');
-        if (foremanDatalist) foremanDatalist.innerHTML = optionsHtml;
+        });
 
         listEl.innerHTML = res.employees.map(function (emp, idx) {
           var inputId = 'adminRateInput' + idx;
@@ -2295,6 +2308,68 @@
       .replace(/"/g, '&quot;');
   }
 
+  // Свой выпадающий список подсказок — замена нативному <input list="...">
+  // (<datalist>), который на разных устройствах/браузерах выглядит
+  // по-разному (вертикальный список, горизонтальная карусель над
+  // клавиатурой и т.п.) и не поддаётся стилизации через CSS. Оборачивает
+  // inputEl в относительно-позиционированный контейнер и рисует под ним
+  // свою панель с подсказками — выглядит одинаково везде.
+  //   inputEl — поле ввода
+  //   getItemsFn — функция без аргументов, возвращающая АКТУАЛЬНЫЙ на
+  //     момент вызова массив строк-подсказок (чтобы список всегда брался
+  //     из свежих данных, а не замораживался на момент инициализации)
+  // Безопасно вызывать повторно на одном и том же элементе (например, при
+  // каждом рендере списка объектов) — повторная обёртка не создаётся.
+  function initAutocomplete(inputEl, getItemsFn) {
+    if (!inputEl || inputEl._autocompleteInited) return;
+    inputEl._autocompleteInited = true;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'autocompleteWrap';
+    inputEl.parentNode.insertBefore(wrap, inputEl);
+    wrap.appendChild(inputEl);
+
+    var list = document.createElement('div');
+    list.className = 'autocompleteList';
+    wrap.appendChild(list);
+
+    function render() {
+      var items = getItemsFn() || [];
+      var query = inputEl.value.trim().toLowerCase();
+      var matches = query
+        ? items.filter(function (label) { return label.toLowerCase().indexOf(query) !== -1; })
+        : items;
+      matches = matches.slice(0, 40);
+      if (!matches.length) {
+        list.style.display = 'none';
+        list.innerHTML = '';
+        return;
+      }
+      list.innerHTML = matches.map(function (label) {
+        return '<div class="autocompleteItem">' + escapeHtml(label) + '</div>';
+      }).join('');
+      list.style.display = 'block';
+    }
+
+    inputEl.addEventListener('input', render);
+    inputEl.addEventListener('focus', render);
+
+    // mousedown (а не click) — срабатывает раньше blur поля ввода, иначе
+    // список успел бы скрыться до того, как засчитается нажатие на пункт.
+    list.addEventListener('mousedown', function (e) {
+      var item = e.target.closest('.autocompleteItem');
+      if (!item) return;
+      e.preventDefault();
+      inputEl.value = item.textContent;
+      list.style.display = 'none';
+      inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    inputEl.addEventListener('blur', function () {
+      setTimeout(function () { list.style.display = 'none'; }, 150);
+    });
+  }
+
   function renderStats(data) {
     document.getElementById('statMonthHours').textContent = data.monthHours;
     document.getElementById('statMonthPay').textContent = (data.monthPay || 0) + ' ₽';
@@ -2464,6 +2539,20 @@
   }
   document.getElementById('objectSearchInput').addEventListener('change', function () {
     findAndOpenObjectCard_(this.value);
+  });
+  initAutocomplete(document.getElementById('objectSearchInput'), function () {
+    return (lastAdminObjectsResponse && lastAdminObjectsResponse.objects)
+      ? lastAdminObjectsResponse.objects.map(function (o) { return o.name; })
+      : [];
+  });
+  initAutocomplete(document.getElementById('objectForemanInput'), function () {
+    return Object.keys(adminAssigneeMap);
+  });
+  initAutocomplete(document.getElementById('taskAssigneeInput'), function () {
+    return Object.keys(adminAssigneeMap);
+  });
+  initAutocomplete(document.getElementById('taskObjectInput'), function () {
+    return validObjects;
   });
 
   var objectAddStatusEl = document.getElementById('objectAddStatus');
