@@ -438,12 +438,37 @@
   .shiftTimesRow > div { flex: 1; min-width: 0; }
   .shiftTimesRow label { font-size: 12px; }
   .shiftTimesRow input { margin-top: 2px; }
-  .adminObjRow { padding: 12px 0; border-bottom: 1px solid var(--border); }
-  .adminObjRow:last-child { border-bottom: none; }
-  .adminObjName { font-weight: 600; }
-  .adminObjAddress { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .smallLinkBtn {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--blue);
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .adminObjDetails { border-bottom: 1px solid var(--border); }
+  .adminObjDetails:last-child { border-bottom: none; }
+  .adminObjSummary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 0;
+    cursor: pointer;
+    list-style: none;
+  }
+  .adminObjSummary::-webkit-details-marker { display: none; }
+  .adminObjSummaryText { min-width: 0; overflow: hidden; }
+  .adminObjName { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adminObjAddress { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .adminObjGeoStatus { font-size: 12px; margin-top: 2px; }
-  .adminObjForm { margin-top: 8px; }
+  .adminObjChevron {
+    flex-shrink: 0;
+    color: var(--muted);
+    transition: transform 0.2s;
+  }
+  .adminObjDetails[open] .adminObjChevron { transform: rotate(180deg); }
+  .adminObjForm { padding-bottom: 14px; }
   .adminObjForm label { font-size: 12px; }
   .adminObjSaveRow { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   .adminObjSaveRow button { margin: 0; padding: 8px 12px; width: auto; font-size: 13px; }
@@ -953,12 +978,6 @@
       <div class="card">
         <button id="goToAdminObjectsBtn" type="button">Объекты</button>
       </div>
-
-      <div class="card">
-        <h2>Администраторы</h2>
-        <div id="adminAdminsList"></div>
-        <div class="statsEmpty" style="margin-top:10px; text-align:left;">Чтобы назначить или убрать администратора — поставьте или снимите галочку в столбце «Админ» листа «Сотрудники» в таблице.</div>
-      </div>
     </div>
   </div>
 
@@ -1021,8 +1040,11 @@
       <div id="objectAddStatus"></div>
     </div>
     <div class="card">
-      <h2>Список объектов</h2>
-      <div id="adminObjectsList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+      <h2>Найти объект</h2>
+      <input id="objectSearchInput" type="text" list="objectSearchDatalist" placeholder="Начните вводить название…" autocomplete="off">
+      <datalist id="objectSearchDatalist"></datalist>
+      <a id="objectsShowAllLink" class="smallLinkBtn">Все объекты ▾</a>
+      <div id="adminObjectsList" style="display:none;"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
   </div>
 
@@ -1417,6 +1439,11 @@
   }
 
   var adminAssigneeMap = {};
+  // Последний успешный ответ adminGetObjects/adminUpdateObjectShifts — чтобы
+  // после точечного сохранения в одной карточке не перестраивать весь
+  // список (и не захлопывать раскрытую карточку), а просто иметь свежие
+  // данные под рукой, если понадобятся (например, при повторном открытии).
+  var lastAdminObjectsResponse = null;
 
   // --- Кнопки "Админ панель" / "Поставить задачу" на главном экране ---
   // Раньше права администратора подтверждались отдельным входом через
@@ -1822,7 +1849,6 @@
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenAdmin.style.display = 'block';
-    loadAdminList();
     pushScreenState('admin');
   }
 
@@ -1899,17 +1925,32 @@
     return typed; // возможно, ввели телефон напрямую — бэкенд сам проверит
   }
 
+  // Список большой и редактирование каждого объекта занимает много места,
+  // поэтому по умолчанию список скрыт (см. objectsShowAllLink) и открыт
+  // только поиск — а каждый объект в списке свёрнут в одну строку (<details>,
+  // разворачивается по клику стрелкой). Новые объекты в таблице добавляются
+  // вниз, но актуальнее для админа именно недавно добавленные — поэтому
+  // здесь показываем в обратном порядке (последний добавленный — сверху).
   function renderAdminObjectsList(res) {
     var listEl = document.getElementById('adminObjectsList');
+    var searchDatalist = document.getElementById('objectSearchDatalist');
+    lastAdminObjectsResponse = res;
     if (res.status !== 'ok') {
       listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
       return;
     }
     if (!res.objects || !res.objects.length) {
       listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного объекта</div>';
+      searchDatalist.innerHTML = '';
       return;
     }
-    listEl.innerHTML = res.objects.map(function (obj, idx) {
+
+    searchDatalist.innerHTML = res.objects.map(function (obj) {
+      return '<option value="' + escapeHtml(obj.name) + '">';
+    }).join('');
+
+    var reversed = res.objects.slice().reverse();
+    listEl.innerHTML = reversed.map(function (obj, idx) {
       var addressLine = obj.address
         ? escapeHtml(obj.address)
         : '<span style="color:var(--muted);">адрес не указан</span>';
@@ -1925,11 +1966,16 @@
       var s2Id = 'objShift2Start' + idx, e2Id = 'objShift2End' + idx;
       var fId = 'objForeman' + idx, statusId = 'objSaveStatus' + idx;
       return (
-        '<div class="adminObjRow">' +
-          '<div class="adminObjName">' + escapeHtml(obj.name) + '</div>' +
-          '<div class="adminObjAddress">' + addressLine + '</div>' +
-          statusLine +
+        '<details class="adminObjDetails" id="objDetails' + idx + '" data-objname="' + escapeHtml(obj.name) + '">' +
+          '<summary class="adminObjSummary">' +
+            '<div class="adminObjSummaryText">' +
+              '<div class="adminObjName">' + escapeHtml(obj.name) + '</div>' +
+              '<div class="adminObjAddress">' + addressLine + '</div>' +
+            '</div>' +
+            '<span class="adminObjChevron">▾</span>' +
+          '</summary>' +
           '<div class="adminObjForm">' +
+            statusLine +
             '<div class="shiftTimesRow">' +
               '<div><label for="' + s1Id + '">Смена 1, начало</label><input id="' + s1Id + '" type="time" value="' + escapeHtml(obj.shift1Start) + '"></div>' +
               '<div><label for="' + e1Id + '">Смена 1, конец</label><input id="' + e1Id + '" type="time" value="' + escapeHtml(obj.shift1End) + '"></div>' +
@@ -1945,7 +1991,7 @@
               '<span class="adminObjSaveStatus" id="' + statusId + '"></span>' +
             '</div>' +
           '</div>' +
-        '</div>'
+        '</details>'
       );
     }).join('');
 
@@ -1971,9 +2017,13 @@
           .then(function (res) {
             btn.disabled = false;
             if (res.status === 'ok') {
+              // Список не перестраиваем целиком — чтобы раскрытая карточка
+              // не "захлопнулась" сразу после сохранения, просто обновляем
+              // карту объектов (на случай поиска) и показываем подтверждение.
+              lastAdminObjectsResponse = res;
               statusEl.textContent = 'Сохранено ✓';
               statusEl.style.color = 'var(--green)';
-              renderAdminObjectsList(res);
+              setTimeout(function () { statusEl.textContent = ''; }, 2500);
             } else {
               statusEl.textContent = res.message || 'Не удалось сохранить';
               statusEl.style.color = 'var(--red)';
@@ -2065,34 +2115,6 @@
               });
           });
         });
-      })
-      .catch(function (err) {
-        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
-      });
-  }
-
-  // Список администраторов теперь только для просмотра — назначаются они
-  // галочкой в столбце "Админ" листа "Сотрудники" прямо в таблице, а не
-  // через приложение (кнопок добавить/убрать здесь больше нет).
-  function loadAdminList() {
-    var listEl = document.getElementById('adminAdminsList');
-    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
-    apiPost({ action: 'adminGetAdminList', phone: currentUser && currentUser.phone })
-      .then(function (res) {
-        if (res.status !== 'ok') {
-          listEl.innerHTML = '<div class="statsEmpty">' + (res.message || 'Ошибка загрузки') + '</div>';
-          return;
-        }
-        listEl.innerHTML = res.admins.map(function (email) {
-          var isBootstrap = email.toLowerCase() === (res.bootstrapAdmin || '').toLowerCase();
-          return (
-            '<div class="adminAdminRow">' +
-              '<div class="adminAdminEmail">' + escapeHtml(email) +
-                (isBootstrap ? '<span class="adminBadgeYou">(основной)</span>' : '') +
-              '</div>' +
-            '</div>'
-          );
-        }).join('');
       })
       .catch(function (err) {
         listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
@@ -2400,6 +2422,44 @@
   document.getElementById('adminObjectsBackLink').addEventListener('click', function () {
     showAdminScreen();
   });
+
+  // Список объектов по умолчанию скрыт (каждый объект и так разворачивается
+  // в большую форму редактирования) — эта ссылка показывает/прячет его
+  // целиком, свёрнутым (<details> без open), в обратном порядке.
+  var objectsListVisible = false;
+  document.getElementById('objectsShowAllLink').addEventListener('click', function () {
+    var listEl = document.getElementById('adminObjectsList');
+    var link = document.getElementById('objectsShowAllLink');
+    objectsListVisible = !objectsListVisible;
+    listEl.style.display = objectsListVisible ? 'block' : 'none';
+    link.textContent = objectsListVisible ? 'Скрыть объекты ▴' : 'Все объекты ▾';
+  });
+
+  // Быстрый поиск: выбрали/ввели точное название объекта из подсказки —
+  // показываем список (если был скрыт), разворачиваем именно эту карточку
+  // (остальные сворачиваем) и прокручиваем к ней.
+  function findAndOpenObjectCard_(name) {
+    var trimmed = String(name || '').trim();
+    if (!trimmed || !lastAdminObjectsResponse || !lastAdminObjectsResponse.objects) return;
+    var exists = lastAdminObjectsResponse.objects.some(function (o) { return o.name === trimmed; });
+    if (!exists) return;
+
+    var listEl = document.getElementById('adminObjectsList');
+    objectsListVisible = true;
+    listEl.style.display = 'block';
+    document.getElementById('objectsShowAllLink').textContent = 'Скрыть объекты ▴';
+
+    listEl.querySelectorAll('.adminObjDetails').forEach(function (det) {
+      det.open = det.getAttribute('data-objname') === trimmed;
+      if (det.open) {
+        det.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  }
+  document.getElementById('objectSearchInput').addEventListener('change', function () {
+    findAndOpenObjectCard_(this.value);
+  });
+
   var objectAddStatusEl = document.getElementById('objectAddStatus');
   function setObjectAddStatus(text, kind) {
     stopWaitIndicator(objectAddStatusEl);
