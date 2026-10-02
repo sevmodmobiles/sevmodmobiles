@@ -1,3 +1,7 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Учёт рабочего времени</title>
 
@@ -33,3 +37,2233 @@
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121214;
+      --card: #1e1e21;
+      --text: #f2f2f3;
+      --muted: #9a9aa0;
+      --border: #303034;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121214;
+    --card: #1e1e21;
+    --text: #f2f2f3;
+    --muted: #9a9aa0;
+    --border: #303034;
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); height: 100%; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    padding: 20px 16px 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    width: 100%;
+    max-width: 440px;
+    margin-bottom: 14px;
+  }
+  #photoPreview {
+    width: 100%;
+    height: 220px;
+    object-fit: cover;
+    border-radius: 10px;
+    background: #000;
+    margin-bottom: 10px;
+    display: none;
+  }
+  /* Камера теперь открывается во весь экран (как обычная камера телефона),
+     а не встроенным блоком внутри формы — так кнопка "Сделать фото" всегда
+     видна и не уезжает за пределы экрана на длинной форме регистрации. */
+  #cameraOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 3000;
+  }
+  #cameraOverlay.open { display: block; }
+  #cameraOverlay #camPreview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    display: block;
+    background: #000;
+  }
+  #camCloseBtn {
+    position: absolute;
+    top: max(16px, env(safe-area-inset-top));
+    left: 16px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 20px;
+    line-height: 1;
+    border: none;
+    margin: 0;
+  }
+  .camHint {
+    position: absolute;
+    top: max(16px, env(safe-area-inset-top));
+    left: 60px;
+    right: 16px;
+    text-align: center;
+    color: #fff;
+    font-size: 14px;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  }
+  /* Силуэт-подсказка: контур головы, шеи и плеч (как в паспортных фото
+     или Zoom/Skype), по которому нужно "поймать" себя в кадре. Всё, что
+     снаружи силуэта, слегка затемняется — это и есть подсказка, куда
+     наводить камеру, без какой-либо реальной обработки изображения. */
+  .camFaceGuideImg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+  }
+  #captureBtn {
+    position: absolute;
+    bottom: max(28px, env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    background: #fff;
+    border: 4px solid rgba(255,255,255,0.45);
+    padding: 0;
+    margin: 0;
+  }
+  #captureBtn:active { background: #ddd; }
+  .consentRow {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 4px 0 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .consentRow input[type="checkbox"] {
+    width: auto;
+    margin: 3px 0 0;
+    flex-shrink: 0;
+  }
+  .consentRow label { margin: 0; }
+  .consentRow a { color: var(--blue); text-decoration: underline; cursor: pointer; }
+  .googleGateText {
+    font-size: 14px;
+    color: var(--muted);
+    margin: 0 0 14px;
+    line-height: 1.4;
+  }
+  #googleSignInButton {
+    display: flex;
+    justify-content: center;
+  }
+  .googleConfirmed {
+    text-align: center;
+    font-size: 13px;
+    color: var(--green);
+    font-weight: 600;
+    background: rgba(52,168,83,0.12);
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 14px;
+  }
+  .modalOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .modalOverlay.open { display: flex; }
+  .modalBox {
+    background: var(--card);
+    color: var(--text);
+    border-radius: 14px;
+    padding: 20px;
+    max-width: 480px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .modalText { font-size: 13px; line-height: 1.5; color: var(--text); }
+  .modalText p { margin: 0 0 10px; }
+  .logo-card { text-align: center; }
+  .logo { max-width: 220px; width: 60%; height: auto; margin-bottom: 12px; }
+  /* Тёмная версия логотипа (с белой обводкой) показывается вместо обычной
+     только в тёмной теме — иначе синий логотип сливался бы с тёмным фоном. */
+  .logo-dark { display: none; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .logo-light { display: none; }
+    :root:not([data-theme="light"]) .logo-dark { display: inline-block; }
+  }
+  :root[data-theme="dark"] .logo-light { display: none; }
+  :root[data-theme="dark"] .logo-dark { display: inline-block; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input, select, textarea {
+    width: 100%;
+    padding: 13px;
+    font-size: 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    margin-bottom: 14px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; }
+  button {
+    width: 100%;
+    padding: 15px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    margin-top: 6px;
+    cursor: pointer;
+    color: #fff;
+    /* Зелёный — цвет кнопки по умолчанию. Конкретные кнопки (вход/регистрация —
+       синий, "Уход"/отмена — красный, неактивные/второстепенные — var(--muted)
+       и т.п.) переопределяют это своим собственным правилом (по #id, классу
+       или инлайн-стилем) — именно так и нужно задавать другой цвет для новой
+       кнопки, если он должен отличаться от зелёного по умолчанию. */
+    background: var(--green);
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #regBtn { background: var(--blue); }
+  #startCamBtn { background: var(--green); }
+  #taskCreateBtn { background: var(--green); }
+  #actionBtn { display: none; }
+  #actionBtn.action-in { background: var(--green); }
+  #actionBtn.action-out { background: var(--red); }
+  #myStatsBtn { background: #555; margin-top: 24px; }
+  #reader { width: 100%; margin-top: 14px; border-radius: 10px; overflow: hidden; }
+  #objectLabel {
+    text-align: center;
+    font-weight: 600;
+    color: var(--blue);
+    display: none;
+    margin-top: 12px;
+    padding: 10px;
+    background: rgba(66,133,244,0.12);
+    border-radius: 8px;
+  }
+  #status, #regStatus, #loginStatus {
+    text-align: center;
+    font-size: 14px;
+    color: var(--muted);
+    min-height: 20px;
+    margin-top: 14px;
+  }
+  .success { color: var(--green) !important; font-weight: 600; }
+  .error { color: var(--red) !important; font-weight: 600; }
+  .failAlert {
+    text-align: left;
+    background: rgba(234,67,53,0.1);
+    border: 2px solid var(--red);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .failAlertTitle { font-weight: 700; margin-bottom: 6px; }
+  .failAlert button {
+    background: var(--red);
+    margin-top: 10px;
+  }
+  .geoAlertBox {
+    text-align: center;
+    background: rgba(234,67,53,0.14);
+    border: 3px solid var(--red);
+    border-radius: 12px;
+    padding: 18px 14px;
+    animation: geoAlertShake 0.5s;
+    box-shadow: 0 0 0 4px rgba(234,67,53,0.12);
+  }
+  .geoAlertIcon { font-size: 40px; line-height: 1; margin-bottom: 6px; }
+  .geoAlertTitle {
+    font-weight: 800;
+    font-size: 17px;
+    letter-spacing: 0.5px;
+    color: var(--red);
+    margin-bottom: 8px;
+  }
+  .geoAlertText { font-weight: 600; margin-bottom: 8px; }
+  .geoAlertNote { font-size: 12px; opacity: 0.8; margin-bottom: 10px; }
+  .geoAlertBox button {
+    background: var(--red);
+    font-weight: 700;
+  }
+  @keyframes geoAlertShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+  .waiting {
+    color: var(--blue) !important;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .shiftBanner {
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    display: none;
+  }
+  .shiftBanner.shiftBanner-open {
+    display: block;
+    color: var(--green);
+    background: rgba(52,168,83,0.12);
+  }
+  .shiftBanner.shiftBanner-closed {
+    display: block;
+    color: var(--muted);
+    background: rgba(107,114,128,0.12);
+  }
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(66,133,244,0.25);
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .whoami {
+    font-size: 14px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .whoami b { color: var(--text); }
+  .switchUser {
+    text-align: center;
+    margin-top: 10px;
+    font-size: 13px;
+  }
+  .switchUser a { color: var(--muted); text-decoration: underline; cursor: pointer; }
+  #screenScan { display: none; }
+  #screenStats { display: none; }
+  #screenAdmin { display: none; }
+  #screenTasks { display: none; }
+  #screenReg { display: none; }
+
+  .statsGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .statCardWide { grid-column: 1 / -1; }
+  .statCard.lateGood .statValue { color: var(--green); }
+  .statCard.lateBad .statValue { color: var(--red); }
+  .statCard {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 14px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .statLabel {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .statValue {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .statsEmpty {
+    color: var(--muted);
+    font-size: 14px;
+    text-align: center;
+    padding: 12px 0;
+  }
+  .dayRow {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .dayRow:last-child { border-bottom: none; }
+  .dayRowTop { display: flex; justify-content: space-between; align-items: baseline; }
+  .dayRow .dayDate { font-weight: 600; }
+  .dayRowBottom { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 8px; }
+  .dayRow .dayTimes { font-size: 12px; color: var(--muted); }
+  .dayRow .arrivalTime { font-weight: 600; }
+  .dayRow .arrivalTime.late { color: var(--red); }
+  .dayRow .arrivalTime.onTime { color: var(--green); }
+  .lateBadge {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .lateBadge.late { color: var(--red); background: rgba(234, 67, 53, 0.12); }
+  .lateBadge.onTime { color: var(--green); background: rgba(52, 168, 83, 0.12); }
+  .dayRow .dayRight { text-align: right; }
+  .dayRow .dayPay { font-weight: 600; }
+  .dayRow .dayHoursInline { font-weight: 600; color: var(--text); }
+
+  /* ===== Свой выпадающий список подсказок (замена нативному <datalist>) =====
+     Нативный <datalist> на разных устройствах/браузерах показывается
+     по-разному (где-то обычным списком, где-то горизонтальной карусельной
+     лентой над клавиатурой) и это никак не стилизовать — поэтому везде,
+     где раньше был list="...", теперь свой список (initAutocomplete),
+     который выглядит одинаково на всех устройствах. */
+  .autocompleteWrap { position: relative; }
+  .autocompleteList {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    margin-top: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  }
+  .autocompleteItem {
+    padding: 10px 14px;
+    font-size: 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .autocompleteItem:last-child { border-bottom: none; }
+  .autocompleteItem:hover, .autocompleteItem:active { background: var(--bg); }
+
+  /* ===== Панель администратора ===== */
+  .shiftTimesRow { display: flex; gap: 10px; margin-top: 10px; }
+  .shiftTimesRow > div { flex: 1; min-width: 0; }
+  .shiftTimesRow label { font-size: 12px; }
+  .shiftTimesRow input { margin-top: 2px; }
+  .smallLinkBtn {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--blue);
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .adminObjDetails { border-bottom: 1px solid var(--border); }
+  .adminObjDetails:last-child { border-bottom: none; }
+  .adminObjSummary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 0;
+    cursor: pointer;
+    list-style: none;
+  }
+  .adminObjSummary::-webkit-details-marker { display: none; }
+  .adminObjSummaryText { min-width: 0; overflow: hidden; }
+  .adminObjName { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adminObjAddress { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adminObjGeoStatus { font-size: 12px; margin-top: 2px; }
+  .adminObjChevron {
+    flex-shrink: 0;
+    color: var(--muted);
+    transition: transform 0.2s;
+  }
+  .adminObjDetails[open] .adminObjChevron { transform: rotate(180deg); }
+  .adminObjForm { padding-bottom: 14px; }
+  .adminObjForm label { font-size: 12px; }
+  .adminObjSaveRow { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .adminObjSaveRow button { margin: 0; padding: 8px 12px; width: auto; font-size: 13px; }
+  .adminObjSaveStatus { font-size: 12px; }
+  .adminEmpRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .adminEmpRow:last-child { border-bottom: none; }
+  .adminEmpInfo { min-width: 0; }
+  .adminEmpName { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adminEmpPhone { font-size: 12px; color: var(--muted); }
+  .adminEmpRateForm { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .adminEmpRateForm input {
+    width: 84px;
+    margin: 0;
+    padding: 8px 10px;
+    text-align: right;
+  }
+  .adminEmpRateForm button {
+    margin: 0;
+    padding: 8px 12px;
+    width: auto;
+    font-size: 13px;
+  }
+  .adminEmpSaved { color: var(--green); font-size: 12px; }
+  .adminAdminRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .adminAdminRow:last-child { border-bottom: none; }
+  .adminAdminEmail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adminAdminRemoveBtn {
+    margin: 0;
+    padding: 6px 10px;
+    width: auto;
+    font-size: 12px;
+    background: var(--red);
+    flex-shrink: 0;
+  }
+  .adminBadgeYou {
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: 6px;
+  }
+
+  /* ===== Задачи (разовые работы) ===== */
+  .taskCard {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .taskCard:last-child { border-bottom: none; }
+  .taskText { white-space: pre-wrap; margin-bottom: 8px; }
+  .taskPhoto {
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    display: block;
+  }
+  .taskDate { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .taskDoneBtn {
+    margin: 0;
+    width: auto;
+    padding: 8px 14px;
+    font-size: 13px;
+    background: var(--green);
+  }
+  .taskStatusDone { color: var(--green); font-size: 12px; font-weight: 600; }
+  .adminTaskCard {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .adminTaskCard:last-child { border-bottom: none; }
+  .adminTaskCard .adminTaskName { font-weight: 600; }
+  .adminTaskCard .adminTaskText { color: var(--text); margin-top: 2px; }
+  .adminTaskCard .adminTaskMeta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .adminTaskCard.adminTaskCardDone {
+    background: rgba(52, 168, 83, 0.08);
+    border-radius: 10px;
+    padding: 10px;
+    margin: 4px 0;
+    border-bottom: none;
+    cursor: pointer;
+  }
+  .adminTaskCard.adminTaskCardClickable { cursor: pointer; }
+  .adminTaskStatusTag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .adminTaskStatusTag.stNew { color: var(--muted); background: rgba(107, 114, 128, 0.12); }
+  .adminTaskStatusTag.stProgress { color: var(--blue); background: rgba(66, 133, 244, 0.12); }
+  .adminTaskStatusTag.stDone { color: var(--green); background: rgba(52, 168, 83, 0.14); }
+  .adminTaskDetail {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    font-size: 13px;
+  }
+
+  /* Превью выбранных, но ещё не отправленных фото (постановка задачи,
+     фото "до"/"после" у сотрудника) — просто ряд квадратных миниатюр. */
+  .photoPreviewRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 14px;
+  }
+  .photoPreviewRow img {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  /* Уже загруженные фото (сетка побольше, для просмотра результата) */
+  .photoGrid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .photoGrid a { display: block; }
+  .photoGrid img {
+    width: 110px;
+    height: 110px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    display: block;
+  }
+
+  .taskStatusBadge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 11px;
+    border-radius: 20px;
+  }
+  .taskStatusBadge.stNew { color: var(--muted); background: rgba(107, 114, 128, 0.12); }
+  .taskStatusBadge.stProgress { color: var(--blue); background: rgba(66, 133, 244, 0.12); }
+  .taskStatusBadge.stDone { color: var(--green); background: rgba(52, 168, 83, 0.14); }
+
+  /* Красная точка/счётчик на кнопке "Мои задачи" — видна, только когда
+     есть хотя бы одна невыполненная задача. */
+  .taskBadge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 10px;
+    background: var(--red);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 20px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--card-bg, #fff);
+  }
+
+  /* ===== Тестовый режим ===== */
+  /* Скрыта по умолчанию — видна только тому, кто знает секретную ссылку
+     (см. проверку localStorage в скрипте ниже). Обычные сотрудники её
+     никогда не увидят. */
+  #debugToggle {
+    display: none;
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #333;
+    color: #fff;
+    font-size: 20px;
+    border: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  #debugToggle.debugVisible { display: flex; }
+  #debugPanel {
+    display: none;
+    position: fixed;
+    right: 16px;
+    bottom: 72px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    padding: 12px;
+    z-index: 1000;
+    width: 240px;
+  }
+  #debugPanel.open { display: block; }
+  #debugPanel .debugTitle {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    text-align: center;
+  }
+  #debugPanel button {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 10px;
+    font-size: 13px;
+    background: #555;
+  }
+  #debugPanel button:last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+
+  <!-- Экран входа -->
+  <div id="screenLogin">
+    <div class="card logo-card">
+      <img class="logo logo-light" src="logo-sevmod.png" alt="SEVMOD"><img class="logo logo-dark" src="logo-sevmod-dark.png" alt="SEVMOD">
+      <h1>Учёт рабочего времени</h1>
+      <div class="subtitle">Войдите по номеру телефона</div>
+    </div>
+    <div class="card">
+      <h2>Вход</h2>
+      <label for="loginPhone">Номер телефона</label>
+      <input id="loginPhone" type="tel" inputmode="numeric" placeholder="+7 (___) ___-__-__" autocomplete="tel" maxlength="18">
+      <button id="loginBtn">Войти</button>
+      <div id="loginStatus"></div>
+      <div class="switchUser" style="margin-top:14px;">
+        <a id="goToRegLink">Ещё не зарегистрированы? Зарегистрироваться</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Экран регистрации -->
+  <div id="screenReg">
+    <div class="card logo-card">
+      <img class="logo logo-light" src="logo-sevmod.png" alt="SEVMOD"><img class="logo logo-dark" src="logo-sevmod-dark.png" alt="SEVMOD">
+      <h1>Учёт рабочего времени</h1>
+      <div class="subtitle">Первый вход — представьтесь, пожалуйста</div>
+    </div>
+    <div class="card">
+      <h2>Регистрация</h2>
+
+      <div id="googleSignInGate">
+        <p class="googleGateText">
+          Чтобы подтвердить, что регистрируется реальный человек, сначала
+          войдите через свой Google-аккаунт.
+        </p>
+        <div id="googleSignInButton"></div>
+        <div id="googleSignInError" class="error" style="margin-top:10px;"></div>
+      </div>
+
+      <div id="regFormFields" style="display:none;">
+        <div id="googleConfirmedEmail" class="googleConfirmed"></div>
+
+        <label for="regLastName">Фамилия</label>
+        <input id="regLastName" type="text" placeholder="Иванов" autocomplete="family-name">
+        <label for="regFirstName">Имя</label>
+        <input id="regFirstName" type="text" placeholder="Иван" autocomplete="given-name">
+        <label for="regMiddleName">Отчество</label>
+        <input id="regMiddleName" type="text" placeholder="Иванович (необязательно)" autocomplete="additional-name">
+        <label for="regPhone">Номер телефона</label>
+        <input id="regPhone" type="tel" inputmode="numeric" placeholder="+7 (___) ___-__-__" autocomplete="tel" maxlength="18">
+
+        <label>Фото лица</label>
+        <canvas id="camCanvas" style="display:none;"></canvas>
+        <img id="photoPreview" alt="Ваше фото">
+        <button id="startCamBtn" type="button">Сделать фото</button>
+        <button id="retakeBtn" type="button" style="display:none; background:var(--muted);">Переснять</button>
+
+        <div class="consentRow">
+          <input type="checkbox" id="consentCheckbox">
+          <label for="consentCheckbox">
+            Я даю согласие на обработку моих персональных данных на условиях,
+            изложенных в <a id="policyLink">Политике обработки персональных данных</a>
+          </label>
+        </div>
+
+        <button id="regBtn">Зарегистрироваться</button>
+        <div id="regStatus"></div>
+      </div>
+
+      <div class="switchUser" style="margin-top:14px;">
+        <a id="goToLoginLink">Уже зарегистрированы? Войти</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Экран сканирования -->
+  <div id="screenScan">
+    <div class="card logo-card">
+      <img class="logo logo-light" src="logo-sevmod.png" alt="SEVMOD"><img class="logo logo-dark" src="logo-sevmod-dark.png" alt="SEVMOD">
+      <h1>Учёт рабочего времени</h1>
+      <div class="whoami">Вы вошли как: <b id="whoamiName"></b></div>
+      <div class="switchUser">
+        <a id="switchUserLink">Это не я / сменить пользователя</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Отметка на объекте</h2>
+      <div id="shiftStatusBanner" class="shiftBanner"></div>
+      <button id="actionBtn">Отметить приход</button>
+      <div id="reader"></div>
+      <div id="objectLabel"></div>
+      <div id="status"></div>
+      <button id="myTasksBtn" type="button" style="background:var(--muted); position:relative;">Мои задачи<span id="myTasksBadge" class="taskBadge" style="display:none;"></span></button>
+      <!-- Обе кнопки ниже видны только тем, у кого стоит галочка "Админ" в
+           листе "Сотрудники" — проверяется автоматически при входе на этот
+           экран (см. refreshAdminStatus в скрипте), без отдельного входа
+           через Google. Обычный сотрудник их не видит вообще. -->
+      <button id="taskManageBtn" type="button" style="display:none; background:var(--green);">Поставить задачу</button>
+      <button id="myStatsBtn" type="button">Мой кабинет</button>
+      <button id="adminPanelBtn" type="button" style="display:none; background:var(--blue);">Админ панель</button>
+    </div>
+  </div>
+
+  <!-- Экран "Мои задачи" — разовые поручения от администратора, не
+       привязанные к обычным сменам. Виден всем, но если у сотрудника
+       нет ни одной актуальной задачи, экран просто говорит об этом. -->
+  <div id="screenTasks">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Мои задачи</h1>
+      <div class="whoami">Вы вошли как: <b id="tasksWhoamiName"></b></div>
+      <div class="switchUser"><a id="tasksBackLink">← Главный экран</a></div>
+    </div>
+    <div class="card">
+      <div id="tasksList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Экран деталей одной задачи — текст, объект, фото задачи, и дальше
+       пошагово: "Приступить к выполнению" (фото ДО) -> "Подтвердить
+       выполнение" (фото ПОСЛЕ + комментарий). Какой именно шаг сейчас
+       виден, решает статус задачи (см. renderTaskDetail в скрипте). -->
+  <div id="screenTaskDetail">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Задача</h1>
+      <div class="switchUser"><a id="taskDetailBackLink">← Мои задачи</a></div>
+    </div>
+    <div class="card">
+      <div id="taskDetailLoading" class="statsEmpty"><span class="spinner"></span> Загрузка…</div>
+      <div id="taskDetailBody" style="display:none;">
+        <div id="taskDetailStatusBadge" class="taskStatusBadge"></div>
+        <h2 id="taskDetailObjectTitle" style="margin-top:8px;"></h2>
+        <div id="taskDetailText" class="taskText"></div>
+        <div id="taskDetailTaskPhotos" class="photoGrid"></div>
+        <div id="taskDetailMeta" class="taskDate"></div>
+
+        <div id="taskDetailBeforeSection" style="display:none; margin-top:16px;">
+          <h3>Фото до начала работ</h3>
+          <div id="taskDetailBeforePhotos" class="photoGrid"></div>
+          <div id="taskDetailStartedMeta" class="taskDate"></div>
+        </div>
+
+        <div id="taskDetailAfterSection" style="display:none; margin-top:16px;">
+          <h3>Фото после выполнения</h3>
+          <div id="taskDetailAfterPhotos" class="photoGrid"></div>
+          <div id="taskDetailCommentBlock" style="display:none; margin-top:8px;">
+            <div class="taskDate">Комментарий сотрудника:</div>
+            <div id="taskDetailComment" class="taskText"></div>
+          </div>
+          <div id="taskDetailCompletedMeta" class="taskDate"></div>
+        </div>
+
+        <!-- Шаг 1: приступить к выполнению -->
+        <div id="taskStartAction" style="display:none; margin-top:16px;">
+          <button id="taskStartBtn" type="button">Приступить к выполнению</button>
+        </div>
+        <div id="taskStartForm" style="display:none; margin-top:16px;">
+          <label>Сфотографируйте объект ДО начала работ</label>
+          <input id="taskBeforePhotoInput" type="file" accept="image/*" capture="environment" multiple>
+          <div id="taskBeforePhotoPreview" class="photoPreviewRow"></div>
+          <button id="taskStartSubmitBtn" type="button">Подтвердить начало</button>
+          <div id="taskStartStatus" style="margin-top:10px;"></div>
+        </div>
+
+        <!-- Шаг 2: подтвердить выполнение -->
+        <div id="taskCompleteAction" style="display:none; margin-top:16px;">
+          <button id="taskCompleteBtn" type="button" class="taskDoneBtn">Подтвердить выполнение</button>
+        </div>
+        <div id="taskCompleteForm" style="display:none; margin-top:16px;">
+          <label>Сфотографируйте результат выполненных работ</label>
+          <input id="taskAfterPhotoInput" type="file" accept="image/*" capture="environment" multiple>
+          <div id="taskAfterPhotoPreview" class="photoPreviewRow"></div>
+          <label for="taskCompleteCommentInput">Комментарий (если были доп. работы)</label>
+          <textarea id="taskCompleteCommentInput" rows="2" placeholder="Необязательно"></textarea>
+          <button id="taskCompleteSubmitBtn" type="button" class="taskDoneBtn">Отправить</button>
+          <div id="taskCompleteStatus" style="margin-top:10px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Экран "Поставить задачу" — раньше был частью панели администратора,
+       теперь вынесен на главный экран (кнопка видна только админу, см.
+       taskManageBtn), чтобы не приходилось заходить в полную админку ради
+       одной задачи. Доступ проверяется на backend по номеру телефона (см.
+       adminAuth_ в Code.gs) — отдельного входа через Google здесь больше
+       нет, открывается сразу. -->
+  <div id="screenTaskManage">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Поставить задачу</h1>
+      <div class="switchUser"><a id="taskManageBackLink">← Главный экран</a></div>
+    </div>
+
+    <div id="taskManageContent">
+      <div class="card">
+        <label for="taskAssigneeInput">Исполнитель</label>
+        <input id="taskAssigneeInput" type="text" placeholder="Начните вводить имя…" autocomplete="off">
+
+        <label for="taskObjectInput">Объект</label>
+        <input id="taskObjectInput" type="text" placeholder="Начните вводить название объекта…" autocomplete="off">
+
+        <label for="taskTextInput">Текст задачи</label>
+        <textarea id="taskTextInput" rows="3" placeholder="Опишите, что нужно сделать"></textarea>
+
+        <label>Фото задачи (необязательно, можно несколько)</label>
+        <input id="taskPhotoInput" type="file" accept="image/*" multiple>
+        <div id="taskPhotoPreview" class="photoPreviewRow"></div>
+
+        <button id="taskCreateBtn" type="button">Поставить задачу</button>
+        <div id="taskCreateStatus" style="margin-top:10px;"></div>
+
+        <h2 style="margin-top:20px;">Активные задачи</h2>
+        <div id="adminTasksList"><div class="statsEmpty">Загрузка…</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Экран личного кабинета -->
+  <div id="screenStats">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Мой кабинет</h1>
+      <div class="whoami">Вы вошли как: <b id="statsWhoamiName"></b></div>
+      <div class="switchUser"><a id="backToScanLink">← Главный экран</a></div>
+      <div class="switchUser" style="margin-top:6px;"><a id="goToAdminLink">Панель администратора</a></div>
+    </div>
+
+    <div class="statsGrid">
+      <div class="statCard">
+        <div class="statLabel">Часы за месяц</div>
+        <div class="statValue" id="statMonthHours">—</div>
+      </div>
+      <div class="statCard">
+        <div class="statLabel">К оплате за месяц</div>
+        <div class="statValue" id="statMonthPay">—</div>
+      </div>
+      <div class="statCard">
+        <div class="statLabel">Часы всего</div>
+        <div class="statValue" id="statTotalHours">—</div>
+      </div>
+      <div class="statCard">
+        <div class="statLabel">К оплате всего</div>
+        <div class="statValue" id="statTotalPay">—</div>
+      </div>
+      <div class="statCard statCardWide" id="statMonthLateCard">
+        <div class="statLabel">Опоздания за месяц</div>
+        <div class="statValue" id="statMonthLate">—</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>По дням</h2>
+      <div id="statsDaysList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Экран администратора: ставки сотрудников + управление списком
+       администраторов. Доступ проверяется на backend по номеру телефона,
+       с которым человек уже вошёл в приложение (см. adminAuth_ в Code.gs,
+       смотрит на галочку "Админ" в "Сотрудники") — сама по себе ссылка на
+       этот экран ничего не даёт без реальных прав, никакого отдельного
+       входа через Google здесь больше не требуется. -->
+  <div id="screenAdmin">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Панель администратора</h1>
+      <div class="switchUser"><a id="adminBackLink">← Главный экран</a></div>
+    </div>
+
+    <div id="adminContent">
+      <div class="card">
+        <button id="goToAdminRatesBtn" type="button">Ставки сотрудников</button>
+      </div>
+
+      <div class="card">
+        <button id="goToAdminObjectsBtn" type="button">Объекты</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Экран "Ставки сотрудников" — вынесен из общего списка панели
+       администратора в отдельный подэкран, чтобы сама панель администратора
+       не была перегружена. Открывается кнопкой "Ставки сотрудников" из
+       панели администратора. -->
+  <div id="screenAdminRates">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Ставки сотрудников</h1>
+      <div class="switchUser"><a id="adminRatesBackLink">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <div id="adminEmployeesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Экран "Объекты" — список объектов с адресом/статусом геокодирования,
+       расписанием смен и ответственным прорабом + форма добавления нового.
+       Сам адрес после добавления по-прежнему меняется повторным вводом
+       здесь же или прямо в таблице (переезд геокодирует заново). -->
+  <div id="screenAdminObjects">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Объекты</h1>
+      <div class="switchUser"><a id="adminObjectsBackLink">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <h2>Найти объект</h2>
+      <input id="objectSearchInput" type="text" placeholder="Начните вводить название…" autocomplete="off">
+      <a id="objectsShowAllLink" class="smallLinkBtn">Все объекты ▾</a>
+      <div id="adminObjectsList" style="display:none;"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+      <button id="showAddObjectFormBtn" type="button" style="margin-top:14px;">+ Добавить объект</button>
+    </div>
+    <div class="card" id="addObjectCard" style="display:none;">
+      <h2>Добавить объект</h2>
+      <label for="objectNameInput">Название объекта</label>
+      <input id="objectNameInput" type="text" placeholder="Например: ЖК Самолёт, корпус 2">
+      <label for="objectAddressInput" style="margin-top:10px;">Адрес (с указанием города)</label>
+      <input id="objectAddressInput" type="text" placeholder="Например: Самара, ул. Ленина, 10">
+
+      <div class="shiftTimesRow">
+        <div>
+          <label for="objectShift1StartInput">Смена 1, начало</label>
+          <input id="objectShift1StartInput" type="time">
+        </div>
+        <div>
+          <label for="objectShift1EndInput">Смена 1, конец</label>
+          <input id="objectShift1EndInput" type="time">
+        </div>
+      </div>
+      <div class="shiftTimesRow">
+        <div>
+          <label for="objectShift2StartInput">Смена 2, начало</label>
+          <input id="objectShift2StartInput" type="time">
+        </div>
+        <div>
+          <label for="objectShift2EndInput">Смена 2, конец</label>
+          <input id="objectShift2EndInput" type="time">
+        </div>
+      </div>
+
+      <label for="objectForemanInput" style="margin-top:10px;">Ответственный прораб</label>
+      <input id="objectForemanInput" type="text" placeholder="Начните вводить имя…" autocomplete="off">
+
+      <button id="objectAddBtn" type="button" style="margin-top:10px;">Добавить объект</button>
+      <div id="objectAddStatus"></div>
+    </div>
+  </div>
+
+  <!-- ===== ТЕСТОВЫЙ РЕЖИМ: кнопка + панель для просмотра экранов ===== -->
+  <button id="debugToggle" type="button">🧪</button>
+  <div id="debugPanel">
+    <div class="debugTitle">Тестовый режим — переключить экран</div>
+    <button id="dbgLogin" type="button">Вход</button>
+    <button id="dbgReg" type="button">Регистрация</button>
+    <button id="dbgScanStart" type="button">Сканирование (стартовый экран)</button>
+    <button id="dbgScanFound" type="button">Сканирование (объект найден, смена не начата)</button>
+    <button id="dbgScanFoundActive" type="button">Сканирование (объект найден, смена уже идёт)</button>
+    <button id="dbgStats" type="button">Мой кабинет (с примером данных)</button>
+    <button id="dbgPolicy" type="button">Показать политику (модалка)</button>
+  </div>
+
+  <div id="cameraOverlay">
+    <video id="camPreview" autoplay playsinline muted></video>
+    <img class="camFaceGuideImg" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAAUUCAYAAAADW2xFAAAe5UlEQVR4nO3dXXLbyBmGUXRKW+AitQ1vwov0IpALj2ZkmRQB8AX675wq36gcG0ks6GF/jUZZluXHAgBAzP9qXwAAwGgEFgBAmMACAAgTWAAAYQILACBMYAEAhAksAIAwgQUAECawAADCBBYAQJjAAgAIE1gAAGECCwAgTGABAIQJLACAMIEFABAmsAAAwgQWAECYwAIACBNYAABhAgsAIExgAQCECSwAgDCBBQAQJrAAAMIEFgBAmMACAAgTWAAAYQILACBMYAEAhAksAIAwgQUAECawAADCBBYAQJjAAgAIE1gAAGECCwAgTGABAIQJLACAMIEFABAmsAAAwgQWAECYwAIACBNYAABhAgsAIExgAQCECSwAgDCBBQAQJrAAAMIEFgBAmMACAAgTWAAAYQILACBMYAEAhAksAIAwgQUAECawAADCBBYAQJjAAgAIE1gAAGECCwAgTGABAIQJLACAMIEFABAmsAAAwgQWAECYwAIACBNYAABhAgsAIExgAQCECSwAgDCBBQAQJrAAAMIEFgBAmMACAAgTWAAAYQILACBMYAEAhAksAIAwgQUAECawAADCBBYAQJjAAgAIE1gAAGECCwAgTGABAIQJLACAMIEFABAmsAAAwgQWAECYwAIACBNYAABhAgsAIExgAQCECSwAgDCBBQAQJrAAAMIEFgBAmMACAAgTWAAAYQILACBMYAEAhAksAIAwgQUAECawAADCBBYAQJjAAgAIE1gAAGECCwAgTGABAIQJLACAMIEFABAmsAAAwgQWAECYwAIACBNYAABhAgsAIExgAQCECSwAgDCBBQAQJrAAAMIEFgBAmMACAAgTWAAAYQILACBMYAEAhAksAIAwgQUAECawAADCBBYAQJjAAgAIE1gAAGECCwAgTGABAIQJLACAMIEFABAmsAAAwgQWAECYwAIACBNYAABhAgsAIExgAQCECSwAgDCBBQAQJrAAAMIEFgBAmMACAAgTWAAAYQILACBMYAEAhAksAIAwgQUAECawAADCBBYAQJjAAgAIE1gAAGECCwAgTGABAIQJLACAMIEFABAmsAAAwgQWAECYwAIACBNYAABhAgsAIExgAQCECSwAgDCBBQAQJrAAAMIEFgBAmMACAAgTWAAAYQILACBM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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAe+z9LxO+NoVrrUQAAAABJRU5ErkJggg==" alt="">
+    <button id="camCloseBtn" type="button" aria-label="Отмена">✕</button>
+    <div class="camHint">Совместите силуэт с лицом и плечами и нажмите кнопку внизу</div>
+    <button id="captureBtn" type="button" aria-label="Сделать фото"></button>
+  </div>
+
+  <div id="policyModal" class="modalOverlay">
+    <div class="modalBox">
+      <h2 style="margin-top:0;">Политика обработки персональных данных</h2>
+      <div class="modalText">
+        <p><b>[Название организации]</b> (далее — Оператор), ИНН [_______], адрес: [_______],
+        в соответствии с требованиями Федерального закона от 27.07.2006 № 152-ФЗ
+        «О персональных данных» настоящим информирует о порядке обработки персональных данных
+        сотрудников, использующих настоящее приложение учёта рабочего времени.</p>
+
+        <p><b>1. Перечень обрабатываемых персональных данных:</b><br>
+        фамилия, имя, отчество; номер контактного телефона; фотографическое изображение лица;
+        дата, время и место (объект) отметок о начале и окончании рабочей смены.</p>
+
+        <p><b>2. Цели обработки:</b><br>
+        учёт рабочего времени и посещаемости объектов; идентификация сотрудника при отметке
+        прихода/ухода в целях исключения отметок за другое лицо; формирование табеля учёта
+        рабочего времени для целей расчёта оплаты труда.</p>
+
+        <p><b>3. Правовое основание обработки:</b><br>
+        согласие субъекта персональных данных (ст. 9 Закона № 152-ФЗ), трудовой договор
+        и требования трудового законодательства РФ (ст. 86–88 Трудового кодекса РФ).</p>
+
+        <p><b>4. Способы обработки:</b><br>
+        сбор, запись, систематизация, накопление, хранение в информационной системе
+        (Google Таблицы, Google Диск) с использованием средств автоматизации.</p>
+
+        <p><b>5. Срок обработки и хранения:</b><br>
+        персональные данные хранятся в течение срока действия трудовых/гражданско-правовых
+        отношений и в течение [_______] после их прекращения, если иной срок не установлен
+        законодательством РФ.</p>
+
+        <p><b>6. Права субъекта персональных данных:</b><br>
+        субъект вправе получить информацию об обработке своих данных, требовать их уточнения,
+        блокирования или уничтожения в случае неполноты, устаревания или неправомерной
+        обработки, а также отозвать согласие на обработку персональных данных, направив
+        письменное заявление Оператору по адресу: [_______] или на электронную почту:
+        [_______].</p>
+
+        <p><b>7. Передача третьим лицам:</b><br>
+        персональные данные не передаются третьим лицам, за исключением случаев,
+        предусмотренных законодательством РФ.</p>
+
+        <p><b>8. Согласие на обработку:</b><br>
+        проставляя отметку в чекбоксе «Я даю согласие…», субъект персональных данных
+        подтверждает, что согласие дано им свободно, своей волей и в своём интересе,
+        является конкретным, информированным и сознательным.</p>
+      </div>
+      <button id="closePolicyBtn">Закрыть</button>
+    </div>
+  </div>
+
+
+<script>
+  var API_URL = 'https://script.google.com/macros/s/AKfycbzWDeFOuO9xkmHW9Q0xoAS6jBJpd-yhVGxE6hMts1FoPDnWUROKP4MaB9mx7NjbdDTA/exec';
+  var STORAGE_KEY = 'attendance_user_v1';
+
+  // --- Кэш "Личного кабинета" (статистики) в памяти телефона ---
+  // Данные за прошедшие дни не меняются, поэтому при каждом открытии
+  // экрана незачем заново ждать сервер: сразу показываем последнее, что
+  // уже сохранено на телефоне, а свежие данные подгружаем в фоне и тихо
+  // обновляем экран, если что-то изменилось. Отдельно, сразу после
+  // отметки "Уход" (конец смены), заново запрашиваем статистику и
+  // сохраняем её — чтобы при следующем открытии приложения кабинет был
+  // актуален уже "из коробки", без необходимости ждать загрузку.
+  var STATS_CACHE_KEY_PREFIX = 'attendance_stats_cache_v1_';
+
+  function statsCacheKey(phone) {
+    return STATS_CACHE_KEY_PREFIX + String(phone || '');
+  }
+
+  function loadStatsCache(phone) {
+    try {
+      var raw = localStorage.getItem(statsCacheKey(phone));
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveStatsCache(phone, data) {
+    try {
+      localStorage.setItem(statsCacheKey(phone), JSON.stringify(data));
+    } catch (e) {
+      // localStorage недоступен (приватный режим, переполнен и т.п.) —
+      // не критично, просто не кэшируем
+    }
+  }
+
+  // Тихо обновляет кэш статистики в фоне (не трогает интерфейс, если на
+  // экране статистики сейчас никто не смотрит, и аккуратно перерисовывает
+  // его, если смотрит). Используется и при открытии кабинета, и сразу
+  // после закрытия смены.
+  function refreshStatsCache(phone, afterUpdate) {
+    if (!phone) return;
+    apiPost({ action: 'stats', phone: phone })
+      .then(function (res) {
+        if (res.status === 'ok') {
+          saveStatsCache(phone, res);
+          if (afterUpdate) afterUpdate(res);
+        }
+      })
+      .catch(function () {
+        // фоновое обновление — при ошибке связи просто оставляем
+        // последние сохранённые данные как есть, без сообщения об ошибке
+      });
+  }
+
+  // ЗАМЕНИТЕ на свой Client ID из Google Cloud Console (см. инструкцию).
+  // Это не секрет — такой идентификатор открыто передаётся в браузер,
+  // но он должен совпадать с тем, что backend проверяет в Code.gs.
+  var GOOGLE_CLIENT_ID = '540820593622-782iqaj43ksklngqmlgr2r0vigrae7m0.apps.googleusercontent.com';
+  var validObjects = [];
+  var validObjectsLoaded = false;
+
+  // Apps Script иногда (не по нашей вине — особенность инфраструктуры
+  // Google) вместо JSON-ответа на долю секунды отдаёт служебную
+  // HTML-страницу, из-за чего разбор JSON падает с ошибкой вида
+  // "Unexpected token '<'" или fetch обрывается сам. Это не постоянная
+  // поломка, а редкий сбой — поэтому вместо немедленного показа ошибки
+  // пользователю сначала тихо пробуем повторить запрос ещё пару раз.
+  function apiFetch(url, options, attempt) {
+    attempt = attempt || 1;
+    return fetch(url, options)
+      .then(function (r) {
+        return r.text().then(function (text) {
+          try {
+            return JSON.parse(text);
+          } catch (parseErr) {
+            throw new Error('bad-json');
+          }
+        });
+      })
+      .catch(function (err) {
+        if (attempt < 3) {
+          return new Promise(function (resolve) {
+            setTimeout(resolve, 700 * attempt);
+          }).then(function () {
+            return apiFetch(url, options, attempt + 1);
+          });
+        }
+        throw err;
+      });
+  }
+
+  function apiPost(body) {
+    return apiFetch(API_URL, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  // GPS-координаты телефона в момент отметки — нужны серверу, чтобы
+  // сверить их с адресом объекта и отсечь попытки отметиться по
+  // сфотографированному где-то ещё QR-коду издалека (см. logEvent на
+  // бэкенде). Запрашивается заранее (см. actionBtn click) и кешируется на
+  // несколько секунд, чтобы к моменту реальной отметки результат уже был
+  // готов и не добавлял заметной задержки.
+  var geoPositionPromise = null;
+  function getGeoPositionPromise() {
+    return new Promise(function (resolve) {
+      if (!navigator.geolocation) { resolve(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+        },
+        function () { resolve(null); },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000 }
+      );
+    });
+  }
+
+  apiFetch(API_URL + '?action=objects')
+    .then(function (data) {
+      validObjects = (data.objects || []).map(function (o) { return String(o).trim(); });
+      validObjectsLoaded = true;
+      // Тот же список объектов используется в подсказках поля "Объект" на
+      // форме постановки задачи — initAutocomplete для taskObjectInput
+      // читает validObjects напрямую, отдельно наполнять нечего.
+    })
+    .catch(function () { validObjectsLoaded = false; });
+
+  var screenLogin = document.getElementById('screenLogin');
+  var screenReg = document.getElementById('screenReg');
+  var screenScan = document.getElementById('screenScan');
+  var screenStats = document.getElementById('screenStats');
+  var screenAdmin = document.getElementById('screenAdmin');
+  var screenAdminRates = document.getElementById('screenAdminRates');
+  var screenAdminObjects = document.getElementById('screenAdminObjects');
+  var screenTaskManage = document.getElementById('screenTaskManage');
+  var screenTasks = document.getElementById('screenTasks');
+  var screenTaskDetail = document.getElementById('screenTaskDetail');
+  var regStatus = document.getElementById('regStatus');
+  function setRegStatus(text, kind) {
+    stopWaitIndicator(regStatus);
+    regStatus.textContent = text;
+    regStatus.className = kind || '';
+  }
+  var loginStatus = document.getElementById('loginStatus');
+  function setLoginStatus(text, kind) {
+    stopWaitIndicator(loginStatus);
+    loginStatus.textContent = text;
+    loginStatus.className = kind || '';
+  }
+  var statusEl = document.getElementById('status');
+
+  var currentUser = null;
+  try {
+    var saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) currentUser = JSON.parse(saved);
+  } catch (e) { currentUser = null; }
+
+  // --- Кнопка "назад" (аппаратная/жест на Android, а также обычная кнопка
+  // "назад" браузера) — переключает экраны внутри приложения вместо того,
+  // чтобы сразу закрывать вкладку/приложение. Работает через обычный
+  // History API: каждый show*Screen() сам "отмечается" в истории браузера
+  // (pushScreenState ниже), а переход по кнопке "назад" ловится через
+  // popstate и просто показывает нужный экран — страница при этом
+  // физически не перезагружается, это тот же самый открытый сайт.
+  var isBackNavigation = false;
+  var hasPushedInitialScreenState = false;
+
+  function pushScreenState(name, params) {
+    // Если show*Screen() сейчас вызван ИЗ обработчика popstate (то есть
+    // браузер уже сам переместил указатель истории назад/вперёд) — заново
+    // ничего не пушим, иначе история будет расти в обе стороны одновременно.
+    if (isBackNavigation) return;
+    var state = Object.assign({ screen: name }, params || {});
+    if (!hasPushedInitialScreenState) {
+      // Самый первый показанный экран — не "новая" запись в истории, а
+      // замена текущей. Так кнопка "назад" с первого же экрана приложения
+      // ведёт туда, куда вела бы и без этого (закрывает приложение/вкладку),
+      // а не крутится на месте.
+      history.replaceState(state, '', '#' + name);
+      hasPushedInitialScreenState = true;
+    } else {
+      history.pushState(state, '', '#' + name);
+    }
+  }
+
+  window.addEventListener('popstate', function (e) {
+    isBackNavigation = true;
+    try {
+      var state = e.state;
+      if (!state || !state.screen) {
+        if (currentUser && currentUser.name && currentUser.phone) {
+          showScanScreen();
+        } else {
+          showLoginScreen();
+        }
+        return;
+      }
+      switch (state.screen) {
+        case 'scan': showScanScreen(); break;
+        case 'login': showLoginScreen(); break;
+        case 'reg': showRegScreen(); break;
+        case 'stats': showStatsScreen(); break;
+        case 'tasks': showTasksScreen(); break;
+        case 'taskDetail': showTaskDetailScreen(state.taskId); break;
+        case 'admin': showAdminScreen(); break;
+        case 'adminRates': showAdminRatesScreen(); break;
+        case 'adminObjects': showAdminObjectsScreen(); break;
+        case 'taskManage': showTaskManageScreen(); break;
+        default: showScanScreen();
+      }
+    } finally {
+      isBackNavigation = false;
+    }
+  });
+
+  function showScanScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenScan.style.display = 'block';
+    document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
+    checkShiftStatus();
+    refreshTasksBadge();
+    refreshAdminStatus();
+    pushScreenState('scan');
+  }
+
+  // Красная точка-счётчик на кнопке "Мои задачи" — показывает, сколько
+  // сейчас невыполненных задач, и сама исчезает, когда их не осталось.
+  function updateTasksBadge(count) {
+    var badge = document.getElementById('myTasksBadge');
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = count > 9 ? '9+' : String(count);
+      badge.style.display = 'block';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  function refreshTasksBadge() {
+    if (!currentUser || !currentUser.phone) { updateTasksBadge(0); return; }
+    apiPost({ action: 'getMyTasks', phone: currentUser.phone })
+      .then(function (res) {
+        updateTasksBadge(res.status === 'ok' && res.tasks ? res.tasks.length : 0);
+      })
+      .catch(function () {
+        // при сбое связи бейдж просто не трогаем — не критично
+      });
+  }
+
+  // Экран входа по номеру телефона — стартовый экран для тех, кто уже
+  // зарегистрирован, но ещё не вошёл на этом устройстве (например, после
+  // "сменить пользователя" или на новом телефоне). В отличие от полной
+  // регистрации, здесь не нужно ни фото, ни согласие — сервер просто
+  // узнаёт номер и логинит.
+  function showLoginScreen() {
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenLogin.style.display = 'block';
+    pushScreenState('login');
+  }
+
+  function showRegScreen() {
+    screenLogin.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenReg.style.display = 'block';
+    updateGoogleGateVisibility();
+    pushScreenState('reg');
+  }
+
+  // --- Подтверждение личности через Google перед регистрацией ---
+  // Раньше можно было зарегистрироваться, указав вообще любые данные —
+  // ничего не проверялось. Теперь для регистрации нового сотрудника
+  // сначала нужно войти через Google: подтверждённый email пишется в
+  // таблицу вместе с остальными данными, и backend отдельно перепроверяет
+  // токен (см. Code.gs) — просто подделать его во фронтенде нельзя.
+  var googleIdToken = null;
+
+  function updateGoogleGateVisibility() {
+    var gate = document.getElementById('googleSignInGate');
+    var formFields = document.getElementById('regFormFields');
+    if (!gate || !formFields) return;
+    if (googleIdToken) {
+      gate.style.display = 'none';
+      formFields.style.display = 'block';
+    } else {
+      gate.style.display = 'block';
+      formFields.style.display = 'none';
+    }
+  }
+
+  var adminAssigneeMap = {};
+  // Последний успешный ответ adminGetObjects/adminUpdateObjectShifts — чтобы
+  // после точечного сохранения в одной карточке не перестраивать весь
+  // список (и не захлопывать раскрытую карточку), а просто иметь свежие
+  // данные под рукой, если понадобятся (например, при повторном открытии).
+  var lastAdminObjectsResponse = null;
+
+  // --- Кнопки "Админ панель" / "Поставить задачу" на главном экране ---
+  // Раньше права администратора подтверждались отдельным входом через
+  // Google при каждом открытии админки. Теперь прав достаточно того, что
+  // уже видно на backend по номеру телефона (галочка "Админ" в
+  // "Сотрудники", см. adminAuth_/isAdminPhone_ в Code.gs) — отдельного
+  // подтверждения больше не требуется, кнопки появляются сами.
+  //
+  // Чтобы кнопки не "моргали" (сначала скрыты, потом появляются после
+  // ответа сервера), сразу показываем то, что помним с прошлого раза на
+  // этом телефоне (кэш в localStorage), и тут же тихо перепроверяем на
+  // сервере — если права с тех пор забрали, кнопки корректно спрячутся.
+  var ADMIN_STATUS_CACHE_PREFIX = 'attendance_admin_status_v2_';
+
+  function adminStatusCacheKey(phone) {
+    return ADMIN_STATUS_CACHE_PREFIX + String(phone || '');
+  }
+
+  function loadAdminStatusCache(phone) {
+    try {
+      return localStorage.getItem(adminStatusCacheKey(phone)) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function saveAdminStatusCache(phone, isAdmin) {
+    try {
+      localStorage.setItem(adminStatusCacheKey(phone), isAdmin ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function updateAdminButtonsVisibility(isAdmin) {
+    var btn = document.getElementById('adminPanelBtn');
+    if (btn) btn.style.display = isAdmin ? 'block' : 'none';
+    var taskBtn = document.getElementById('taskManageBtn');
+    if (taskBtn) taskBtn.style.display = isAdmin ? 'block' : 'none';
+  }
+
+  function refreshAdminStatus() {
+    if (!currentUser || !currentUser.phone) {
+      updateAdminButtonsVisibility(false);
+      return;
+    }
+    updateAdminButtonsVisibility(loadAdminStatusCache(currentUser.phone));
+    apiPost({ action: 'adminCheckAccess', phone: currentUser.phone })
+      .then(function (res) {
+        var isAdmin = res.status === 'ok';
+        saveAdminStatusCache(currentUser.phone, isAdmin);
+        updateAdminButtonsVisibility(isAdmin);
+      })
+      .catch(function () {
+        // сбой связи — оставляем то, что уже показано из кэша, не прячем
+        // кнопки из-за временного обрыва сети
+      });
+  }
+
+  function handleGoogleCredential(response) {
+    var email = '';
+    try {
+      var base64 = response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      var payload = JSON.parse(atob(base64));
+      email = payload.email || '';
+    } catch (e) {}
+
+    googleIdToken = response.credential;
+    document.getElementById('googleConfirmedEmail').textContent = email
+      ? ('Подтверждено через Google: ' + email)
+      : 'Вход через Google подтверждён';
+    document.getElementById('googleSignInError').textContent = '';
+    updateGoogleGateVisibility();
+  }
+
+  function initGoogleSignIn() {
+    if (!window.google || !google.accounts || !google.accounts.id) {
+      var errEl = document.getElementById('googleSignInError');
+      if (errEl) {
+        errEl.textContent = 'Не удалось загрузить вход через Google. Проверьте интернет-соединение и обновите страницу.';
+      }
+      return;
+    }
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredential
+    });
+    google.accounts.id.renderButton(
+      document.getElementById('googleSignInButton'),
+      { theme: 'outline', size: 'large', text: 'signup_with', locale: 'ru', width: 280 }
+    );
+  }
+
+  if (document.readyState === 'complete') {
+    initGoogleSignIn();
+  } else {
+    window.addEventListener('load', initGoogleSignIn);
+  }
+
+  function showStatsScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenStats.style.display = 'block';
+    document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
+    loadMyStats();
+    pushScreenState('stats');
+  }
+
+  // --- Мои задачи (разовые поручения) ---
+  function showTasksScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenTasks.style.display = 'block';
+    document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
+    loadMyTasks();
+    pushScreenState('tasks');
+  }
+
+  // Единое отображение статуса — переиспользуется и в списке у сотрудника,
+  // и в обзоре у админа.
+  function taskStatusTag(status) {
+    if (status === 'Выполнена') return { cls: 'stDone', label: 'Выполнено' };
+    if (status === 'В работе') return { cls: 'stProgress', label: 'В работе' };
+    return { cls: 'stNew', label: 'Новая' };
+  }
+
+  function loadMyTasks() {
+    var listEl = document.getElementById('tasksList');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    var phone = currentUser ? currentUser.phone : '';
+    apiPost({ action: 'getMyTasks', phone: phone })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        updateTasksBadge(res.tasks ? res.tasks.length : 0);
+        if (!res.tasks || !res.tasks.length) {
+          listEl.innerHTML = '<div class="statsEmpty">У вас нет актуальных задач</div>';
+          return;
+        }
+        listEl.innerHTML = res.tasks.map(function (t) {
+          var tag = taskStatusTag(t.status);
+          return (
+            '<div class="taskCard adminTaskCardClickable" data-id="' + escapeHtml(t.id) + '">' +
+              '<div><span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
+              (t.objectName ? ' <b>' + escapeHtml(t.objectName) + '</b>' : '') + '</div>' +
+              '<div class="taskText">' + escapeHtml(t.text) + '</div>' +
+              '<div class="taskDate">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
+            '</div>'
+          );
+        }).join('');
+
+        listEl.querySelectorAll('.taskCard').forEach(function (card) {
+          card.addEventListener('click', function () {
+            showTaskDetailScreen(card.getAttribute('data-id'));
+          });
+        });
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  // --- Экран деталей одной задачи (у сотрудника) ---
+
+  // Читает несколько файлов (FileList) как base64 и отдаёт массив строк
+  // через callback — используется и для фото задачи у админа, и для фото
+  // "до"/"после" у сотрудника, чтобы не дублировать код.
+  function readFilesAsBase64(fileList, callback) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) { callback([]); return; }
+    var results = new Array(files.length);
+    var remaining = files.length;
+    files.forEach(function (file, idx) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        results[idx] = reader.result;
+        remaining--;
+        if (remaining === 0) callback(results);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function renderPhotoPreview(containerEl, base64List) {
+    containerEl.innerHTML = (base64List || []).map(function (b64) {
+      return '<img src="' + b64 + '" alt="">';
+    }).join('');
+  }
+
+  function renderPhotoGrid(containerEl, urls) {
+    if (!urls || !urls.length) {
+      containerEl.innerHTML = '';
+      containerEl.style.display = 'none';
+      return;
+    }
+    containerEl.style.display = 'flex';
+    containerEl.innerHTML = urls.map(function (url) {
+      return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(url) + '" alt=""></a>';
+    }).join('');
+  }
+
+  var taskBeforePhotosBase64 = [];
+  var taskAfterPhotosBase64 = [];
+  var currentTaskId = null;
+
+  function showTaskDetailScreen(taskId) {
+    currentTaskId = taskId;
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'block';
+    document.getElementById('taskDetailLoading').style.display = 'block';
+    document.getElementById('taskDetailBody').style.display = 'none';
+    loadTaskDetail();
+    pushScreenState('taskDetail', { taskId: taskId });
+  }
+
+  function loadTaskDetail() {
+    var phone = currentUser ? currentUser.phone : '';
+    apiPost({ action: 'getTaskById', phone: phone, taskId: currentTaskId })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          document.getElementById('taskDetailLoading').textContent = res.message || 'Не удалось загрузить задачу';
+          return;
+        }
+        document.getElementById('taskDetailLoading').style.display = 'none';
+        document.getElementById('taskDetailBody').style.display = 'block';
+        renderTaskDetail(res.task);
+      })
+      .catch(function (err) {
+        document.getElementById('taskDetailLoading').textContent = 'Ошибка соединения: ' + err;
+      });
+  }
+
+  function renderTaskDetail(t) {
+    var tag = taskStatusTag(t.status);
+    var badge = document.getElementById('taskDetailStatusBadge');
+    badge.className = 'taskStatusBadge ' + tag.cls;
+    badge.textContent = tag.label;
+    document.getElementById('taskDetailObjectTitle').textContent = t.objectName || 'Задача';
+    document.getElementById('taskDetailText').textContent = t.text;
+    renderPhotoGrid(document.getElementById('taskDetailTaskPhotos'), t.taskPhotos);
+    document.getElementById('taskDetailMeta').textContent = 'Поставлена: ' + (t.createdAt || '');
+
+    var beforeSection = document.getElementById('taskDetailBeforeSection');
+    var afterSection = document.getElementById('taskDetailAfterSection');
+    var startAction = document.getElementById('taskStartAction');
+    var startForm = document.getElementById('taskStartForm');
+    var completeAction = document.getElementById('taskCompleteAction');
+    var completeForm = document.getElementById('taskCompleteForm');
+
+    beforeSection.style.display = 'none';
+    afterSection.style.display = 'none';
+    startAction.style.display = 'none';
+    startForm.style.display = 'none';
+    completeAction.style.display = 'none';
+    completeForm.style.display = 'none';
+
+    if (t.status === 'Актуальна') {
+      startAction.style.display = 'block';
+    } else if (t.status === 'В работе') {
+      beforeSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailBeforePhotos'), t.beforePhotos);
+      document.getElementById('taskDetailStartedMeta').textContent = 'Начато: ' + (t.startedAt || '');
+      completeAction.style.display = 'block';
+    } else { // Выполнена
+      beforeSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailBeforePhotos'), t.beforePhotos);
+      document.getElementById('taskDetailStartedMeta').textContent = 'Начато: ' + (t.startedAt || '');
+      afterSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailAfterPhotos'), t.afterPhotos);
+      var commentBlock = document.getElementById('taskDetailCommentBlock');
+      if (t.comment) {
+        commentBlock.style.display = 'block';
+        document.getElementById('taskDetailComment').textContent = t.comment;
+      } else {
+        commentBlock.style.display = 'none';
+      }
+      document.getElementById('taskDetailCompletedMeta').textContent = 'Выполнено: ' + (t.completedAt || '');
+    }
+  }
+
+  document.getElementById('taskDetailBackLink').addEventListener('click', function () {
+    showTasksScreen();
+  });
+
+  document.getElementById('taskStartBtn').addEventListener('click', function () {
+    document.getElementById('taskStartAction').style.display = 'none';
+    document.getElementById('taskStartForm').style.display = 'block';
+  });
+
+  document.getElementById('taskBeforePhotoInput').addEventListener('change', function (e) {
+    readFilesAsBase64(e.target.files, function (list) {
+      taskBeforePhotosBase64 = list;
+      renderPhotoPreview(document.getElementById('taskBeforePhotoPreview'), list);
+    });
+  });
+
+  document.getElementById('taskStartSubmitBtn').addEventListener('click', function () {
+    var statusEl5 = document.getElementById('taskStartStatus');
+    var btn = document.getElementById('taskStartSubmitBtn');
+    var phone = currentUser ? currentUser.phone : '';
+    btn.disabled = true;
+    statusEl5.textContent = 'Отправка…';
+    statusEl5.className = '';
+    apiPost({ action: 'startTask', phone: phone, taskId: currentTaskId, photos: taskBeforePhotosBase64 })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          taskBeforePhotosBase64 = [];
+          document.getElementById('taskBeforePhotoInput').value = '';
+          loadTaskDetail();
+          refreshTasksBadge();
+        } else {
+          statusEl5.textContent = res.message || 'Не удалось сохранить';
+          statusEl5.className = 'error';
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        statusEl5.textContent = 'Ошибка соединения: ' + err;
+        statusEl5.className = 'error';
+      });
+  });
+
+  document.getElementById('taskCompleteBtn').addEventListener('click', function () {
+    document.getElementById('taskCompleteAction').style.display = 'none';
+    document.getElementById('taskCompleteForm').style.display = 'block';
+  });
+
+  document.getElementById('taskAfterPhotoInput').addEventListener('change', function (e) {
+    readFilesAsBase64(e.target.files, function (list) {
+      taskAfterPhotosBase64 = list;
+      renderPhotoPreview(document.getElementById('taskAfterPhotoPreview'), list);
+    });
+  });
+
+  document.getElementById('taskCompleteSubmitBtn').addEventListener('click', function () {
+    var statusEl6 = document.getElementById('taskCompleteStatus');
+    var btn = document.getElementById('taskCompleteSubmitBtn');
+    var phone = currentUser ? currentUser.phone : '';
+    var comment = document.getElementById('taskCompleteCommentInput').value.trim();
+    btn.disabled = true;
+    statusEl6.textContent = 'Отправка…';
+    statusEl6.className = '';
+    apiPost({ action: 'completeTask', phone: phone, taskId: currentTaskId, photos: taskAfterPhotosBase64, comment: comment })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          taskAfterPhotosBase64 = [];
+          document.getElementById('taskAfterPhotoInput').value = '';
+          document.getElementById('taskCompleteCommentInput').value = '';
+          loadTaskDetail();
+          refreshTasksBadge();
+        } else {
+          statusEl6.textContent = res.message || 'Не удалось сохранить';
+          statusEl6.className = 'error';
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        statusEl6.textContent = 'Ошибка соединения: ' + err;
+        statusEl6.className = 'error';
+      });
+  });
+
+  // --- Панель администратора ---
+  // Доступ проверяется на backend (adminAuth_ в Code.gs) по номеру
+  // телефона, с которым человек уже вошёл в приложение — смотрит на
+  // галочку "Админ" в листе "Сотрудники". Никакого отдельного входа через
+  // Google здесь больше нет: кнопка "Админ панель" на главном экране и
+  // так видна только тем, у кого права уже подтверждены (см.
+  // refreshAdminStatus), а сами данные на этом экране в любом случае
+  // перепроверяются сервером при каждой загрузке.
+  function showAdminScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenAdmin.style.display = 'block';
+    pushScreenState('admin');
+  }
+
+  // --- Экран "Поставить задачу" (вынесен из панели администратора на
+  // главный экран) — доступ так же проверяется по номеру телефона. ---
+  function showTaskManageScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenTaskManage.style.display = 'block';
+    loadAdminEmployees(); // наполняет даталист "Исполнитель"
+    loadAdminTasks();
+    pushScreenState('taskManage');
+  }
+
+  // --- Экран "Ставки сотрудников" (подэкран панели администратора) ---
+  function showAdminRatesScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenAdminRates.style.display = 'block';
+    loadAdminEmployees();
+    pushScreenState('adminRates');
+  }
+
+  // --- Экран "Объекты" (подэкран панели администратора) ---
+  function showAdminObjectsScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenAdminObjects.style.display = 'block';
+    loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
+    loadAdminObjects();
+    pushScreenState('adminObjects');
+  }
+
+  function loadAdminObjects() {
+    var listEl = document.getElementById('adminObjectsList');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetObjects', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        renderAdminObjectsList(res);
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  // Та же карта "label -> {phone, name}", что и для "Исполнителя" на форме
+  // задачи (наполняется в loadAdminEmployees) — используется, чтобы по
+  // введённому в поле "Ответственный прораб" тексту найти телефон сотрудника.
+  function resolveForemanPhoneFromInput_(inputEl) {
+    var typed = inputEl.value.trim();
+    if (!typed) return '';
+    if (adminAssigneeMap[typed]) return adminAssigneeMap[typed].phone;
+    return typed; // возможно, ввели телефон напрямую — бэкенд сам проверит
+  }
+
+  // Список большой и редактирование каждого объекта занимает много места,
+  // поэтому по умолчанию список скрыт (см. objectsShowAllLink) и открыт
+  // только поиск — а каждый объект в списке свёрнут в одну строку (<details>,
+  // разворачивается по клику стрелкой). Новые объекты в таблице добавляются
+  // вниз, но актуальнее для админа именно недавно добавленные — поэтому
+  // здесь показываем в обратном порядке (последний добавленный — сверху).
+  function renderAdminObjectsList(res) {
+    var listEl = document.getElementById('adminObjectsList');
+    lastAdminObjectsResponse = res;
+    if (res.status !== 'ok') {
+      listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
+      return;
+    }
+    if (!res.objects || !res.objects.length) {
+      listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного объекта</div>';
+      return;
+    }
+
+    // Подсказки поля поиска читаются прямо из lastAdminObjectsResponse
+    // (см. initAutocomplete для objectSearchInput) — отдельный список
+    // подсказок здесь поддерживать не нужно.
+    var reversed = res.objects.slice().reverse();
+    listEl.innerHTML = reversed.map(function (obj, idx) {
+      var addressLine = obj.address
+        ? escapeHtml(obj.address)
+        : '<span style="color:var(--muted);">адрес не указан</span>';
+      // "OK: ..." показываем зелёным (адрес распознан и GPS-проверка для
+      // объекта работает), иначе — тревожным цветом (адрес ещё не указан
+      // или геокодер не смог его распознать — см. geoStatus в Code.gs).
+      var isOk = obj.geoStatus && obj.geoStatus.indexOf('OK') === 0;
+      var statusLine = obj.geoStatus
+        ? '<div class="adminObjGeoStatus" style="color:' + (isOk ? 'var(--green)' : 'var(--red)') + ';">' + escapeHtml(obj.geoStatus) + '</div>'
+        : '';
+      var foremanValue = obj.foremanPhone ? (obj.foremanName ? (obj.foremanName + ' — ' + obj.foremanPhone) : obj.foremanPhone) : '';
+      var s1Id = 'objShift1Start' + idx, e1Id = 'objShift1End' + idx;
+      var s2Id = 'objShift2Start' + idx, e2Id = 'objShift2End' + idx;
+      var fId = 'objForeman' + idx, statusId = 'objSaveStatus' + idx;
+      return (
+        '<details class="adminObjDetails" id="objDetails' + idx + '" data-objname="' + escapeHtml(obj.name) + '">' +
+          '<summary class="adminObjSummary">' +
+            '<div class="adminObjSummaryText">' +
+              '<div class="adminObjName">' + escapeHtml(obj.name) + '</div>' +
+              '<div class="adminObjAddress">' + addressLine + '</div>' +
+            '</div>' +
+            '<span class="adminObjChevron">▾</span>' +
+          '</summary>' +
+          '<div class="adminObjForm">' +
+            statusLine +
+            '<div class="shiftTimesRow">' +
+              '<div><label for="' + s1Id + '">Смена 1, начало</label><input id="' + s1Id + '" type="time" value="' + escapeHtml(obj.shift1Start) + '"></div>' +
+              '<div><label for="' + e1Id + '">Смена 1, конец</label><input id="' + e1Id + '" type="time" value="' + escapeHtml(obj.shift1End) + '"></div>' +
+            '</div>' +
+            '<div class="shiftTimesRow">' +
+              '<div><label for="' + s2Id + '">Смена 2, начало</label><input id="' + s2Id + '" type="time" value="' + escapeHtml(obj.shift2Start) + '"></div>' +
+              '<div><label for="' + e2Id + '">Смена 2, конец</label><input id="' + e2Id + '" type="time" value="' + escapeHtml(obj.shift2End) + '"></div>' +
+            '</div>' +
+            '<label for="' + fId + '" style="margin-top:8px;">Ответственный прораб</label>' +
+            '<input id="' + fId + '" type="text" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
+            '<div class="adminObjSaveRow">' +
+              '<button type="button" class="adminObjSaveBtn" data-name="' + escapeHtml(obj.name) + '" data-idx="' + idx + '">Сохранить</button>' +
+              '<span class="adminObjSaveStatus" id="' + statusId + '"></span>' +
+            '</div>' +
+          '</div>' +
+        '</details>'
+      );
+    }).join('');
+
+    listEl.querySelectorAll('input[id^="objForeman"]').forEach(function (input) {
+      initAutocomplete(input, function () { return Object.keys(adminAssigneeMap); });
+    });
+
+    listEl.querySelectorAll('.adminObjSaveBtn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = btn.getAttribute('data-idx');
+        var objectName = btn.getAttribute('data-name');
+        var statusEl = document.getElementById('objSaveStatus' + idx);
+        var foremanInput = document.getElementById('objForeman' + idx);
+        btn.disabled = true;
+        statusEl.textContent = 'Сохраняем…';
+        statusEl.style.color = 'var(--muted)';
+        apiPost({
+          action: 'adminUpdateObjectShifts',
+          phone: currentUser && currentUser.phone,
+          objectName: objectName,
+          shift1Start: document.getElementById('objShift1Start' + idx).value,
+          shift1End: document.getElementById('objShift1End' + idx).value,
+          shift2Start: document.getElementById('objShift2Start' + idx).value,
+          shift2End: document.getElementById('objShift2End' + idx).value,
+          foremanPhone: resolveForemanPhoneFromInput_(foremanInput)
+        })
+          .then(function (res) {
+            btn.disabled = false;
+            if (res.status === 'ok') {
+              // Список не перестраиваем целиком — чтобы раскрытая карточка
+              // не "захлопнулась" сразу после сохранения, просто обновляем
+              // карту объектов (на случай поиска) и показываем подтверждение.
+              lastAdminObjectsResponse = res;
+              statusEl.textContent = 'Сохранено ✓';
+              statusEl.style.color = 'var(--green)';
+              setTimeout(function () { statusEl.textContent = ''; }, 2500);
+            } else {
+              statusEl.textContent = res.message || 'Не удалось сохранить';
+              statusEl.style.color = 'var(--red)';
+            }
+          })
+          .catch(function (err) {
+            btn.disabled = false;
+            statusEl.textContent = 'Ошибка соединения: ' + err;
+            statusEl.style.color = 'var(--red)';
+          });
+      });
+    });
+  }
+
+  function loadAdminEmployees() {
+    var listEl = document.getElementById('adminEmployeesList');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetEmployees', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + (res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        if (!res.employees || !res.employees.length) {
+          listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного сотрудника</div>';
+          adminAssigneeMap = {};
+          return;
+        }
+
+        // Заодно наполняем общую карту "label -> {phone, name}" для подсказок
+        // "Исполнитель" (форма задачи) и "Ответственный прораб" (экран
+        // "Объекты") — сам выпадающий список рисует initAutocomplete,
+        // подсказки читает прямо из adminAssigneeMap (см. ниже, где вызван
+        // initAutocomplete для соответствующих полей).
+        adminAssigneeMap = {};
+        res.employees.forEach(function (emp) {
+          var label = emp.name + ' — ' + emp.phone;
+          adminAssigneeMap[label] = { phone: emp.phone, name: emp.name };
+        });
+
+        listEl.innerHTML = res.employees.map(function (emp, idx) {
+          var inputId = 'adminRateInput' + idx;
+          return (
+            '<div class="adminEmpRow">' +
+              '<div class="adminEmpInfo">' +
+                '<div class="adminEmpName">' + escapeHtml(emp.name) + '</div>' +
+                '<div class="adminEmpPhone">' + escapeHtml(emp.phone) + '</div>' +
+              '</div>' +
+              '<div class="adminEmpRateForm">' +
+                '<input id="' + inputId + '" type="number" inputmode="numeric" min="0" step="1" value="' + (emp.rate || 0) + '" data-phone="' + escapeHtml(emp.phone) + '">' +
+                '<button type="button" class="adminSaveRateBtn" data-input="' + inputId + '" data-phone="' + escapeHtml(emp.phone) + '">Сохранить</button>' +
+              '</div>' +
+            '</div>'
+          );
+        }).join('');
+
+        listEl.querySelectorAll('.adminSaveRateBtn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var input = document.getElementById(btn.getAttribute('data-input'));
+            var phone = btn.getAttribute('data-phone');
+            var rate = input.value;
+            btn.disabled = true;
+            btn.textContent = '…';
+            apiPost({ action: 'adminSetRate', phone: currentUser && currentUser.phone, targetPhone: phone, rate: rate })
+              .then(function (res) {
+                btn.disabled = false;
+                if (res.status === 'ok') {
+                  btn.textContent = 'Сохранено ✓';
+                  setTimeout(function () { btn.textContent = 'Сохранить'; }, 1500);
+                } else {
+                  btn.textContent = 'Сохранить';
+                  alert(res.message || 'Не удалось сохранить');
+                }
+              })
+              .catch(function (err) {
+                btn.disabled = false;
+                btn.textContent = 'Сохранить';
+                alert('Ошибка соединения: ' + err);
+              });
+          });
+        });
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  var adminTasksById = {};
+
+  // Карточку задачи можно развернуть кликом — детали (фото до/после,
+  // комментарий) рисуются из уже загруженных данных, без нового запроса.
+  function adminTaskDetailHtml(t) {
+    var html = '';
+    if (t.taskPhotos && t.taskPhotos.length) {
+      html += '<div class="taskDate">Фото задачи:</div><div class="photoGrid" style="display:flex;">' +
+        t.taskPhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+        '</div>';
+    }
+    if (t.status !== 'Актуальна') {
+      html += '<div class="taskDate" style="margin-top:6px;">Начато: ' + escapeHtml(t.startedAt || '—') + '</div>';
+      if (t.beforePhotos && t.beforePhotos.length) {
+        html += '<div class="taskDate">Фото до:</div><div class="photoGrid" style="display:flex;">' +
+          t.beforePhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+          '</div>';
+      }
+    }
+    if (t.status === 'Выполнена') {
+      html += '<div class="taskDate" style="margin-top:6px;">Выполнено: ' + escapeHtml(t.completedAt || '—') + '</div>';
+      if (t.afterPhotos && t.afterPhotos.length) {
+        html += '<div class="taskDate">Фото после:</div><div class="photoGrid" style="display:flex;">' +
+          t.afterPhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+          '</div>';
+      }
+      if (t.comment) {
+        html += '<div class="taskDate" style="margin-top:4px;">Комментарий сотрудника:</div><div class="adminTaskText">' + escapeHtml(t.comment) + '</div>';
+      }
+    }
+    return html;
+  }
+
+  function loadAdminTasks() {
+    var listEl = document.getElementById('adminTasksList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetTasks', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        if (!res.tasks || !res.tasks.length) {
+          listEl.innerHTML = '<div class="statsEmpty">Задач пока нет</div>';
+          return;
+        }
+        adminTasksById = {};
+        res.tasks.forEach(function (t) { adminTasksById[t.id] = t; });
+
+        listEl.innerHTML = res.tasks.map(function (t) {
+          var tag = taskStatusTag(t.status);
+          var doneClass = t.status === 'Выполнена' ? ' adminTaskCardDone' : '';
+          return (
+            '<div class="adminTaskCard adminTaskCardClickable' + doneClass + '" data-id="' + escapeHtml(t.id) + '">' +
+              '<div class="adminTaskName">' + escapeHtml(t.name) +
+                '<span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
+              '</div>' +
+              '<div class="adminTaskMeta">' + escapeHtml(t.objectName || '') + '</div>' +
+              '<div class="adminTaskText">' + escapeHtml(t.text) + '</div>' +
+              '<div class="adminTaskMeta">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
+              '<div class="adminTaskDetail" style="display:none;"></div>' +
+            '</div>'
+          );
+        }).join('');
+
+        listEl.querySelectorAll('.adminTaskCard').forEach(function (card) {
+          card.addEventListener('click', function () {
+            var detailEl = card.querySelector('.adminTaskDetail');
+            var isOpen = detailEl.style.display !== 'none';
+            if (isOpen) {
+              detailEl.style.display = 'none';
+              return;
+            }
+            var t = adminTasksById[card.getAttribute('data-id')];
+            if (t) detailEl.innerHTML = adminTaskDetailHtml(t);
+            detailEl.style.display = 'block';
+          });
+        });
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  var taskCreatePhotosBase64 = [];
+  var taskPhotoInputEl = document.getElementById('taskPhotoInput');
+  if (taskPhotoInputEl) {
+    taskPhotoInputEl.addEventListener('change', function (e) {
+      readFilesAsBase64(e.target.files, function (list) {
+        taskCreatePhotosBase64 = list;
+        renderPhotoPreview(document.getElementById('taskPhotoPreview'), list);
+      });
+    });
+  }
+
+  var taskCreateBtnEl = document.getElementById('taskCreateBtn');
+  if (taskCreateBtnEl) {
+    taskCreateBtnEl.addEventListener('click', function () {
+      var statusEl4 = document.getElementById('taskCreateStatus');
+      var assigneeInput = document.getElementById('taskAssigneeInput');
+      var objectInput = document.getElementById('taskObjectInput');
+      var textInput = document.getElementById('taskTextInput');
+      var assignee = adminAssigneeMap[assigneeInput.value.trim()];
+
+      if (!assignee) {
+        statusEl4.textContent = 'Выберите исполнителя из списка предложенных вариантов';
+        statusEl4.className = 'error';
+        return;
+      }
+      var objectName = objectInput.value.trim();
+      if (!objectName || (validObjectsLoaded && validObjects.indexOf(objectName) === -1)) {
+        statusEl4.textContent = 'Выберите объект из списка предложенных вариантов';
+        statusEl4.className = 'error';
+        return;
+      }
+      var text = textInput.value.trim();
+      if (!text) {
+        statusEl4.textContent = 'Введите текст задачи';
+        statusEl4.className = 'error';
+        return;
+      }
+
+      statusEl4.textContent = 'Постановка задачи…';
+      statusEl4.className = '';
+      taskCreateBtnEl.disa
