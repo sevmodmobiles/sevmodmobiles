@@ -867,6 +867,12 @@
   .expPersonMeta { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
   .expPills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .expPill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .expSeg { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 3px; margin-bottom: 10px; }
+  .expSeg button { flex: 1; margin: 0; padding: 9px 6px; font-size: 14px; font-weight: 600; background: none; color: var(--muted); border-radius: 8px; }
+  .expSeg button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+  .expFilters { display: flex; gap: 8px; }
+  .expFilters select { flex: 1; min-width: 0; padding: 10px; font-size: 14px; }
+  .expFilters select.active { border-color: var(--blue); color: var(--blue); font-weight: 600; }
   .expDays { border-top: 1px solid var(--border); overflow-x: auto; }
   .expDays table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .expDays td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -1411,11 +1417,19 @@
   <!-- Экран "Посмотреть расходы": кому сколько должны, по статусам -->
   <div id="screenExpView">
     <div class="card logo-card">
-      <h1 style="margin-top:0;">Расходы по людям</h1>
+      <h1 id="expViewTitle" style="margin-top:0;">Расходы по людям</h1>
       <div class="switchUser"><a id="expViewBackLink">← Расходы</a></div>
     </div>
     <div class="card">
+      <div class="expSeg" role="tablist" aria-label="Группировка">
+        <button type="button" id="expModePeople" class="on" role="tab">По людям</button>
+        <button type="button" id="expModeBrig" role="tab">По бригадам</button>
+      </div>
       <div id="expChips" class="expChips" role="tablist" aria-label="Статус"></div>
+      <div class="expFilters">
+        <select id="expBrigFilter" aria-label="Бригадир" hidden></select>
+        <select id="expObjFilter" aria-label="Объект"></select>
+      </div>
       <input id="expSearch" type="search" placeholder="Поиск: имя, бригадир или объект" autocomplete="off">
       <div id="expTotals" class="expTotals"></div>
       <div id="expPeople"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
@@ -3964,6 +3978,11 @@
     });
   }
 
+  var expViewMode = 'people';      // 'people' | 'brigades'
+  var expBrigFilter = '';          // выбранный бригадир ('' — все бригады)
+  var expObjFilter = '';           // выбранный объект ('' — все объекты)
+  var NO_BRIG = 'Без бригадира';
+
   function renderExpView() {
     var rows = expRows_();
     // Статусы: сначала в порядке сводки таблицы, потом остальные.
@@ -3989,70 +4008,150 @@
         dot + escapeHtml(name) + '</button>';
     }).join('');
 
+    var brigMode = expViewMode === 'brigades';
+    document.getElementById('expModePeople').classList.toggle('on', !brigMode);
+    document.getElementById('expModeBrig').classList.toggle('on', brigMode);
+    document.getElementById('expViewTitle').textContent = brigMode ? 'Расходы по бригадам' : 'Расходы по людям';
+
     var q = expKey_(document.getElementById('expSearch').value);
-    var list = rows.filter(function (r) {
+    function brigOf_(r) { return r.brigadier || NO_BRIG; }
+    var byStatus = rows.filter(function (r) {
       if (expViewStatus !== '*' && expKey_(r.status) !== expViewStatus) return false;
       if (q && (expKey_(r.worker) + ' ' + expKey_(r.brigadier) + ' ' + expKey_(r.object)).indexOf(q) < 0) return false;
       return true;
     });
+    var useBrig = brigMode && expBrigFilter;
 
-    // Группировка по работнику.
-    var people = {};
-    list.forEach(function (r) {
-      var name = r.worker || '(без имени)';
-      var p = people[name] || (people[name] = { name: name, sum: 0, rows: [], objects: {}, statuses: {}, min: '', max: '' });
-      p.sum += Number(r.total) || 0;
-      p.rows.push(r);
-      if (r.object) p.objects[r.object] = true;
-      var sk = r.status || 'Без статуса';
-      p.statuses[sk] = (p.statuses[sk] || 0) + (Number(r.total) || 0);
-      if (r.date && (!p.min || r.date < p.min)) p.min = r.date;
-      if (r.date && (!p.max || r.date > p.max)) p.max = r.date;
+    // Списки для выпадающих фильтров (с учётом другого фильтра).
+    function options_(sel, items, current, allLabel) {
+      var uniq = {}; items.forEach(function (x) { if (x) uniq[x] = true; });
+      if (current) uniq[current] = true;
+      var list = Object.keys(uniq).sort(function (a, b) { return a.localeCompare(b, 'ru'); });
+      sel.innerHTML = '<option value="">' + allLabel + '</option>' + list.map(function (x) {
+        return '<option value="' + escapeHtml(x) + '"' + (x === current ? ' selected' : '') + '>' + escapeHtml(x) + '</option>';
+      }).join('');
+      sel.classList.toggle('active', !!current);
+    }
+    var brigSel = document.getElementById('expBrigFilter');
+    brigSel.hidden = !brigMode;
+    if (brigMode) {
+      options_(brigSel, byStatus.filter(function (r) { return !expObjFilter || r.object === expObjFilter; }).map(brigOf_),
+        expBrigFilter, 'Все бригады');
+    }
+    options_(document.getElementById('expObjFilter'),
+      byStatus.filter(function (r) { return !useBrig || brigOf_(r) === expBrigFilter; }).map(function (r) { return r.object; }),
+      expObjFilter, 'Все объекты');
+
+    var list = byStatus.filter(function (r) {
+      if (expObjFilter && r.object !== expObjFilter) return false;
+      if (useBrig && brigOf_(r) !== expBrigFilter) return false;
+      return true;
     });
-    var arr = Object.keys(people).map(function (k) { return people[k]; })
-      .sort(function (a, b) { return b.sum - a.sum; });
-    var total = arr.reduce(function (a, p) { return a + p.sum; }, 0);
+
+    // Группы: бригады (режим «По бригадам», бригадир не выбран) или люди.
+    var groupByBrig = brigMode && !expBrigFilter;
+    var groups = {};
+    list.forEach(function (r) {
+      var key = groupByBrig ? brigOf_(r) : (r.worker || '(без имени)');
+      var g = groups[key] || (groups[key] = { name: key, sum: 0, rows: [], objects: {}, statuses: {}, people: {}, min: '', max: '' });
+      var t = Number(r.total) || 0;
+      g.sum += t;
+      g.rows.push(r);
+      if (r.object) g.objects[r.object] = true;
+      var sk = r.status || 'Без статуса';
+      g.statuses[sk] = (g.statuses[sk] || 0) + t;
+      var pw = r.worker || '(без имени)';
+      var pp = g.people[pw] || (g.people[pw] = { name: pw, sum: 0, days: {} });
+      pp.sum += t;
+      if (r.date) pp.days[r.date] = true;
+      if (r.date && (!g.min || r.date < g.min)) g.min = r.date;
+      if (r.date && (!g.max || r.date > g.max)) g.max = r.date;
+    });
+    var arr = Object.keys(groups).map(function (k) { return groups[k]; })
+      .sort(function (a, b) {
+        // «Без бригадира» — всегда в конце списка бригад.
+        if (groupByBrig && (a.name === NO_BRIG) !== (b.name === NO_BRIG)) return a.name === NO_BRIG ? 1 : -1;
+        return b.sum - a.sum;
+      });
+    var total = arr.reduce(function (a, g) { return a + g.sum; }, 0);
+    var peopleCount = {}; list.forEach(function (r) { peopleCount[r.worker || '(без имени)'] = true; });
+    var nPeople = Object.keys(peopleCount).length;
 
     document.getElementById('expTotals').innerHTML = arr.length
-      ? '<span class="big">' + money_(total) + '</span><span class="meta">' + arr.length + ' чел. · ' + list.length + ' зап.</span>'
+      ? '<span class="big">' + money_(total) + '</span><span class="meta">' +
+        (groupByBrig ? arr.length + ' бриг. · ' : '') + nPeople + ' чел. · ' + list.length + ' зап.</span>'
       : '';
     var box = document.getElementById('expPeople');
     if (!arr.length) {
-      box.innerHTML = '<div class="statsEmpty">' + (q ? 'Ничего не найдено' : 'Нет записей с этим статусом') + '</div>';
+      box.innerHTML = '<div class="statsEmpty">' + (q || expObjFilter || expBrigFilter ? 'Ничего не найдено' : 'Нет записей с этим статусом') + '</div>';
       return;
     }
     function shortDate_(iso) { var p = String(iso).split('-'); return p.length === 3 ? p[2] + '.' + p[1] : ''; }
-    box.innerHTML = arr.map(function (p) {
-      var objs = Object.keys(p.objects);
-      var days = {}; p.rows.forEach(function (r) { if (r.date) days[r.date] = true; });
-      var nDays = Object.keys(days).length;
-      var meta = nDays + ' ' + daysWord_(nDays) +
-        (p.min ? ' · ' + (p.min === p.max ? fmtIsoRu_(p.min) : shortDate_(p.min) + ' – ' + fmtIsoRu_(p.max)) : '') +
-        (objs.length ? ' · ' + escapeHtml(objs.slice(0, 2).join(', ')) + (objs.length > 2 ? ' и ещё ' + (objs.length - 2) : '') : '');
-      var pills = expViewStatus === '*' ? '<div class="expPills">' + Object.keys(p.statuses).map(function (st) {
+    function dateSpan_(g) { return g.min ? ' · ' + (g.min === g.max ? fmtIsoRu_(g.min) : shortDate_(g.min) + ' – ' + fmtIsoRu_(g.max)) : ''; }
+    function objText_(g) {
+      if (expObjFilter) return '';
+      var objs = Object.keys(g.objects);
+      return objs.length ? ' · ' + escapeHtml(objs.slice(0, 2).join(', ')) + (objs.length > 2 ? ' и ещё ' + (objs.length - 2) : '') : '';
+    }
+    function pills_(g) {
+      return expViewStatus === '*' ? '<div class="expPills">' + Object.keys(g.statuses).map(function (st) {
         return '<span class="expPill"><span class="dot" style="background:' + escapeHtml(expStatusColor_(st)) + '"></span>' +
-          escapeHtml(st) + ' ' + money_(p.statuses[st]) + '</span>';
+          escapeHtml(st) + ' ' + money_(g.statuses[st]) + '</span>';
       }).join('') + '</div>' : '';
-      var open = !!expOpenPeople[p.name];
-      var details = '';
-      if (open) {
-        var sortedRows = p.rows.slice().sort(function (a, b) { return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); });
-        details = '<div class="expDays"><table>' + sortedRows.map(function (r) {
-          var sub = [r.brigadier ? 'бригадир ' + r.brigadier : '', r.comment].filter(Boolean).join(' · ');
-          return '<tr><td class="d">' + (r.date ? fmtIsoRu_(r.date) : '—') + '</td>' +
-            '<td>' + escapeHtml(r.object || '—') + (sub ? '<div class="sub">' + escapeHtml(sub) + '</div>' : '') +
-            (expViewStatus === '*' ? '<div class="sub"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
-              escapeHtml(expStatusColor_(r.status)) + '"></span> ' + escapeHtml(r.status || 'Без статуса') + '</div>' : '') +
-            (r.payDate ? '<div class="sub">погашено ' + fmtIsoRu_(r.payDate) + '</div>' : '') + '</td>' +
-            '<td class="num">' + money_(r.total) + '</td></tr>';
-        }).join('') + '</table></div>';
+    }
+
+    box.innerHTML = arr.map(function (g) {
+      var open = !!expOpenPeople[g.name];
+      var meta, details = '';
+      if (groupByBrig) {
+        var ppl = Object.keys(g.people).map(function (k) { return g.people[k]; }).sort(function (a, b) { return b.sum - a.sum; });
+        meta = ppl.length + ' чел.' + dateSpan_(g) + objText_(g);
+        if (open) {
+          details = '<div class="expDays"><table>' + ppl.map(function (pp) {
+            var nd = Object.keys(pp.days).length;
+            return '<tr><td>' + escapeHtml(pp.name) + '<div class="sub">' + nd + ' ' + daysWord_(nd) + '</div></td>' +
+              '<td class="num">' + money_(pp.sum) + '</td></tr>';
+          }).join('') + '</table>' +
+          (g.name !== NO_BRIG ? '<button type="button" class="expChip expOpenBrig" data-brig="' + escapeHtml(g.name) +
+            '" style="margin:8px 10px 10px;">Все расходы бригады по дням ›</button>' : '') + '</div>';
+        }
+      } else {
+        var days = {}; g.rows.forEach(function (r) { if (r.date) days[r.date] = true; });
+        var nDays = Object.keys(days).length;
+        meta = nDays + ' ' + daysWord_(nDays) + dateSpan_(g) + objText_(g);
+        if (open) {
+          var sortedRows = g.rows.slice().sort(function (a, b) { return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); });
+          details = '<div class="expDays"><table>' + sortedRows.map(function (r) {
+            var sub = [r.brigadier && !useBrig ? 'бригадир ' + r.brigadier : '', r.comment].filter(Boolean).join(' · ');
+            return '<tr><td class="d">' + (r.date ? fmtIsoRu_(r.date) : '—') + '</td>' +
+              '<td>' + escapeHtml(r.object || '—') + (sub ? '<div class="sub">' + escapeHtml(sub) + '</div>' : '') +
+              (expViewStatus === '*' ? '<div class="sub"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
+                escapeHtml(expStatusColor_(r.status)) + '"></span> ' + escapeHtml(r.status || 'Без статуса') + '</div>' : '') +
+              (r.payDate ? '<div class="sub">погашено ' + fmtIsoRu_(r.payDate) + '</div>' : '') + '</td>' +
+              '<td class="num">' + money_(r.total) + '</td></tr>';
+          }).join('') + '</table></div>';
+        }
       }
-      return '<div class="expPerson"><button type="button" class="expPersonHead" data-name="' + escapeHtml(p.name) + '" aria-expanded="' + open + '">' +
-        '<div class="expPersonTop"><span class="expPersonName">' + escapeHtml(p.name) + '</span>' +
-        '<span class="expPersonSum">' + money_(p.sum) + '</span></div>' +
-        '<div class="expPersonMeta">' + meta + '</div>' + pills + '</button>' + details + '</div>';
+      return '<div class="expPerson"><button type="button" class="expPersonHead" data-name="' + escapeHtml(g.name) + '" aria-expanded="' + open + '">' +
+        '<div class="expPersonTop"><span class="expPersonName">' + (groupByBrig && g.name !== NO_BRIG ? 'Бригада: ' : '') + escapeHtml(g.name) + '</span>' +
+        '<span class="expPersonSum">' + money_(g.sum) + '</span></div>' +
+        '<div class="expPersonMeta">' + meta + '</div>' + pills_(g) + '</button>' + details + '</div>';
     }).join('');
   }
+  function setExpMode_(mode) {
+    expViewMode = mode;
+    expBrigFilter = '';
+    expOpenPeople = {};
+    renderExpView();
+  }
+  document.getElementById('expModePeople').addEventListener('click', function () { setExpMode_('people'); });
+  document.getElementById('expModeBrig').addEventListener('click', function () { setExpMode_('brigades'); });
+  document.getElementById('expBrigFilter').addEventListener('change', function () {
+    expBrigFilter = this.value; expOpenPeople = {}; renderExpView();
+  });
+  document.getElementById('expObjFilter').addEventListener('change', function () {
+    expObjFilter = this.value; expOpenPeople = {}; renderExpView();
+  });
   document.getElementById('expChips').addEventListener('click', function (e) {
     var c = e.target.closest('.expChip');
     if (!c) return;
@@ -4062,6 +4161,8 @@
   });
   document.getElementById('expSearch').addEventListener('input', function () { if (expOverview) renderExpView(); });
   document.getElementById('expPeople').addEventListener('click', function (e) {
+    var ob = e.target.closest('.expOpenBrig');
+    if (ob) { expBrigFilter = ob.dataset.brig; expOpenPeople = {}; renderExpView(); return; }
     var h = e.target.closest('.expPersonHead');
     if (!h) return;
     expOpenPeople[h.dataset.name] = !expOpenPeople[h.dataset.name];
