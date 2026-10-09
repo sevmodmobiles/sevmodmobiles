@@ -1,3 +1,8 @@
+// v45: статусы расходов — в выпадающий список колонки "Статус" скрипт сам
+//      добавляет все статусы из сводки в шапке листа ("По Акту", "По Графику",
+//      "Под отчет" и т.д.), которых там нет; уже имеющиеся значения остаются.
+//      Делается при каждой записи расходов, при открытии обзора в приложении и
+//      пунктом меню "Включить строгие списки в расходах".
 // v44: обзор расходов для приложения — adminExpenseOverview: сводка из шапки
 //      листа "Расходы SEVMOD (копия)" (строки над заголовками: подпись, сумма,
 //      цвет ячейки — "ОПЛАЧЕНО", "НЕ ОПЛАЧЕНО", "По Акту", "Под отчет",
@@ -2882,6 +2887,7 @@ function applyExpenseStrictLists_(sheet, lay, lists) {
   if (lists.brigadiers.length) strict_(lay.cols.brigadier, lists.ref.getRange(lists.brigadierCol === 2 ? 'B2:B' : 'A2:A'));
   var objSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
   if (objSheet && lists.objects.length) strict_(lay.cols.object, objSheet.getRange('A2:A'));
+  ensureExpenseStatuses_(sheet, lay);
 }
 
 function applyExpenseStrictListsManual() {
@@ -3119,18 +3125,10 @@ function expenseHistory_() {
   return out;
 }
 
-// Сводка (шапка листа) + строки расходов для экранов "Расходы" и
-// "Посмотреть расходы".
-function adminExpenseOverview(phone) {
-  var auth = adminAuth_(phone);
-  if (!auth.ok) return { status: 'error', message: auth.error };
-  var lay = expenseLayout_();
-  if (lay.error) return { status: 'error', message: lay.error };
-  var sheet = lay.sheet, cols = lay.cols;
+// Шапка листа: в каждой строке над заголовками — подпись и (правее) число,
+// плюс цвет ячейки подписи. [{ label, value (null — суммы нет), color }].
+function expenseSummary_(sheet, lay) {
   var lastCol = sheet.getLastColumn();
-  var tz = Session.getScriptTimeZone();
-
-  // Шапка: в каждой строке над заголовками — подпись и (правее) число.
   var summary = [];
   if (lay.headerRow > 1) {
     var top = sheet.getRange(1, 1, lay.headerRow - 1, lastCol);
@@ -3150,6 +3148,51 @@ function adminExpenseOverview(phone) {
       summary.push({ label: String(disp[r][labelCol]).trim(), value: value, color: bgs[r][labelCol] });
     }
   }
+  return summary;
+}
+
+// Добавляет в выпадающий список колонки "Статус" статусы из сводки шапки,
+// которых в нём нет (сравнение без учёта регистра). Существующие значения
+// сохраняются. Правило меняется, только если чего-то не хватает.
+function ensureExpenseStatuses_(sheet, lay) {
+  var col = lay.cols.status;
+  if (!col) return;
+  var n = sheet.getMaxRows() - lay.headerRow;
+  if (n < 1) return;
+  var current = [];
+  var rule = sheet.getRange(lay.headerRow + 1, col).getDataValidation();
+  if (rule && rule.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+    current = (rule.getCriteriaValues()[0] || []).map(function (v) { return String(v).trim(); }).filter(String);
+  }
+  var have = {};
+  current.forEach(function (v) { have[v.toLowerCase()] = true; });
+  var missing = [];
+  expenseSummary_(sheet, lay).forEach(function (x) {
+    var k = x.label.toLowerCase();
+    if (x.label && !have[k]) { have[k] = true; missing.push(x.label); }
+  });
+  if (!have[EXPENSE_DEFAULT_STATUS.toLowerCase()]) missing.push(EXPENSE_DEFAULT_STATUS);
+  if (!missing.length) return;
+  var newRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(current.concat(missing), true)
+    .setAllowInvalid(rule ? rule.getAllowInvalid() : false)
+    .build();
+  sheet.getRange(lay.headerRow + 1, col, n, 1).setDataValidation(newRule);
+}
+
+// Сводка (шапка листа) + строки расходов для экранов "Расходы" и
+// "Посмотреть расходы".
+function adminExpenseOverview(phone) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  var lay = expenseLayout_();
+  if (lay.error) return { status: 'error', message: lay.error };
+  var sheet = lay.sheet, cols = lay.cols;
+  var lastCol = sheet.getLastColumn();
+  var tz = Session.getScriptTimeZone();
+
+  try { ensureExpenseStatuses_(sheet, lay); } catch (e) { /* обзор важнее */ }
+  var summary = expenseSummary_(sheet, lay);
 
   // Строки расходов.
   var rows = [];
