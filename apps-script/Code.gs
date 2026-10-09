@@ -1,3 +1,8 @@
+// v43: расходы по бригадам. adminAddExpense принимает entries [{worker, rate}]
+//      — несколько работников с бригадиром, у каждого своя ставка; строка на
+//      каждый день и каждого работника. adminExpenseLookups дополнительно
+//      отдаёт brigades (состав бригады = работники последней записи с этим
+//      бригадиром, со ставками) и lastRates (последняя ставка работника).
 // v42: расходы — жёсткий выбор из списков. Новый лист "Справочник расходов"
 //      (создаётся сам): колонка A "Работники", колонка B "Бригадиры" (если B
 //      пустая — бригадиром можно выбрать любого из работников). Колонкам
@@ -364,7 +369,7 @@ function doPost(e) {
     }
     if (data.action === 'adminAddExpense') {
       return jsonOutput(adminAddExpense(data.phone, data.date, data.worker, data.brigadier,
-        data.objectName, data.rate, data.comment, data.dateTo));
+        data.objectName, data.rate, data.comment, data.dateTo, data.entries));
     }
     if (data.action === 'adminExpenseLookups') {
       return jsonOutput(adminExpenseLookups(data.phone));
@@ -2943,9 +2948,12 @@ function expenseMatch_(allowed, value) {
   return allowed.strict ? null : value;
 }
 
-// dateToIso — необязательный конец периода (включительно). Если он задан и
-// позже dateIso, на каждый день периода пишется отдельная строка.
-function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso) {
+var EXPENSE_MAX_ROWS = 600;
+
+// Запись расходов. Работники — либо один (worker + rate), либо список entries
+// [{ worker, rate }] (бригада: у каждого своя ставка). dateToIso — конец
+// периода (включительно): на каждый день и каждого работника — своя строка.
+function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso, entries) {
   var auth = adminAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
 
@@ -2963,115 +2971,88 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
   }
   var days = dates.length;
 
-  // Жёсткий выбор: работник, бригадир и объект — только из списков.
+  // Жёсткий выбор: работники, бригадир и объект — только из списков.
   var lists = getExpenseRefLists_();
   if (!lists.workers.length) {
     return { status: 'error', message: 'Список работников пуст — заполните колонку «Работники» на листе «' + EXPENSE_REF_SHEET_NAME + '».' };
   }
-  var pickedWorker = pickFromList_(lists.workers, worker);
-  if (pickedWorker === null) return { status: 'error', message: 'Работника «' + String(worker).trim() + '» нет в списке. Выберите из списка.' };
   var pickedBrigadier = pickFromList_(lists.brigadiers, brigadier);
   if (pickedBrigadier === null) return { status: 'error', message: 'Бригадира «' + String(brigadier).trim() + '» нет в списке. Выберите из списка.' };
   var pickedObject = pickFromList_(lists.objects, objectName);
   if (pickedObject === null) return { status: 'error', message: 'Объекта «' + String(objectName).trim() + '» нет в списке. Выберите из списка.' };
-  worker = pickedWorker;
+  if (!pickedObject) return { status: 'error', message: 'Укажите объект' };
   brigadier = pickedBrigadier;
   objectName = pickedObject;
-  worker = String(worker || '').trim();
-  brigadier = String(brigadier || '').trim();
-  objectName = String(objectName || '').trim();
   comment = String(comment || '').trim().slice(0, 500);
-  if (!worker) return { status: 'error', message: 'Укажите работника' };
-  if (!objectName) return { status: 'error', message: 'Укажите объект' };
-  var amount = Number(String(rate).replace(/\s/g, '').replace(',', '.'));
-  if (!isFinite(amount) || amount <= 0) return { status: 'error', message: 'Укажите ставку (число больше нуля)' };
+
+  var raw = (entries && entries.length) ? entries : [{ worker: worker, rate: rate }];
+  var people = [], seenPeople = {};
+  for (var ei = 0; ei < raw.length; ei++) {
+    var w = pickFromList_(lists.workers, raw[ei] && raw[ei].worker);
+    if (w === null) return { status: 'error', message: 'Работника «' + String(raw[ei].worker).trim() + '» нет в списке. Выберите из списка.' };
+    if (!w) return { status: 'error', message: 'Укажите работника' };
+    var amt = Number(String(raw[ei].rate).replace(/\s/g, '').replace(',', '.'));
+    if (!isFinite(amt) || amt <= 0) return { status: 'error', message: 'Укажите ставку для «' + w + '» (число больше нуля)' };
+    if (seenPeople[w]) continue;
+    seenPeople[w] = true;
+    people.push({ worker: w, rate: amt });
+  }
+  if (!people.length) return { status: 'error', message: 'Выберите хотя бы одного работника' };
+
+  // Строки: по дням, внутри дня — по работникам.
+  var rowsData = [];
+  dates.forEach(function (dt) {
+    people.forEach(function (pp) { rowsData.push({ date: dt, worker: pp.worker, rate: pp.rate }); });
+  });
+  var count = rowsData.length;
+  if (count > EXPENSE_MAX_ROWS) {
+    return { status: 'error', message: 'Слишком много строк за раз (' + count + '). Сократите период или число работников.' };
+  }
 
   var lock = LockService.getScriptLock();
-  lock.waitLock(15000);
+  lock.waitLock(20000);
   try {
     var lay = expenseLayout_();
     if (lay.error) return { status: 'error', message: lay.error };
     var sheet = lay.sheet, cols = lay.cols;
     applyExpenseStrictLists_(sheet, lay, lists);
 
-    // Пишем после последней строки с данными, затем сортируем по дате.
     var lastUsed = expenseLastDataRow_(sheet, lay);
     var row = lastUsed + 1;
-    var rowTo = row + days - 1;
-
-    // Проверка по выпадающим спискам листа — до записи, чтобы не оставить
-    // недописанных строк. Правило берём у строки, куда пишем (или у
-    // последней заполненной, если ниже проверки нет).
-    function allowedFor_(col) {
-      if (!col) return null;
-      return expenseAllowed_(sheet, Math.min(row, sheet.getMaxRows()), col) ||
-        (lastUsed > lay.headerRow ? expenseAllowed_(sheet, lastUsed, col) : null);
-    }
-    var checks = [
-      { col: cols.worker, label: 'Работник', get: function () { return worker; }, set: function (v) { worker = v; } },
-      { col: cols.brigadier, label: 'Бригадир', get: function () { return brigadier; }, set: function (v) { brigadier = v; } },
-      { col: cols.object, label: 'Объект', get: function () { return objectName; }, set: function (v) { objectName = v; } }
-    ];
-    var warn = [];
-    for (var ci = 0; ci < checks.length; ci++) {
-      var ch = checks[ci];
-      var allowed = allowedFor_(ch.col);
-      if (allowed && allowed.broken) {
-        allowed = repairExpenseValidation_(sheet, lay.headerRow, ch.col, ch.col === cols.object, row, days);
-        warn.push(allowed
-          ? 'выпадающий список колонки «' + ch.label + '» ссылался на несуществующий лист — перенастроен на лист «Объекты»'
-          : 'у колонки «' + ch.label + '» сломан выпадающий список (ссылается на несуществующий лист) — для новых строк он снят');
-      }
-      var matched = expenseMatch_(allowed, ch.get());
-      if (matched === null) {
-        return {
-          status: 'error',
-          message: '«' + ch.get() + '» нет в списке колонки «' + ch.label + '» листа «' + EXPENSE_SHEET_NAME +
-            '». Выберите значение из подсказки или добавьте его в список проверки данных в таблице.'
-        };
-      }
-      ch.set(matched);
-    }
-    var statusAllowed = allowedFor_(cols.status);
-    if (statusAllowed && statusAllowed.broken) {
-      statusAllowed = repairExpenseValidation_(sheet, lay.headerRow, cols.status, false, row, days);
-    }
-    var statusValue = expenseMatch_(statusAllowed, EXPENSE_DEFAULT_STATUS) || '';
+    var rowTo = row + count - 1;
     if (rowTo > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), rowTo - sheet.getMaxRows());
 
-    // Одна колонка — один вызов setValues на все дни периода.
-    function fill_(col, value) {
-      var vals = [];
-      for (var k = 0; k < days; k++) vals.push([value]);
-      return sheet.getRange(row, col, days, 1).setValues(vals);
+    var warn = [];
+    // Статус по умолчанию — если он допустим выпадающим списком колонки.
+    var statusAllowed = cols.status ? expenseAllowed_(sheet, row, cols.status) : null;
+    if (statusAllowed && statusAllowed.broken) {
+      statusAllowed = repairExpenseValidation_(sheet, lay.headerRow, cols.status, false, row, count);
     }
-    sheet.getRange(row, cols.date, days, 1)
-      .setValues(dates.map(function (x) { return [x]; }))
-      .setNumberFormat('dd.MM.yyyy');
-    fill_(cols.worker, worker);
-    if (cols.brigadier) fill_(cols.brigadier, brigadier);
-    fill_(cols.object, objectName);
-    fill_(cols.rate, amount);
-    if (cols.comment) fill_(cols.comment, comment);
+    var statusValue = expenseMatch_(statusAllowed, EXPENSE_DEFAULT_STATUS) || '';
 
-    // Служебные колонки рабочего листа. Формулу из предыдущей строки
-    // протягиваем, иначе пишем значение по умолчанию.
-    function fillAuto_(col, valueForDate) {
+    function column_(col, fn) {
+      if (!col) return null;
+      return sheet.getRange(row, col, count, 1).setValues(rowsData.map(function (x) { return [fn(x)]; }));
+    }
+    column_(cols.date, function (x) { return x.date; }).setNumberFormat('dd.MM.yyyy');
+    column_(cols.worker, function (x) { return x.worker; });
+    column_(cols.brigadier, function () { return brigadier; });
+    column_(cols.object, function () { return objectName; });
+    column_(cols.rate, function (x) { return x.rate; });
+    column_(cols.comment, function () { return comment; });
+
+    // Служебные колонки: формулу предыдущей строки протягиваем, иначе значение.
+    function fillAuto_(col, fn) {
       if (!col) return;
-      // Колонку считает ARRAYFORMULA (в заголовке или первой строке данных) —
-      // не трогаем, иначе формула сломается.
       var top2 = sheet.getRange(lay.headerRow, col, 2, 1).getFormulas();
       if (/ARRAYFORMULA/i.test(top2[0][0] + top2[1][0])) return;
       var formula = lastUsed > lay.headerRow ? sheet.getRange(lastUsed, col).getFormulaR1C1() : '';
-      if (formula) {
-        sheet.getRange(row, col, days, 1).setFormulaR1C1(formula);
-      } else {
-        sheet.getRange(row, col, days, 1).setValues(dates.map(function (x) { return [valueForDate(x)]; }));
-      }
+      if (formula) sheet.getRange(row, col, count, 1).setFormulaR1C1(formula);
+      else column_(col, fn);
     }
-    fillAuto_(cols.month, function (x) { return x.getMonth() + 1; });
+    fillAuto_(cols.month, function (x) { return x.date.getMonth() + 1; });
     fillAuto_(cols.count, function () { return 1; });
-    fillAuto_(cols.total, function () { return amount; });
+    fillAuto_(cols.total, function (x) { return x.rate; });
     fillAuto_(cols.status, function () { return statusValue; });
     SpreadsheetApp.flush();
 
@@ -3083,13 +3064,49 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     } catch (e) {
       warn.push('строки добавлены в конец, но отсортировать лист по дате не удалось: ' + e.message);
     }
-
     if (!cols.brigadier && brigadier) warn.push('в таблице нет столбца «Бригадир» — бригадир не записан');
     if (!cols.comment && comment) warn.push('в таблице нет столбца «Комментарий» — комментарий не записан');
-    return { status: 'ok', row: row, rowTo: rowTo, days: days, sorted: sorted, warning: warn.join('; ') };
+    var total = rowsData.reduce(function (a, x) { return a + x.rate; }, 0);
+    return {
+      status: 'ok', row: row, rowTo: rowTo, days: days, rows: count, people: people.length,
+      total: total, sorted: sorted, warning: warn.join('; ')
+    };
   } finally {
     lock.releaseLock();
   }
+}
+
+// По листу расходов: состав бригад (работники самой поздней даты, на которую
+// есть записи с этим бригадиром, + их ставки в тот день) и последняя ставка
+// каждого работника.
+function expenseHistory_() {
+  var lay = expenseLayout_();
+  var out = { brigades: {}, lastRates: {} };
+  if (lay.error) return out;
+  var sheet = lay.sheet, cols = lay.cols;
+  var last = expenseLastDataRow_(sheet, lay);
+  var first = lay.headerRow + 1;
+  if (last < first) return out;
+  var n = last - first + 1;
+  function col_(c) { return c ? sheet.getRange(first, c, n, 1).getValues() : null; }
+  var dts = col_(cols.date), ws = col_(cols.worker), bs = col_(cols.brigadier), rs = col_(cols.rate);
+  var brigDate = {}, rateDate = {};
+  for (var i = 0; i < n; i++) {
+    var dt = dts[i][0] instanceof Date ? dts[i][0].getTime() : 0;
+    var w = String(ws[i][0] || '').trim();
+    var r = Number(rs[i][0]) || 0;
+    if (!w) continue;
+    if (r > 0 && (rateDate[w] === undefined || dt >= rateDate[w])) { rateDate[w] = dt; out.lastRates[w] = r; }
+    var b = bs ? String(bs[i][0] || '').trim() : '';
+    if (!b) continue;
+    if (brigDate[b] === undefined || dt > brigDate[b]) { brigDate[b] = dt; out.brigades[b] = {}; }
+    if (dt === brigDate[b]) out.brigades[b][w] = r;
+  }
+  Object.keys(out.brigades).forEach(function (b) {
+    var m = out.brigades[b];
+    out.brigades[b] = Object.keys(m).map(function (w) { return { worker: w, rate: m[w] }; });
+  });
+  return out;
 }
 
 // Списки для формы — те же, что проверяются при записи (жёсткий выбор):
@@ -3099,12 +3116,16 @@ function adminExpenseLookups(phone) {
   if (!auth.ok) return { status: 'error', message: auth.error };
   var lists = getExpenseRefLists_();
   function sorted_(a) { return a.slice().sort(function (x, y) { return x.localeCompare(y, 'ru'); }); }
+  var hist = { brigades: {}, lastRates: {} };
+  try { hist = expenseHistory_(); } catch (e) { /* подсказки необязательны */ }
   return {
     status: 'ok',
     strict: true,
     workers: sorted_(lists.workers),
     brigadiers: sorted_(lists.brigadiers),
     objects: sorted_(lists.objects),
+    brigades: hist.brigades,
+    lastRates: hist.lastRates,
     refSheet: EXPENSE_REF_SHEET_NAME
   };
 }

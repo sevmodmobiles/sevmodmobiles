@@ -829,6 +829,15 @@
   #expDateModal .modalBox { max-width: 400px; }
   #expPeriodNote { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
   .pickError { font-size: 13px; color: var(--red); margin: -8px 0 12px; }
+  .brigadeList { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; }
+  .brigadeRow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .brigadeRow:last-child { border-bottom: none; }
+  .brigadeRow input[type=checkbox] { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--green); }
+  .brigadeRow .brigadeName { flex: 1; min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
+  .brigadeRow.off .brigadeName { color: var(--muted); text-decoration: line-through; }
+  .brigadeRow input.brigadeRate { width: 110px; flex: none; margin: 0; padding: 9px 10px; font-size: 15px; text-align: right; }
+  .brigadeRow.off input.brigadeRate { opacity: 0.4; }
+  .brigadeEmpty { padding: 12px; font-size: 13px; color: var(--muted); }
 
   /* ===== Нижняя навигация ===== */
   /* Показывается только когда человек вошёл (см. showBottomNav/hideBottomNav
@@ -1348,17 +1357,31 @@
       <button id="expDateBtn" class="dateField" type="button" aria-haspopup="dialog">
         <span id="expDateText">—</span><span class="dateFieldIcon" aria-hidden="true">📅</span>
       </button>
-      <label for="expWorker" style="margin-top:10px;">Работник</label>
-      <input id="expWorker" type="text" autocomplete="off" placeholder="Выберите из списка">
-      <div id="expWorkerErr" class="pickError" hidden></div>
       <label for="expBrigadier" style="margin-top:10px;">Бригадир</label>
       <input id="expBrigadier" type="text" autocomplete="off" placeholder="Необязательно — выберите из списка">
       <div id="expBrigadierErr" class="pickError" hidden></div>
+
+      <!-- Без бригадира: один работник и его ставка -->
+      <div id="expSingleWrap">
+        <label for="expWorker" style="margin-top:10px;">Работник</label>
+        <input id="expWorker" type="text" autocomplete="off" placeholder="Выберите из списка">
+        <div id="expWorkerErr" class="pickError" hidden></div>
+        <label for="expRate" style="margin-top:10px;">Ставка, ₽</label>
+        <input id="expRate" type="number" inputmode="decimal" min="0" step="any" placeholder="Например: 4000">
+      </div>
+
+      <!-- С бригадиром: состав бригады (по последней записи) с галочками и ставками -->
+      <div id="expBrigadeWrap" hidden>
+        <label style="margin-top:10px;">Бригада — снимите галочку, если человек не работал</label>
+        <div id="expBrigadeList" class="brigadeList"></div>
+        <label for="expAddWorker" style="margin-top:10px;">Добавить работника в бригаду</label>
+        <input id="expAddWorker" type="text" autocomplete="off" placeholder="Выберите из списка">
+        <div id="expAddWorkerErr" class="pickError" hidden></div>
+      </div>
+
       <label for="expObject" style="margin-top:10px;">Объект</label>
       <input id="expObject" type="text" autocomplete="off" placeholder="Выберите из списка">
       <div id="expObjectErr" class="pickError" hidden></div>
-      <label for="expRate" style="margin-top:10px;">Ставка, ₽</label>
-      <input id="expRate" type="number" inputmode="decimal" min="0" step="any" placeholder="Например: 4000">
       <label for="expComment" style="margin-top:10px;">Комментарий</label>
       <input id="expComment" type="text" maxlength="500" placeholder="Необязательно">
       <div id="expPeriodNote" hidden></div>
@@ -3325,7 +3348,7 @@
 
 
   // ===== Админ: добавить расходы (запись в таблицу расходов) =====
-  var expLookups = { workers: [], brigadiers: [], objects: [] };
+  var expLookups = { workers: [], brigadiers: [], objects: [], brigades: {}, lastRates: {} };
   var expStatusEl = document.getElementById('expStatus');
   function setExpStatus(text, kind) {
     expStatusEl.textContent = text;
@@ -3362,7 +3385,10 @@
     apiPost({ action: 'adminExpenseLookups', phone: currentUser && currentUser.phone })
       .then(function (res) {
         if (res && res.status === 'ok') {
-          expLookups = { workers: res.workers || [], brigadiers: res.brigadiers || [], objects: res.objects || [], loaded: true };
+          expLookups = {
+            workers: res.workers || [], brigadiers: res.brigadiers || [], objects: res.objects || [],
+            brigades: res.brigades || {}, lastRates: res.lastRates || {}, loaded: true
+          };
           if (!expLookups.workers.length) {
             showPickError('expWorker', 'Список работников пуст — заполните колонку «Работники» на листе «' +
               (res.refSheet || 'Справочник расходов') + '» в таблице.');
@@ -3417,6 +3443,92 @@
     input.addEventListener('change', function () { showPickError(f.id, ''); });
   });
 
+  // ----- Бригада: выбран бригадир — список работников с галочками и ставками -----
+  var expBrigade = [];            // [{ worker, rate, checked }]
+  var expBrigadeFor = '';         // для какого бригадира собран список
+  function lastRateOf_(w) { var r = expLookups.lastRates && expLookups.lastRates[w]; return r ? String(r) : ''; }
+
+  function renderBrigade() {
+    var listEl = document.getElementById('expBrigadeList');
+    if (!expBrigade.length) {
+      listEl.innerHTML = '<div class="brigadeEmpty">Состав бригады ещё не сохранён — добавьте работников ниже. ' +
+        'В следующий раз этот состав подставится сам.</div>';
+    } else {
+      listEl.innerHTML = expBrigade.map(function (m, i) {
+        return '<div class="brigadeRow' + (m.checked ? '' : ' off') + '" data-i="' + i + '">' +
+          '<input type="checkbox" id="expBr' + i + '"' + (m.checked ? ' checked' : '') + '>' +
+          '<label class="brigadeName" for="expBr' + i + '" style="margin:0;color:inherit;font-size:15px;">' + escapeHtml(m.worker) + '</label>' +
+          '<input class="brigadeRate" type="number" inputmode="decimal" min="0" step="any" placeholder="Ставка" value="' +
+          escapeHtml(m.rate) + '" aria-label="Ставка для ' + escapeHtml(m.worker) + '">' +
+          '</div>';
+      }).join('');
+    }
+    renderExpPeriodNote();
+  }
+  document.getElementById('expBrigadeList').addEventListener('change', function (e) {
+    var rowEl = e.target.closest('.brigadeRow');
+    if (!rowEl || e.target.type !== 'checkbox') return;
+    expBrigade[Number(rowEl.dataset.i)].checked = e.target.checked;
+    rowEl.classList.toggle('off', !e.target.checked);
+    renderExpPeriodNote();
+  });
+  document.getElementById('expBrigadeList').addEventListener('input', function (e) {
+    var rowEl = e.target.closest('.brigadeRow');
+    if (!rowEl || !e.target.classList.contains('brigadeRate')) return;
+    expBrigade[Number(rowEl.dataset.i)].rate = e.target.value;
+    renderExpPeriodNote();
+  });
+
+  // Режим формы по полю «Бригадир»: пусто — один работник, выбран — бригада.
+  function updateBrigadeMode() {
+    var b = pickFromList_(expLookups.brigadiers, document.getElementById('expBrigadier').value);
+    var on = !!b;
+    document.getElementById('expSingleWrap').hidden = on;
+    document.getElementById('expBrigadeWrap').hidden = !on;
+    if (on && b !== expBrigadeFor) {
+      expBrigadeFor = b;
+      expBrigade = ((expLookups.brigades && expLookups.brigades[b]) || []).map(function (m) {
+        return { worker: m.worker, rate: m.rate ? String(m.rate) : lastRateOf_(m.worker), checked: true };
+      });
+      renderBrigade();
+    }
+    if (!on) { expBrigadeFor = ''; expBrigade = []; }
+    renderExpPeriodNote();
+  }
+  var brigInput = document.getElementById('expBrigadier');
+  brigInput.addEventListener('change', updateBrigadeMode);
+  brigInput.addEventListener('blur', function () { setTimeout(updateBrigadeMode, 260); });
+  brigInput.addEventListener('input', function () { if (!brigInput.value.trim()) updateBrigadeMode(); });
+
+  // Добавить работника в бригаду — тоже строго из списка.
+  var addWorkerField = { id: 'expAddWorker', label: 'работника', items: function () { return expLookups.workers; } };
+  initAutocomplete(document.getElementById('expAddWorker'), function () {
+    return expLookups.workers.filter(function (w) {
+      return !expBrigade.some(function (m) { return m.worker === w; });
+    });
+  });
+  function addWorkerToBrigade() {
+    var input = document.getElementById('expAddWorker');
+    if (!input.value.trim() || !enforcePick(addWorkerField)) return;
+    var w = input.value;
+    var existing = expBrigade.filter(function (m) { return m.worker === w; })[0];
+    if (existing) existing.checked = true;
+    else expBrigade.push({ worker: w, rate: lastRateOf_(w), checked: true });
+    input.value = '';
+    renderBrigade();
+  }
+  document.getElementById('expAddWorker').addEventListener('change', addWorkerToBrigade);
+  document.getElementById('expAddWorker').addEventListener('blur', function () { setTimeout(addWorkerToBrigade, 200); });
+
+  // Один работник: после выбора подставляем его последнюю ставку, если поле пустое.
+  document.getElementById('expWorker').addEventListener('change', function () {
+    var rateEl = document.getElementById('expRate');
+    var w = pickFromList_(expLookups.workers, this.value);
+    if (w && !rateEl.value) { rateEl.value = lastRateOf_(w); renderExpPeriodNote(); }
+  });
+
+  function expBrigadeMode() { return !document.getElementById('expBrigadeWrap').hidden; }
+
   // ----- Дата / период расходов -----
   var EXP_MAX_DAYS = 62;
   var expRange = { from: '', to: '' };          // применённый выбор (ISO)
@@ -3455,6 +3567,7 @@
   }
   // Под формой: сколько строк будет добавлено и на какую сумму (для периода).
   function renderExpPeriodNote() {
+    if (typeof expBrigadeMode === 'function' && expBrigadeMode()) { renderBrigadeNote(); return; }
     var el = document.getElementById('expPeriodNote');
     var n = expRange.from ? daysBetween_(expRange.from, expRange.to || expRange.from) : 1;
     if (n <= 1) { el.hidden = true; return; }
@@ -3464,6 +3577,19 @@
     el.hidden = false;
   }
   document.getElementById('expRate').addEventListener('input', renderExpPeriodNote);
+  // Для бригады: строк = дни × отмеченные работники, сумма = дни × их ставки.
+  function renderBrigadeNote() {
+    var el = document.getElementById('expPeriodNote');
+    var n = expRange.from ? daysBetween_(expRange.from, expRange.to || expRange.from) : 1;
+    var picked = expBrigade.filter(function (m) { return m.checked; });
+    if (!picked.length) { el.hidden = true; return; }
+    var perDay = picked.reduce(function (a, m) { return a + (Number(String(m.rate).replace(',', '.')) || 0); }, 0);
+    var rows = n * picked.length;
+    el.textContent = 'Будет добавлено ' + rows + ' ' + (rows === 1 ? 'строка' : (rows % 10 >= 2 && rows % 10 <= 4 && (rows % 100 < 12 || rows % 100 > 14) ? 'строки' : 'строк')) +
+      ': ' + picked.length + ' чел. × ' + n + ' ' + daysWord_(n) +
+      (perDay > 0 ? ' — итого ' + (perDay * n).toLocaleString('ru-RU') + ' ₽' : '') + '.';
+    el.hidden = false;
+  }
 
   function renderExpCal() {
     var y = expCalMonth.getFullYear(), m = expCalMonth.getMonth();
@@ -3579,9 +3705,22 @@
     payload.objectName = document.getElementById('expObject').value.trim();
     if (!picksOk) { setExpStatus('Выберите значения из списков', 'error'); return; }
     if (!payload.date) { setExpStatus('Укажите дату', 'error'); return; }
-    if (!payload.worker) { setExpStatus('Укажите работника', 'error'); return; }
+    var whoText;
+    if (expBrigadeMode()) {
+      var picked = expBrigade.filter(function (m) { return m.checked; });
+      if (!picked.length) { setExpStatus('Отметьте хотя бы одного работника бригады', 'error'); return; }
+      var noRate = picked.filter(function (m) { return !(Number(String(m.rate).replace(',', '.')) > 0); });
+      if (noRate.length) { setExpStatus('Укажите ставку: ' + noRate.map(function (m) { return m.worker; }).join(', '), 'error'); return; }
+      payload.entries = picked.map(function (m) { return { worker: m.worker, rate: m.rate }; });
+      payload.worker = '';
+      payload.rate = '';
+      whoText = 'Бригада ' + payload.brigadier + ' (' + picked.length + ' чел.)';
+    } else {
+      if (!payload.worker) { setExpStatus('Укажите работника', 'error'); return; }
+      if (!(Number(payload.rate) > 0)) { setExpStatus('Укажите ставку', 'error'); return; }
+      whoText = payload.worker;
+    }
     if (!payload.objectName) { setExpStatus('Укажите объект', 'error'); return; }
-    if (!(Number(payload.rate) > 0)) { setExpStatus('Укажите ставку', 'error'); return; }
     btn.disabled = true;
     setExpStatus('Записываю в таблицу…');
     apiPost(payload)
@@ -3590,7 +3729,12 @@
         if (res.status === 'ok') {
           var sentDays = daysBetween_(payload.date, payload.dateTo);
           var n = res.days || 1;
-          var msg = '✓ ' + payload.worker + ': добавлено ' + n + ' ' + (n === 1 ? 'строка' : (n < 5 ? 'строки' : 'строк')) +
+          var rowsN = res.rows || n;
+          if (payload.entries && !res.rows) {
+            setExpStatus('Скрипт в таблице устарел и не умеет записывать бригаду — обновите его до v43', 'error');
+            return;
+          }
+          var msg = '✓ ' + whoText + ': добавлено ' + rowsN + ' ' + (rowsN % 10 === 1 && rowsN % 100 !== 11 ? 'строка' : (rowsN % 10 >= 2 && rowsN % 10 <= 4 && (rowsN % 100 < 12 || rowsN % 100 > 14) ? 'строки' : 'строк')) +
             ' (' + fmtIsoRu_(payload.date) + (n > 1 ? ' – ' + fmtIsoRu_(payload.dateTo) : '') + ')' +
             (res.sorted ? ', таблица отсортирована по дате' : '');
           if (sentDays > 1 && !res.days) {
@@ -3602,7 +3746,16 @@
           ['expWorker', 'expBrigadier', 'expObject', 'expRate', 'expComment'].forEach(function (id) {
             document.getElementById(id).value = '';
           });
+          document.getElementById('expAddWorker').value = '';
           expRange = { from: isoToday_(), to: isoToday_() };
+          // Запомненный состав этой бригады обновляем локально (сервер вернёт его же при следующей загрузке).
+          if (payload.entries) {
+            expLookups.brigades[payload.brigadier] = payload.entries.map(function (e) { return { worker: e.worker, rate: Number(e.rate) }; });
+          }
+          (payload.entries || [{ worker: payload.worker, rate: payload.rate }]).forEach(function (e) {
+            if (e.worker) expLookups.lastRates[e.worker] = Number(e.rate);
+          });
+          updateBrigadeMode();
           renderExpDateField();
           EXP_PICK_FIELDS.forEach(function (f) { showPickError(f.id, ''); });
         } else {
