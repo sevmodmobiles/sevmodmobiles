@@ -280,7 +280,7 @@
     background: rgba(66,133,244,0.12);
     border-radius: 8px;
   }
-  #status, #regStatus, #loginStatus {
+  #status, #regStatus, #loginStatus, #expStatus {
     text-align: center;
     font-size: 14px;
     color: var(--muted);
@@ -756,7 +756,7 @@
   #screenScan #reader { margin-top: 8px; }
 
   /* ===== Отсутствия (отгулы / больничные) ===== */
-  #screenAbsence, #screenAdminAbsences { display: none; }
+  #screenAbsence, #screenAdminAbsences, #screenAdminExpense { display: none; }
   .absTotals { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
   .absTable { width: 100%; border-collapse: collapse; font-size: 13px; }
   .absTable th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--border); }
@@ -1189,6 +1189,10 @@
       </div>
 
       <div class="card">
+        <button id="goToAdminExpenseBtn" type="button">Добавить расходы</button>
+      </div>
+
+      <div class="card">
         <button id="goToAdminAbsencesBtn" type="button" class="hasDot">Согласовать отгулы</button>
       </div>
     </div>
@@ -1295,6 +1299,31 @@
     </div>
     <div class="card">
       <div id="adminAbsencesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Экран "Добавить расходы" (только админ): строка пишется в лист
+       "Расходы SEVMOD" внешней таблицы расходов (см. adminAddExpense). -->
+  <div id="screenAdminExpense">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Добавить расходы</h1>
+      <div class="switchUser"><a id="adminExpenseBackLink">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <label for="expDate">Дата</label>
+      <input id="expDate" type="date">
+      <label for="expWorker" style="margin-top:10px;">Работник</label>
+      <input id="expWorker" type="text" autocomplete="off" placeholder="Например: Умар">
+      <label for="expBrigadier" style="margin-top:10px;">Бригадир</label>
+      <input id="expBrigadier" type="text" autocomplete="off" placeholder="Необязательно">
+      <label for="expObject" style="margin-top:10px;">Объект</label>
+      <input id="expObject" type="text" autocomplete="off" placeholder="Начните вводить название">
+      <label for="expRate" style="margin-top:10px;">Ставка, ₽</label>
+      <input id="expRate" type="number" inputmode="decimal" min="0" step="any" placeholder="Например: 4000">
+      <label for="expComment" style="margin-top:10px;">Комментарий</label>
+      <input id="expComment" type="text" maxlength="500" placeholder="Необязательно">
+      <button id="expSubmitBtn" type="button" style="margin-top:10px;">Добавить в таблицу</button>
+      <div id="expStatus"></div>
     </div>
   </div>
 
@@ -1588,6 +1617,7 @@
   var screenProfile = document.getElementById('screenProfile');
   var screenAbsence = document.getElementById('screenAbsence');
   var screenAdminAbsences = document.getElementById('screenAdminAbsences');
+  var screenAdminExpense = document.getElementById('screenAdminExpense');
   var bottomNav = document.getElementById('bottomNav');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
@@ -1663,6 +1693,7 @@
         case 'profile': showProfileScreen(); break;
         case 'absence': showAbsenceScreen(state.mode); break;
         case 'adminAbsences': showAdminAbsencesScreen(); break;
+        case 'adminExpense': showAdminExpenseScreen(); break;
         default: showScanScreen();
       }
     } finally {
@@ -1709,6 +1740,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
@@ -1764,6 +1796,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenLogin.style.display = 'block';
     hideBottomNav();
     pushScreenState('login');
@@ -1782,6 +1815,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
     hideBottomNav();
@@ -1929,6 +1963,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
@@ -1951,6 +1986,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
@@ -1986,6 +2022,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenAbsence.style.display = 'block';
 
     var isPartial = absenceMode === 'partial';
@@ -2133,6 +2170,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'block';
+    screenAdminExpense.style.display = 'none';
     hideAdminPopup_();
     saveNotified_(adminPendingCount);
     loadAdminAbsences();
@@ -2220,6 +2258,7 @@
     screenTaskDetail.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenProfile.style.display = 'block';
     document.getElementById('profileWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     refreshAdminStatus();
@@ -2332,6 +2371,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenTaskDetail.style.display = 'block';
     document.getElementById('taskDetailLoading').style.display = 'block';
     document.getElementById('taskDetailBody').style.display = 'none';
@@ -2511,6 +2551,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenAdmin.style.display = 'block';
     showBottomNav();
     setActiveNav('profile');
@@ -2532,6 +2573,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenTaskManage.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
@@ -2554,6 +2596,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
     showBottomNav();
@@ -2575,6 +2618,7 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'none';
     screenAdminObjects.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
     loadAdminObjects();
@@ -3219,6 +3263,102 @@
   document.getElementById('adminPopupCloseBtn').addEventListener('click', hideAdminPopup_);
   document.getElementById('profileAbsenceApproveBtn').addEventListener('click', function () {
     showAdminAbsencesScreen();
+  });
+
+
+  // ===== Админ: добавить расходы (запись в таблицу расходов) =====
+  var expLookups = { workers: [], brigadiers: [], objects: [] };
+  var expStatusEl = document.getElementById('expStatus');
+  function setExpStatus(text, kind) {
+    expStatusEl.textContent = text;
+    expStatusEl.className = kind || '';
+  }
+
+  function showAdminExpenseScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
+    screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
+    screenAdminExpense.style.display = 'block';
+    var dateEl = document.getElementById('expDate');
+    if (!dateEl.value) dateEl.value = isoToday_();
+    setExpStatus('');
+    loadExpLookups();
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('adminExpense');
+  }
+
+  function loadExpLookups() {
+    apiPost({ action: 'adminExpenseLookups', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        if (res && res.status === 'ok') {
+          expLookups = { workers: res.workers || [], brigadiers: res.brigadiers || [], objects: res.objects || [] };
+        }
+      })
+      .catch(function () { /* подсказки необязательны — вводить можно вручную */ });
+  }
+
+  initAutocomplete(document.getElementById('expWorker'), function () { return expLookups.workers; });
+  initAutocomplete(document.getElementById('expBrigadier'), function () {
+    return expLookups.brigadiers.length ? expLookups.brigadiers : expLookups.workers;
+  });
+  initAutocomplete(document.getElementById('expObject'), function () { return expLookups.objects; });
+
+  document.getElementById('goToAdminExpenseBtn').addEventListener('click', function () {
+    showAdminExpenseScreen();
+  });
+  document.getElementById('adminExpenseBackLink').addEventListener('click', function () {
+    showAdminScreen();
+  });
+
+  document.getElementById('expSubmitBtn').addEventListener('click', function () {
+    var btn = document.getElementById('expSubmitBtn');
+    var payload = {
+      action: 'adminAddExpense',
+      phone: currentUser && currentUser.phone,
+      date: document.getElementById('expDate').value,
+      worker: document.getElementById('expWorker').value.trim(),
+      brigadier: document.getElementById('expBrigadier').value.trim(),
+      objectName: document.getElementById('expObject').value.trim(),
+      rate: document.getElementById('expRate').value,
+      comment: document.getElementById('expComment').value.trim()
+    };
+    if (!payload.date) { setExpStatus('Укажите дату', 'error'); return; }
+    if (!payload.worker) { setExpStatus('Укажите работника', 'error'); return; }
+    if (!payload.objectName) { setExpStatus('Укажите объект', 'error'); return; }
+    if (!(Number(payload.rate) > 0)) { setExpStatus('Укажите ставку', 'error'); return; }
+    btn.disabled = true;
+    setExpStatus('Записываю в таблицу…');
+    apiPost(payload)
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          setExpStatus('✓ Добавлено в таблицу (строка ' + res.row + ')' + (res.warning ? '. Внимание: ' + res.warning : ''), 'success');
+          // Дата, объект и бригадир обычно повторяются при вводе подряд —
+          // оставляем; очищаем то, что меняется от записи к записи.
+          document.getElementById('expWorker').value = '';
+          document.getElementById('expRate').value = '';
+          document.getElementById('expComment').value = '';
+          if (payload.worker && expLookups.workers.indexOf(payload.worker) < 0) expLookups.workers.push(payload.worker);
+          if (payload.brigadier && expLookups.brigadiers.indexOf(payload.brigadier) < 0) expLookups.brigadiers.push(payload.brigadier);
+        } else {
+          setExpStatus(res.message || 'Не удалось записать', 'error');
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        setExpStatus('Ошибка соединения: ' + err, 'error');
+      });
   });
 
   // ===== Админ: согласование отгулов — обработчики =====
