@@ -1252,16 +1252,8 @@
       <div id="absencePartialWrap" style="display:none;">
         <label for="absenceDateOne" style="margin-top:10px;">Дата</label>
         <input id="absenceDateOne" type="date">
-        <div class="shiftTimesRow">
-          <div>
-            <label for="absenceTimeFrom" style="margin-top:10px;">Отсутствую с</label>
-            <input id="absenceTimeFrom" type="time">
-          </div>
-          <div>
-            <label for="absenceTimeTo" style="margin-top:10px;">до</label>
-            <input id="absenceTimeTo" type="time">
-          </div>
-        </div>
+        <label id="absenceTimeLabel" for="absenceTimeFrom" style="margin-top:10px;">Приду к</label>
+        <input id="absenceTimeFrom" type="time">
       </div>
       <label for="absenceComment" style="margin-top:10px;">Комментарий (необязательно)</label>
       <input id="absenceComment" type="text" maxlength="200" placeholder="Например: к врачу">
@@ -1914,6 +1906,7 @@
     sel.innerHTML = isPartial
       ? '<option value="late">Приду позже</option><option value="early">Уйду раньше</option>'
       : '<option value="leave">Отгул</option><option value="sick">Больничный</option>';
+    updateAbsenceTimeLabel_();
     document.getElementById('absenceFullWrap').style.display = isPartial ? 'none' : 'block';
     document.getElementById('absencePartialWrap').style.display = isPartial ? 'block' : 'none';
     var today = isoToday_();
@@ -1921,7 +1914,6 @@
     document.getElementById('absenceDateTo').value = today;
     document.getElementById('absenceDateOne').value = today;
     document.getElementById('absenceTimeFrom').value = '';
-    document.getElementById('absenceTimeTo').value = '';
     document.getElementById('absenceComment').value = '';
     setAbsenceStatus('');
     document.getElementById('absenceYear').textContent = String(new Date().getFullYear());
@@ -1930,6 +1922,12 @@
     setActiveNav('absence');
     pushScreenState('absence', { mode: absenceMode });
   }
+
+  function updateAbsenceTimeLabel_() {
+    var k = document.getElementById('absenceTypeSelect').value;
+    document.getElementById('absenceTimeLabel').textContent = (k === 'early') ? 'Уйду в' : 'Приду к';
+  }
+  document.getElementById('absenceTypeSelect').addEventListener('change', updateAbsenceTimeLabel_);
 
   var absenceStatusEl = document.getElementById('absenceStatus');
   function setAbsenceStatus(text, kind) {
@@ -2963,10 +2961,9 @@
     var dateFrom = isPartial ? document.getElementById('absenceDateOne').value : document.getElementById('absenceDateFrom').value;
     var dateTo = isPartial ? dateFrom : document.getElementById('absenceDateTo').value;
     var timeFrom = document.getElementById('absenceTimeFrom').value;
-    var timeTo = document.getElementById('absenceTimeTo').value;
     if (!dateFrom || !dateTo) { setAbsenceStatus('Выберите дату', 'error'); return; }
     if (dateTo < dateFrom) { setAbsenceStatus('Дата "по" раньше даты "с"', 'error'); return; }
-    if (isPartial && (!timeFrom || !timeTo)) { setAbsenceStatus('Укажите время "с" и "до"', 'error'); return; }
+    if (isPartial && !timeFrom) { setAbsenceStatus('Укажите время', 'error'); return; }
     btn.disabled = true;
     startWaitIndicator(absenceStatusEl, 'Отправляем…');
     apiPost({
@@ -2976,7 +2973,7 @@
       dateFrom: dateFrom,
       dateTo: dateTo,
       timeFrom: timeFrom,
-      timeTo: timeTo,
+      timeTo: '',
       comment: document.getElementById('absenceComment').value.trim()
     })
       .then(function (res) {
