@@ -1,3 +1,10 @@
+// v40: расходы — сломанная проверка данных (выпадающий список ссылается на
+//      лист, которого в таблице нет, например "Справочники" из таблицы
+//      финдира) больше не роняет запись с ошибкой "Диапазон не найден".
+//      Колонка "Объект" перенастраивается на список листа "Объекты" (он и так
+//      синхронизирован со "Справочниками" финдира); у остальных колонок
+//      сломанная проверка снимается только с новых строк. Об этом
+//      возвращается предупреждение.
 // v39: расходы — значения проверяются по выпадающим спискам листа (проверка
 //      данных) ДО записи: если, например, объекта нет в списке колонки
 //      "Объект", ничего не пишется и возвращается понятная ошибка (раньше
@@ -2752,14 +2759,19 @@ function expenseAllowed_(sheet, row, col) {
   var rule = sheet.getRange(row, col).getDataValidation();
   if (!rule) return null;
   var type = rule.getCriteriaType();
-  var args = rule.getCriteriaValues();
   var list = [];
-  if (type === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
-    list = (args[0] || []).map(String);
-  } else if (type === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
-    args[0].getDisplayValues().forEach(function (r) { r.forEach(function (v) { list.push(v); }); });
-  } else {
-    return null;
+  try {
+    var args = rule.getCriteriaValues();
+    if (type === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+      list = (args[0] || []).map(String);
+    } else if (type === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
+      args[0].getDisplayValues().forEach(function (r) { r.forEach(function (v) { list.push(v); }); });
+    } else {
+      return null;
+    }
+  } catch (e) {
+    // Список ссылается на несуществующий лист/диапазон ("Диапазон не найден").
+    return { broken: true, values: [], strict: !rule.getAllowInvalid() };
   }
   var seen = {}, values = [];
   list.forEach(function (v) {
@@ -2767,6 +2779,27 @@ function expenseAllowed_(sheet, row, col) {
     if (v && !seen[v]) { seen[v] = true; values.push(v); }
   });
   return { values: values, strict: !rule.getAllowInvalid() };
+}
+
+// Чинит проверку данных, ссылающуюся на несуществующий диапазон.
+// Для колонки объектов — заново ставит список из листа "Объекты" (A2:A) на
+// всю колонку под заголовком и возвращает новые разрешённые значения.
+// Иначе — снимает проверку только со строк, куда сейчас пишем; вернёт null.
+function repairExpenseValidation_(sheet, headerRow, col, isObjectCol, row, days) {
+  var objSheet = isObjectCol ? SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты') : null;
+  if (objSheet) {
+    var rule = SpreadsheetApp.newDataValidation()
+      .requireValueInRange(objSheet.getRange('A2:A'), true)
+      .setAllowInvalid(false)
+      .build();
+    sheet.getRange(headerRow + 1, col, sheet.getMaxRows() - headerRow, 1).setDataValidation(rule);
+    var seen = {}, values = [];
+    getValidObjects().forEach(function (v) { if (!seen[v]) { seen[v] = true; values.push(v); } });
+    return { values: values, strict: true };
+  }
+  if (row + days - 1 > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), row + days - 1 - sheet.getMaxRows());
+  sheet.getRange(row, col, days, 1).clearDataValidations();
+  return null;
 }
 
 // Подгоняет значение под список (без учёта регистра и лишних пробелов).
@@ -2847,9 +2880,16 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
       { col: cols.brigadier, label: 'Бригадир', get: function () { return brigadier; }, set: function (v) { brigadier = v; } },
       { col: cols.object, label: 'Объект', get: function () { return objectName; }, set: function (v) { objectName = v; } }
     ];
+    var warn = [];
     for (var ci = 0; ci < checks.length; ci++) {
       var ch = checks[ci];
       var allowed = allowedFor_(ch.col);
+      if (allowed && allowed.broken) {
+        allowed = repairExpenseValidation_(sheet, lay.headerRow, ch.col, ch.col === cols.object, row, days);
+        warn.push(allowed
+          ? 'выпадающий список колонки «' + ch.label + '» ссылался на несуществующий лист — перенастроен на лист «Объекты»'
+          : 'у колонки «' + ch.label + '» сломан выпадающий список (ссылается на несуществующий лист) — для новых строк он снят');
+      }
       var matched = expenseMatch_(allowed, ch.get());
       if (matched === null) {
         return {
@@ -2860,7 +2900,11 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
       }
       ch.set(matched);
     }
-    var statusValue = expenseMatch_(allowedFor_(cols.status), EXPENSE_DEFAULT_STATUS) || '';
+    var statusAllowed = allowedFor_(cols.status);
+    if (statusAllowed && statusAllowed.broken) {
+      statusAllowed = repairExpenseValidation_(sheet, lay.headerRow, cols.status, false, row, days);
+    }
+    var statusValue = expenseMatch_(statusAllowed, EXPENSE_DEFAULT_STATUS) || '';
     if (rowTo > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), rowTo - sheet.getMaxRows());
 
     // Одна колонка — один вызов setValues на все дни периода.
@@ -2899,7 +2943,6 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     fillAuto_(cols.status, function () { return statusValue; });
     SpreadsheetApp.flush();
 
-    var warn = [];
     if (!cols.brigadier && brigadier) warn.push('в таблице нет столбца «Бригадир» — бригадир не записан');
     if (!cols.comment && comment) warn.push('в таблице нет столбца «Комментарий» — комментарий не записан');
     return { status: 'ok', row: row, rowTo: rowTo, days: days, warning: warn.join('; ') };
@@ -2932,6 +2975,9 @@ function adminExpenseLookups(phone) {
       var aw = expenseAllowed_(sheet, probeRow, lay.cols.worker);
       var ab = expenseAllowed_(sheet, probeRow, lay.cols.brigadier);
       var ao = expenseAllowed_(sheet, probeRow, lay.cols.object);
+      if (aw && aw.broken) aw = null;
+      if (ab && ab.broken) ab = null;
+      if (ao && ao.broken) ao = null;
       if (ao && ao.strict) objects = ao.values;
       if ((aw && aw.strict) || (ab && ab.strict)) {
         return {
