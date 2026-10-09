@@ -2271,4 +2271,1796 @@
         });
       })
       .catch(function (err) {
-        listEl.innerHTML = '<div class="st
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  // --- Экран деталей одной задачи (у сотрудника) ---
+
+  // Читает несколько файлов (FileList) как base64 и отдаёт массив строк
+  // через callback — используется и для фото задачи у админа, и для фото
+  // "до"/"после" у сотрудника, чтобы не дублировать код.
+  function readFilesAsBase64(fileList, callback) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) { callback([]); return; }
+    var results = new Array(files.length);
+    var remaining = files.length;
+    files.forEach(function (file, idx) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        results[idx] = reader.result;
+        remaining--;
+        if (remaining === 0) callback(results);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function renderPhotoPreview(containerEl, base64List) {
+    containerEl.innerHTML = (base64List || []).map(function (b64) {
+      return '<img src="' + b64 + '" alt="">';
+    }).join('');
+  }
+
+  function renderPhotoGrid(containerEl, urls) {
+    if (!urls || !urls.length) {
+      containerEl.innerHTML = '';
+      containerEl.style.display = 'none';
+      return;
+    }
+    containerEl.style.display = 'flex';
+    containerEl.innerHTML = urls.map(function (url) {
+      return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(url) + '" alt=""></a>';
+    }).join('');
+  }
+
+  var taskBeforePhotosBase64 = [];
+  var taskAfterPhotosBase64 = [];
+  var currentTaskId = null;
+
+  function showTaskDetailScreen(taskId) {
+    currentTaskId = taskId;
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenProfile.style.display = 'none';
+    screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
+    screenTaskDetail.style.display = 'block';
+    document.getElementById('taskDetailLoading').style.display = 'block';
+    document.getElementById('taskDetailBody').style.display = 'none';
+    loadTaskDetail();
+    showBottomNav();
+    setActiveNav('taskDetail');
+    pushScreenState('taskDetail', { taskId: taskId });
+  }
+
+  function loadTaskDetail() {
+    var phone = currentUser ? currentUser.phone : '';
+    apiPost({ action: 'getTaskById', phone: phone, taskId: currentTaskId })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          document.getElementById('taskDetailLoading').textContent = res.message || 'Не удалось загрузить задачу';
+          return;
+        }
+        document.getElementById('taskDetailLoading').style.display = 'none';
+        document.getElementById('taskDetailBody').style.display = 'block';
+        renderTaskDetail(res.task);
+      })
+      .catch(function (err) {
+        document.getElementById('taskDetailLoading').textContent = 'Ошибка соединения: ' + err;
+      });
+  }
+
+  function renderTaskDetail(t) {
+    var tag = taskStatusTag(t.status);
+    var badge = document.getElementById('taskDetailStatusBadge');
+    badge.className = 'taskStatusBadge ' + tag.cls;
+    badge.textContent = tag.label;
+    document.getElementById('taskDetailObjectTitle').textContent = t.objectName || 'Задача';
+    document.getElementById('taskDetailText').textContent = t.text;
+    renderPhotoGrid(document.getElementById('taskDetailTaskPhotos'), t.taskPhotos);
+    document.getElementById('taskDetailMeta').textContent = 'Поставлена: ' + (t.createdAt || '');
+
+    var beforeSection = document.getElementById('taskDetailBeforeSection');
+    var afterSection = document.getElementById('taskDetailAfterSection');
+    var startAction = document.getElementById('taskStartAction');
+    var startForm = document.getElementById('taskStartForm');
+    var completeAction = document.getElementById('taskCompleteAction');
+    var completeForm = document.getElementById('taskCompleteForm');
+
+    beforeSection.style.display = 'none';
+    afterSection.style.display = 'none';
+    startAction.style.display = 'none';
+    startForm.style.display = 'none';
+    completeAction.style.display = 'none';
+    completeForm.style.display = 'none';
+
+    if (t.status === 'Актуальна') {
+      startAction.style.display = 'block';
+    } else if (t.status === 'В работе') {
+      beforeSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailBeforePhotos'), t.beforePhotos);
+      document.getElementById('taskDetailStartedMeta').textContent = 'Начато: ' + (t.startedAt || '');
+      completeAction.style.display = 'block';
+    } else { // Выполнена
+      beforeSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailBeforePhotos'), t.beforePhotos);
+      document.getElementById('taskDetailStartedMeta').textContent = 'Начато: ' + (t.startedAt || '');
+      afterSection.style.display = 'block';
+      renderPhotoGrid(document.getElementById('taskDetailAfterPhotos'), t.afterPhotos);
+      var commentBlock = document.getElementById('taskDetailCommentBlock');
+      if (t.comment) {
+        commentBlock.style.display = 'block';
+        document.getElementById('taskDetailComment').textContent = t.comment;
+      } else {
+        commentBlock.style.display = 'none';
+      }
+      document.getElementById('taskDetailCompletedMeta').textContent = 'Выполнено: ' + (t.completedAt || '');
+    }
+  }
+
+  document.getElementById('taskDetailBackLink').addEventListener('click', function () {
+    showTasksScreen();
+  });
+
+  document.getElementById('taskStartBtn').addEventListener('click', function () {
+    document.getElementById('taskStartAction').style.display = 'none';
+    document.getElementById('taskStartForm').style.display = 'block';
+  });
+
+  document.getElementById('taskBeforePhotoInput').addEventListener('change', function (e) {
+    readFilesAsBase64(e.target.files, function (list) {
+      taskBeforePhotosBase64 = list;
+      renderPhotoPreview(document.getElementById('taskBeforePhotoPreview'), list);
+    });
+  });
+
+  document.getElementById('taskStartSubmitBtn').addEventListener('click', function () {
+    var statusEl5 = document.getElementById('taskStartStatus');
+    var btn = document.getElementById('taskStartSubmitBtn');
+    var phone = currentUser ? currentUser.phone : '';
+    btn.disabled = true;
+    statusEl5.textContent = 'Отправка…';
+    statusEl5.className = '';
+    apiPost({ action: 'startTask', phone: phone, taskId: currentTaskId, photos: taskBeforePhotosBase64 })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          taskBeforePhotosBase64 = [];
+          document.getElementById('taskBeforePhotoInput').value = '';
+          loadTaskDetail();
+          refreshTasksBadge();
+        } else {
+          statusEl5.textContent = res.message || 'Не удалось сохранить';
+          statusEl5.className = 'error';
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        statusEl5.textContent = 'Ошибка соединения: ' + err;
+        statusEl5.className = 'error';
+      });
+  });
+
+  document.getElementById('taskCompleteBtn').addEventListener('click', function () {
+    document.getElementById('taskCompleteAction').style.display = 'none';
+    document.getElementById('taskCompleteForm').style.display = 'block';
+  });
+
+  document.getElementById('taskAfterPhotoInput').addEventListener('change', function (e) {
+    readFilesAsBase64(e.target.files, function (list) {
+      taskAfterPhotosBase64 = list;
+      renderPhotoPreview(document.getElementById('taskAfterPhotoPreview'), list);
+    });
+  });
+
+  document.getElementById('taskCompleteSubmitBtn').addEventListener('click', function () {
+    var statusEl6 = document.getElementById('taskCompleteStatus');
+    var btn = document.getElementById('taskCompleteSubmitBtn');
+    var phone = currentUser ? currentUser.phone : '';
+    var comment = document.getElementById('taskCompleteCommentInput').value.trim();
+    btn.disabled = true;
+    statusEl6.textContent = 'Отправка…';
+    statusEl6.className = '';
+    apiPost({ action: 'completeTask', phone: phone, taskId: currentTaskId, photos: taskAfterPhotosBase64, comment: comment })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          taskAfterPhotosBase64 = [];
+          document.getElementById('taskAfterPhotoInput').value = '';
+          document.getElementById('taskCompleteCommentInput').value = '';
+          loadTaskDetail();
+          refreshTasksBadge();
+        } else {
+          statusEl6.textContent = res.message || 'Не удалось сохранить';
+          statusEl6.className = 'error';
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        statusEl6.textContent = 'Ошибка соединения: ' + err;
+        statusEl6.className = 'error';
+      });
+  });
+
+  // --- Панель администратора ---
+  // Доступ проверяется на backend (adminAuth_ в Code.gs) по номеру
+  // телефона, с которым человек уже вошёл в приложение — смотрит на
+  // галочку "Админ" в листе "Сотрудники". Никакого отдельного входа через
+  // Google здесь больше нет: кнопка "Админ панель" на главном экране и
+  // так видна только тем, у кого права уже подтверждены (см.
+  // refreshAdminStatus), а сами данные на этом экране в любом случае
+  // перепроверяются сервером при каждой загрузке.
+  function showAdminScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
+    screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
+    screenAdmin.style.display = 'block';
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('admin');
+  }
+
+  // --- Экран "Поставить задачу" (вынесен из панели администратора на
+  // главный экран) — доступ так же проверяется по номеру телефона. ---
+  function showTaskManageScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
+    screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
+    screenTaskManage.style.display = 'block';
+    loadAdminEmployees(); // наполняет даталист "Исполнитель"
+    loadAdminTasks();
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('taskManage');
+  }
+
+  // --- Экран "Ставки сотрудников" (подэкран панели администратора) ---
+  function showAdminRatesScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
+    screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
+    screenAdminRates.style.display = 'block';
+    loadAdminEmployees();
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('adminRates');
+  }
+
+  // --- Экран "Объекты" (подэкран панели администратора) ---
+  function showAdminObjectsScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
+    screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
+    screenAdminObjects.style.display = 'block';
+    loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
+    loadAdminObjects();
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('adminObjects');
+  }
+
+  function loadAdminObjects() {
+    var listEl = document.getElementById('adminObjectsList');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetObjects', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        renderAdminObjectsList(res);
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  // Та же карта "label -> {phone, name}", что и для "Исполнителя" на форме
+  // задачи (наполняется в loadAdminEmployees) — используется, чтобы по
+  // введённому в поле "Ответственный прораб" тексту найти телефон сотрудника.
+  function resolveForemanPhoneFromInput_(inputEl) {
+    var typed = inputEl.value.trim();
+    if (!typed) return '';
+    if (adminAssigneeMap[typed]) return adminAssigneeMap[typed].phone;
+    return typed; // возможно, ввели телефон напрямую — бэкенд сам проверит
+  }
+
+  // Список большой и редактирование каждого объекта занимает много места,
+  // поэтому по умолчанию список скрыт (см. objectsShowAllLink) и открыт
+  // только поиск — а каждый объект в списке свёрнут в одну строку (<details>,
+  // разворачивается по клику стрелкой). Новые объекты в таблице добавляются
+  // вниз, но актуальнее для админа именно недавно добавленные — поэтому
+  // здесь показываем в обратном порядке (последний добавленный — сверху).
+  function renderAdminObjectsList(res) {
+    var listEl = document.getElementById('adminObjectsList');
+    lastAdminObjectsResponse = res;
+    if (res.status !== 'ok') {
+      listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
+      return;
+    }
+    if (!res.objects || !res.objects.length) {
+      listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного объекта</div>';
+      return;
+    }
+
+    // Подсказки поля поиска читаются прямо из lastAdminObjectsResponse
+    // (см. initAutocomplete для objectSearchInput) — отдельный список
+    // подсказок здесь поддерживать не нужно.
+    var reversed = res.objects.slice().reverse();
+    listEl.innerHTML = reversed.map(function (obj, idx) {
+      var addressLine = obj.address
+        ? escapeHtml(obj.address)
+        : '<span style="color:var(--muted);">адрес не указан</span>';
+      // "OK: ..." показываем зелёным (адрес распознан и GPS-проверка для
+      // объекта работает), иначе — тревожным цветом (адрес ещё не указан
+      // или геокодер не смог его распознать — см. geoStatus в Code.gs).
+      var isOk = obj.geoStatus && obj.geoStatus.indexOf('OK') === 0;
+      var statusLine = obj.geoStatus
+        ? '<div class="adminObjGeoStatus" style="color:' + (isOk ? 'var(--green)' : 'var(--red)') + ';">' + escapeHtml(obj.geoStatus) + '</div>'
+        : '';
+      var foremanValue = obj.foremanPhone ? (obj.foremanName ? (obj.foremanName + ' — ' + obj.foremanPhone) : obj.foremanPhone) : '';
+      var s1Id = 'objShift1Start' + idx, e1Id = 'objShift1End' + idx;
+      var s2Id = 'objShift2Start' + idx, e2Id = 'objShift2End' + idx;
+      var fId = 'objForeman' + idx, statusId = 'objSaveStatus' + idx;
+      return (
+        '<details class="adminObjDetails" id="objDetails' + idx + '" data-objname="' + escapeHtml(obj.name) + '">' +
+          '<summary class="adminObjSummary">' +
+            '<div class="adminObjSummaryText">' +
+              '<div class="adminObjName">' + escapeHtml(obj.name) + '</div>' +
+              '<div class="adminObjAddress">' + addressLine + '</div>' +
+            '</div>' +
+            '<span class="adminObjChevron">▾</span>' +
+          '</summary>' +
+          '<div class="adminObjForm">' +
+            statusLine +
+            '<div class="shiftTimesRow">' +
+              '<div><label for="' + s1Id + '">Смена 1, начало</label><input id="' + s1Id + '" type="time" value="' + escapeHtml(obj.shift1Start) + '"></div>' +
+              '<div><label for="' + e1Id + '">Смена 1, конец</label><input id="' + e1Id + '" type="time" value="' + escapeHtml(obj.shift1End) + '"></div>' +
+            '</div>' +
+            '<div class="shiftTimesRow">' +
+              '<div><label for="' + s2Id + '">Смена 2, начало</label><input id="' + s2Id + '" type="time" value="' + escapeHtml(obj.shift2Start) + '"></div>' +
+              '<div><label for="' + e2Id + '">Смена 2, конец</label><input id="' + e2Id + '" type="time" value="' + escapeHtml(obj.shift2End) + '"></div>' +
+            '</div>' +
+            '<label for="' + fId + '" style="margin-top:8px;">Ответственный прораб</label>' +
+            '<input id="' + fId + '" type="text" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
+            '<div class="adminObjSaveRow">' +
+              '<button type="button" class="adminObjSaveBtn" data-name="' + escapeHtml(obj.name) + '" data-idx="' + idx + '">Сохранить</button>' +
+              '<span class="adminObjSaveStatus" id="' + statusId + '"></span>' +
+            '</div>' +
+          '</div>' +
+        '</details>'
+      );
+    }).join('');
+
+    listEl.querySelectorAll('input[id^="objForeman"]').forEach(function (input) {
+      initAutocomplete(input, function () { return Object.keys(adminAssigneeMap); });
+    });
+
+    listEl.querySelectorAll('.adminObjSaveBtn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = btn.getAttribute('data-idx');
+        var objectName = btn.getAttribute('data-name');
+        var statusEl = document.getElementById('objSaveStatus' + idx);
+        var foremanInput = document.getElementById('objForeman' + idx);
+        btn.disabled = true;
+        statusEl.textContent = 'Сохраняем…';
+        statusEl.style.color = 'var(--muted)';
+        apiPost({
+          action: 'adminUpdateObjectShifts',
+          phone: currentUser && currentUser.phone,
+          objectName: objectName,
+          shift1Start: document.getElementById('objShift1Start' + idx).value,
+          shift1End: document.getElementById('objShift1End' + idx).value,
+          shift2Start: document.getElementById('objShift2Start' + idx).value,
+          shift2End: document.getElementById('objShift2End' + idx).value,
+          foremanPhone: resolveForemanPhoneFromInput_(foremanInput)
+        })
+          .then(function (res) {
+            btn.disabled = false;
+            if (res.status === 'ok') {
+              // Список не перестраиваем целиком — чтобы раскрытая карточка
+              // не "захлопнулась" сразу после сохранения, просто обновляем
+              // карту объектов (на случай поиска) и показываем подтверждение.
+              lastAdminObjectsResponse = res;
+              statusEl.textContent = 'Сохранено ✓';
+              statusEl.style.color = 'var(--green)';
+              setTimeout(function () { statusEl.textContent = ''; }, 2500);
+            } else {
+              statusEl.textContent = res.message || 'Не удалось сохранить';
+              statusEl.style.color = 'var(--red)';
+            }
+          })
+          .catch(function (err) {
+            btn.disabled = false;
+            statusEl.textContent = 'Ошибка соединения: ' + err;
+            statusEl.style.color = 'var(--red)';
+          });
+      });
+    });
+  }
+
+  function loadAdminEmployees() {
+    var listEl = document.getElementById('adminEmployeesList');
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetEmployees', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + (res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        if (!res.employees || !res.employees.length) {
+          listEl.innerHTML = '<div class="statsEmpty">Пока нет ни одного сотрудника</div>';
+          adminAssigneeMap = {};
+          return;
+        }
+
+        // Заодно наполняем общую карту "label -> {phone, name}" для подсказок
+        // "Исполнитель" (форма задачи) и "Ответственный прораб" (экран
+        // "Объекты") — сам выпадающий список рисует initAutocomplete,
+        // подсказки читает прямо из adminAssigneeMap (см. ниже, где вызван
+        // initAutocomplete для соответствующих полей).
+        adminAssigneeMap = {};
+        res.employees.forEach(function (emp) {
+          var label = emp.name + ' — ' + emp.phone;
+          adminAssigneeMap[label] = { phone: emp.phone, name: emp.name };
+        });
+
+        listEl.innerHTML = res.employees.map(function (emp, idx) {
+          var inputId = 'adminRateInput' + idx;
+          return (
+            '<div class="adminEmpRow">' +
+              '<div class="adminEmpInfo">' +
+                '<div class="adminEmpName">' + escapeHtml(emp.name) + '</div>' +
+                '<div class="adminEmpPhone">' + escapeHtml(emp.phone) + '</div>' +
+              '</div>' +
+              '<div class="adminEmpRateForm">' +
+                '<input id="' + inputId + '" type="number" inputmode="numeric" min="0" step="1" value="' + (emp.rate || 0) + '" data-phone="' + escapeHtml(emp.phone) + '">' +
+                '<button type="button" class="adminSaveRateBtn" data-input="' + inputId + '" data-phone="' + escapeHtml(emp.phone) + '">Сохранить</button>' +
+              '</div>' +
+            '</div>'
+          );
+        }).join('');
+
+        listEl.querySelectorAll('.adminSaveRateBtn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var input = document.getElementById(btn.getAttribute('data-input'));
+            var phone = btn.getAttribute('data-phone');
+            var rate = input.value;
+            btn.disabled = true;
+            btn.textContent = '…';
+            apiPost({ action: 'adminSetRate', phone: currentUser && currentUser.phone, targetPhone: phone, rate: rate })
+              .then(function (res) {
+                btn.disabled = false;
+                if (res.status === 'ok') {
+                  btn.textContent = 'Сохранено ✓';
+                  setTimeout(function () { btn.textContent = 'Сохранить'; }, 1500);
+                } else {
+                  btn.textContent = 'Сохранить';
+                  alert(res.message || 'Не удалось сохранить');
+                }
+              })
+              .catch(function (err) {
+                btn.disabled = false;
+                btn.textContent = 'Сохранить';
+                alert('Ошибка соединения: ' + err);
+              });
+          });
+        });
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  var adminTasksById = {};
+
+  // Карточку задачи можно развернуть кликом — детали (фото до/после,
+  // комментарий) рисуются из уже загруженных данных, без нового запроса.
+  function adminTaskDetailHtml(t) {
+    var html = '';
+    if (t.taskPhotos && t.taskPhotos.length) {
+      html += '<div class="taskDate">Фото задачи:</div><div class="photoGrid" style="display:flex;">' +
+        t.taskPhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+        '</div>';
+    }
+    if (t.status !== 'Актуальна') {
+      html += '<div class="taskDate" style="margin-top:6px;">Начато: ' + escapeHtml(t.startedAt || '—') + '</div>';
+      if (t.beforePhotos && t.beforePhotos.length) {
+        html += '<div class="taskDate">Фото до:</div><div class="photoGrid" style="display:flex;">' +
+          t.beforePhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+          '</div>';
+      }
+    }
+    if (t.status === 'Выполнена') {
+      html += '<div class="taskDate" style="margin-top:6px;">Выполнено: ' + escapeHtml(t.completedAt || '—') + '</div>';
+      if (t.afterPhotos && t.afterPhotos.length) {
+        html += '<div class="taskDate">Фото после:</div><div class="photoGrid" style="display:flex;">' +
+          t.afterPhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
+          '</div>';
+      }
+      if (t.comment) {
+        html += '<div class="taskDate" style="margin-top:4px;">Комментарий сотрудника:</div><div class="adminTaskText">' + escapeHtml(t.comment) + '</div>';
+      }
+    }
+    return html;
+  }
+
+  function loadAdminTasks() {
+    var listEl = document.getElementById('adminTasksList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetTasks', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        if (res.status !== 'ok') {
+          listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
+          return;
+        }
+        if (!res.tasks || !res.tasks.length) {
+          listEl.innerHTML = '<div class="statsEmpty">Задач пока нет</div>';
+          return;
+        }
+        adminTasksById = {};
+        res.tasks.forEach(function (t) { adminTasksById[t.id] = t; });
+
+        listEl.innerHTML = res.tasks.map(function (t) {
+          var tag = taskStatusTag(t.status);
+          var doneClass = t.status === 'Выполнена' ? ' adminTaskCardDone' : '';
+          return (
+            '<div class="adminTaskCard adminTaskCardClickable' + doneClass + '" data-id="' + escapeHtml(t.id) + '">' +
+              '<div class="adminTaskName">' + escapeHtml(t.name) +
+                '<span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
+              '</div>' +
+              '<div class="adminTaskMeta">' + escapeHtml(t.objectName || '') + '</div>' +
+              '<div class="adminTaskText">' + escapeHtml(t.text) + '</div>' +
+              '<div class="adminTaskMeta">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
+              '<div class="adminTaskDetail" style="display:none;"></div>' +
+            '</div>'
+          );
+        }).join('');
+
+        listEl.querySelectorAll('.adminTaskCard').forEach(function (card) {
+          card.addEventListener('click', function () {
+            var detailEl = card.querySelector('.adminTaskDetail');
+            var isOpen = detailEl.style.display !== 'none';
+            if (isOpen) {
+              detailEl.style.display = 'none';
+              return;
+            }
+            var t = adminTasksById[card.getAttribute('data-id')];
+            if (t) detailEl.innerHTML = adminTaskDetailHtml(t);
+            detailEl.style.display = 'block';
+          });
+        });
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+      });
+  }
+
+  var taskCreatePhotosBase64 = [];
+  var taskPhotoInputEl = document.getElementById('taskPhotoInput');
+  if (taskPhotoInputEl) {
+    taskPhotoInputEl.addEventListener('change', function (e) {
+      readFilesAsBase64(e.target.files, function (list) {
+        taskCreatePhotosBase64 = list;
+        renderPhotoPreview(document.getElementById('taskPhotoPreview'), list);
+      });
+    });
+  }
+
+  var taskCreateBtnEl = document.getElementById('taskCreateBtn');
+  if (taskCreateBtnEl) {
+    taskCreateBtnEl.addEventListener('click', function () {
+      var statusEl4 = document.getElementById('taskCreateStatus');
+      var assigneeInput = document.getElementById('taskAssigneeInput');
+      var objectInput = document.getElementById('taskObjectInput');
+      var textInput = document.getElementById('taskTextInput');
+      var assignee = adminAssigneeMap[assigneeInput.value.trim()];
+
+      if (!assignee) {
+        statusEl4.textContent = 'Выберите исполнителя из списка предложенных вариантов';
+        statusEl4.className = 'error';
+        return;
+      }
+      var objectName = objectInput.value.trim();
+      if (!objectName || (validObjectsLoaded && validObjects.indexOf(objectName) === -1)) {
+        statusEl4.textContent = 'Выберите объект из списка предложенных вариантов';
+        statusEl4.className = 'error';
+        return;
+      }
+      var text = textInput.value.trim();
+      if (!text) {
+        statusEl4.textContent = 'Введите текст задачи';
+        statusEl4.className = 'error';
+        return;
+      }
+
+      statusEl4.textContent = 'Постановка задачи…';
+      statusEl4.className = '';
+      taskCreateBtnEl.disabled = true;
+      apiPost({
+        action: 'adminCreateTask',
+        phone: currentUser && currentUser.phone,
+        targetPhone: assignee.phone,
+        name: assignee.name,
+        objectName: objectName,
+        text: text,
+        photos: taskCreatePhotosBase64
+      })
+        .then(function (res) {
+          taskCreateBtnEl.disabled = false;
+          if (res.status === 'ok') {
+            statusEl4.textContent = 'Задача поставлена';
+            statusEl4.className = '';
+            assigneeInput.value = '';
+            objectInput.value = '';
+            textInput.value = '';
+            taskCreatePhotosBase64 = [];
+            taskPhotoInputEl.value = '';
+            document.getElementById('taskPhotoPreview').innerHTML = '';
+            loadAdminTasks();
+          } else {
+            statusEl4.textContent = res.message || 'Не удалось поставить задачу';
+            statusEl4.className = 'error';
+          }
+        })
+        .catch(function (err) {
+          taskCreateBtnEl.disabled = false;
+          statusEl4.textContent = 'Ошибка соединения: ' + err;
+          statusEl4.className = 'error';
+        });
+    });
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // Свой выпадающий список подсказок — замена нативному <input list="...">
+  // (<datalist>), который на разных устройствах/браузерах выглядит
+  // по-разному (вертикальный список, горизонтальная карусель над
+  // клавиатурой и т.п.) и не поддаётся стилизации через CSS. Оборачивает
+  // inputEl в относительно-позиционированный контейнер и рисует под ним
+  // свою панель с подсказками — выглядит одинаково везде.
+  //   inputEl — поле ввода
+  //   getItemsFn — функция без аргументов, возвращающая АКТУАЛЬНЫЙ на
+  //     момент вызова массив строк-подсказок (чтобы список всегда брался
+  //     из свежих данных, а не замораживался на момент инициализации)
+  // Безопасно вызывать повторно на одном и том же элементе (например, при
+  // каждом рендере списка объектов) — повторная обёртка не создаётся.
+  function initAutocomplete(inputEl, getItemsFn) {
+    if (!inputEl || inputEl._autocompleteInited) return;
+    inputEl._autocompleteInited = true;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'autocompleteWrap';
+    inputEl.parentNode.insertBefore(wrap, inputEl);
+    wrap.appendChild(inputEl);
+
+    var list = document.createElement('div');
+    list.className = 'autocompleteList';
+    wrap.appendChild(list);
+
+    function render() {
+      var items = getItemsFn() || [];
+      var query = inputEl.value.trim().toLowerCase();
+      var matches = query
+        ? items.filter(function (label) { return label.toLowerCase().indexOf(query) !== -1; })
+        : items;
+      matches = matches.slice(0, 40);
+      if (!matches.length) {
+        list.style.display = 'none';
+        list.innerHTML = '';
+        return;
+      }
+      list.innerHTML = matches.map(function (label) {
+        return '<div class="autocompleteItem">' + escapeHtml(label) + '</div>';
+      }).join('');
+      list.style.display = 'block';
+    }
+
+    inputEl.addEventListener('input', render);
+    inputEl.addEventListener('focus', render);
+
+    // mousedown (а не click) — срабатывает раньше blur поля ввода, иначе
+    // список успел бы скрыться до того, как засчитается нажатие на пункт.
+    list.addEventListener('mousedown', function (e) {
+      var item = e.target.closest('.autocompleteItem');
+      if (!item) return;
+      e.preventDefault();
+      inputEl.value = item.textContent;
+      list.style.display = 'none';
+      inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    inputEl.addEventListener('blur', function () {
+      setTimeout(function () { list.style.display = 'none'; }, 150);
+    });
+  }
+
+  function renderStats(data) {
+    document.getElementById('statMonthHours').textContent = data.monthHours;
+    document.getElementById('statMonthPay').textContent = (data.monthPay || 0) + ' ₽';
+    document.getElementById('statTotalHours').textContent = data.totalHours;
+    document.getElementById('statTotalPay').textContent = (data.totalPay || 0) + ' ₽';
+
+    var monthLateEl = document.getElementById('statMonthLate');
+    var monthLateCard = document.getElementById('statMonthLateCard');
+    var monthLate = data.monthLateMinutes || 0;
+    monthLateCard.classList.remove('lateGood', 'lateBad');
+    if (monthLate > 0) {
+      var hh = Math.floor(monthLate / 60);
+      var mm = monthLate % 60;
+      monthLateEl.textContent = '⏱ ' + (hh > 0 ? hh + ' ч ' : '') + mm + ' мин';
+      monthLateCard.classList.add('lateBad');
+    } else {
+      monthLateEl.textContent = '✓ нет опозданий';
+      monthLateCard.classList.add('lateGood');
+    }
+
+    var list = document.getElementById('statsDaysList');
+    list.innerHTML = '';
+    // Смены и заявки на отсутствие — одним списком, свежие сверху
+    var entries = [];
+    (data.days || []).forEach(function (d) {
+      entries.push({ key: d.date.split('.').reverse().join('-'), day: d });
+    });
+    (data.absences || []).forEach(function (a) {
+      entries.push({ key: a.dateFrom, abs: a });
+    });
+    entries.sort(function (x, y) { return x.key < y.key ? 1 : (x.key > y.key ? -1 : (x.abs ? -1 : 1)); });
+    if (!entries.length) {
+      list.innerHTML = '<div class="statsEmpty">Пока нет завершённых смен</div>';
+      return;
+    }
+    entries.forEach(function (en) {
+      var row = document.createElement('div');
+      row.className = 'dayRow';
+      if (en.abs) {
+        var it = en.abs, when;
+        if (it.timeFrom) when = escapeHtml(it.timeFrom) + '–' + escapeHtml(it.timeTo);
+        else if (it.dateFrom === it.dateTo) when = 'весь день';
+        else when = fmtIsoRu_(it.dateFrom) + ' – ' + fmtIsoRu_(it.dateTo);
+        row.innerHTML =
+          '<div class="dayRowTop">' +
+            '<div class="dayDate">' + fmtIsoRu_(it.dateFrom) + '</div>' +
+            '<div class="dayRight">' + absStatusTag_(it.status) + '</div>' +
+          '</div>' +
+          '<div class="dayRowBottom"><div class="dayTimes">' + escapeHtml(it.type) + ' · ' + when +
+          ' · <span class="dayHoursInline">' + fmtNum_(it.days) + ' дн.</span></div></div>';
+        list.appendChild(row);
+        return;
+      }
+      var d = en.day;
+      var arrivalHtml = d.arrival || '—';
+      var badgeHtml = '';
+      if (d.lateMinutes !== null && d.lateMinutes !== undefined && d.arrival) {
+        if (d.lateMinutes > 0) {
+          arrivalHtml = '<span class="arrivalTime late">' + d.arrival + '</span>';
+          badgeHtml = '<span class="lateBadge late">⏱ +' + d.lateMinutes + ' мин</span>';
+        } else {
+          arrivalHtml = '<span class="arrivalTime onTime">' + d.arrival + '</span>';
+          badgeHtml = '<span class="lateBadge onTime">✓ вовремя</span>';
+        }
+      }
+      // Время смены и отработанные часы теперь в одной строке (внизу),
+      // а наверху справа, на месте часов, — сумма к оплате за эту смену.
+      var timesText = arrivalHtml + ' – ' + (d.departure || '—') +
+        ' · <span class="dayHoursInline">' + (d.hours || '—') + '</span>';
+
+      row.innerHTML =
+        '<div class="dayRowTop">' +
+          '<div class="dayDate">' + d.date + '</div>' +
+          '<div class="dayRight"><div class="dayPay">' + (d.pay ? d.pay + ' ₽' : '—') + '</div></div>' +
+        '</div>' +
+        '<div class="dayRowBottom">' +
+          '<div class="dayTimes">' + timesText + '</div>' +
+          badgeHtml +
+        '</div>';
+      list.appendChild(row);
+    });
+  }
+
+  function loadMyStats() {
+    if (!currentUser || !currentUser.phone) return;
+    var phone = currentUser.phone;
+
+    // Сначала — то, что уже лежит в памяти телефона: экран заполняется
+    // мгновенно, без спиннера и ожидания сервера.
+    var cached = loadStatsCache(phone);
+    if (cached) {
+      renderStats(cached);
+    } else {
+      document.getElementById('statsDaysList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    }
+
+    // Параллельно (в фоне, если есть что показать сразу) — свежие данные
+    // с сервера, которыми тихо заменяем экран и обновляем кэш на будущее.
+    apiPost({ action: 'stats', phone: phone })
+      .then(function (res) {
+        if (res.status === 'ok') {
+          saveStatsCache(phone, res);
+          renderStats(res);
+        } else if (!cached) {
+          document.getElementById('statsDaysList').innerHTML =
+            '<div class="statsEmpty">' + (res.message || 'Не удалось загрузить статистику') + '</div>';
+        }
+      })
+      .catch(function () {
+        if (!cached) {
+          document.getElementById('statsDaysList').innerHTML =
+            '<div class="statsEmpty">Ошибка соединения</div>';
+        }
+        // если кэш уже показан — при сбое связи просто оставляем его на
+        // экране, не перекрываем сообщением об ошибке
+      });
+  }
+
+  document.getElementById('myStatsBtn').addEventListener('click', function () {
+    showStatsScreen();
+  });
+  document.getElementById('myTasksBtn').addEventListener('click', function () {
+    showTasksScreen();
+  });
+  document.getElementById('tasksBackLink').addEventListener('click', function () {
+    showScanScreen();
+  });
+  document.getElementById('backToScanLink').addEventListener('click', function () {
+    showScanScreen();
+  });
+  document.getElementById('goToAdminLink').addEventListener('click', function () {
+    showAdminScreen();
+  });
+  document.getElementById('adminPanelBtn').addEventListener('click', function () {
+    showAdminScreen();
+  });
+  document.getElementById('adminBackLink').addEventListener('click', function () {
+    showScanScreen();
+  });
+  document.getElementById('taskManageBtn').addEventListener('click', function () {
+    showTaskManageScreen();
+  });
+  document.getElementById('taskManageBackLink').addEventListener('click', function () {
+    showScanScreen();
+  });
+  document.getElementById('goToAdminRatesBtn').addEventListener('click', function () {
+    showAdminRatesScreen();
+  });
+  document.getElementById('adminRatesBackLink').addEventListener('click', function () {
+    showAdminScreen();
+  });
+  document.getElementById('goToAdminObjectsBtn').addEventListener('click', function () {
+    showAdminObjectsScreen();
+  });
+  document.getElementById('adminObjectsBackLink').addEventListener('click', function () {
+    showAdminScreen();
+  });
+
+  // ===== Нижняя навигация — обработчики =====
+  document.getElementById('navHomeBtn').addEventListener('click', function () {
+    showScanScreen();
+  });
+  document.getElementById('navTasksBtn').addEventListener('click', function () {
+    showTasksScreen();
+  });
+  document.getElementById('navStatsBtn').addEventListener('click', function () {
+    showStatsScreen();
+  });
+  document.getElementById('navProfileBtn').addEventListener('click', function () {
+    showProfileScreen();
+  });
+  // Центральная кнопка — то же самое "Отметить приход/уход", что раньше
+  // было единственной кнопкой на Главной. Работает с любого экрана: сперва
+  // переходим на Главную (там и камера, и статус смены), затем сразу же
+  // запускаем сканирование — так, будто сами нажали кнопку там.
+  document.getElementById('navCheckinBtn').addEventListener('click', function () {
+    if (screenScan.style.display !== 'block') {
+      showScanScreen();
+    }
+    var actionBtn = document.getElementById('actionBtn');
+    if (actionBtn.style.display !== 'none' && !actionBtn.disabled) {
+      actionBtn.click();
+    }
+  });
+
+  // ===== Всплывающее уведомление админу — обработчики =====
+  document.getElementById('adminPopupOpenBtn').addEventListener('click', function () {
+    hideAdminPopup_();
+    showAdminAbsencesScreen();
+  });
+  document.getElementById('adminPopupText').addEventListener('click', function () {
+    hideAdminPopup_();
+    showAdminAbsencesScreen();
+  });
+  document.getElementById('adminPopupCloseBtn').addEventListener('click', hideAdminPopup_);
+  document.getElementById('profileAbsenceApproveBtn').addEventListener('click', function () {
+    showAdminAbsencesScreen();
+  });
+
+  // ===== Админ: согласование отгулов — обработчики =====
+  document.getElementById('goToAdminAbsencesBtn').addEventListener('click', function () {
+    showAdminAbsencesScreen();
+  });
+  document.getElementById('adminAbsencesBackLink').addEventListener('click', function () {
+    showAdminScreen();
+  });
+
+  // ===== Экран "Отсутствия" — обработчики =====
+  document.getElementById('profileAbsenceBtn').addEventListener('click', function () {
+    showAbsenceScreen('full');
+  });
+  document.getElementById('profileLateBtn').addEventListener('click', function () {
+    showAbsenceScreen('partial');
+  });
+  // "Все запросы" — сразу к списку текущих и прошлых заявок
+  document.getElementById('profileAllAbsencesLink').addEventListener('click', function () {
+    showAbsenceScreen('full');
+    document.getElementById('absenceListCard').scrollIntoView({ block: 'start' });
+  });
+  document.getElementById('absenceBackLink').addEventListener('click', function () {
+    showProfileScreen();
+  });
+  document.getElementById('absenceSubmitBtn').addEventListener('click', function () {
+    var btn = document.getElementById('absenceSubmitBtn');
+    var isPartial = absenceMode === 'partial';
+    var kind = document.getElementById('absenceTypeSelect').value;
+    var dateFrom = isPartial ? document.getElementById('absenceDateOne').value : document.getElementById('absenceDateFrom').value;
+    var dateTo = isPartial ? dateFrom : document.getElementById('absenceDateTo').value;
+    var timeFrom = document.getElementById('absenceTimeFrom').value;
+    if (!dateFrom || !dateTo) { setAbsenceStatus('Выберите дату', 'error'); return; }
+    if (dateTo < dateFrom) { setAbsenceStatus('Дата "по" раньше даты "с"', 'error'); return; }
+    if (isPartial && !timeFrom) { setAbsenceStatus('Укажите время', 'error'); return; }
+    btn.disabled = true;
+    startWaitIndicator(absenceStatusEl, 'Отправляем…');
+    apiPost({
+      action: 'submitAbsence',
+      phone: currentUser && currentUser.phone,
+      kind: kind,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+      timeFrom: timeFrom,
+      timeTo: '',
+      comment: document.getElementById('absenceComment').value.trim()
+    })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          setAbsenceStatus('Заявка записана ✓', 'success');
+          document.getElementById('absenceComment').value = '';
+          renderAbsences(res);
+        } else {
+          setAbsenceStatus(res.message || 'Не удалось отправить заявку', 'error');
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        setAbsenceStatus('Ошибка соединения: ' + err, 'error');
+      });
+  });
+
+  // ===== Экран "Профиль" — обработчики =====
+  document.getElementById('profileSwitchUserLink').addEventListener('click', function () {
+    document.getElementById('switchUserLink').click();
+  });
+  document.getElementById('profilePolicyBtn').addEventListener('click', function () {
+    policyModal.classList.add('open');
+  });
+  document.getElementById('profileAdminPanelBtn').addEventListener('click', function () {
+    showAdminScreen();
+  });
+  document.getElementById('profileTaskManageBtn').addEventListener('click', function () {
+    showTaskManageScreen();
+  });
+
+  // Список объектов по умолчанию скрыт (каждый объект и так разворачивается
+  // в большую форму редактирования) — эта ссылка показывает/прячет его
+  // целиком, свёрнутым (<details> без open), в обратном порядке.
+  var objectsListVisible = false;
+  document.getElementById('objectsShowAllLink').addEventListener('click', function () {
+    var listEl = document.getElementById('adminObjectsList');
+    var link = document.getElementById('objectsShowAllLink');
+    objectsListVisible = !objectsListVisible;
+    listEl.style.display = objectsListVisible ? 'block' : 'none';
+    link.textContent = objectsListVisible ? 'Скрыть объекты ▴' : 'Все объекты ▾';
+  });
+
+  // Быстрый поиск: выбрали/ввели точное название объекта из подсказки —
+  // показываем список (если был скрыт), разворачиваем именно эту карточку
+  // (остальные сворачиваем) и прокручиваем к ней.
+  function findAndOpenObjectCard_(name) {
+    var trimmed = String(name || '').trim();
+    if (!trimmed || !lastAdminObjectsResponse || !lastAdminObjectsResponse.objects) return;
+    var exists = lastAdminObjectsResponse.objects.some(function (o) { return o.name === trimmed; });
+    if (!exists) return;
+
+    var listEl = document.getElementById('adminObjectsList');
+    objectsListVisible = true;
+    listEl.style.display = 'block';
+    document.getElementById('objectsShowAllLink').textContent = 'Скрыть объекты ▴';
+
+    listEl.querySelectorAll('.adminObjDetails').forEach(function (det) {
+      det.open = det.getAttribute('data-objname') === trimmed;
+      if (det.open) {
+        det.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  }
+  document.getElementById('objectSearchInput').addEventListener('change', function () {
+    findAndOpenObjectCard_(this.value);
+  });
+  initAutocomplete(document.getElementById('objectSearchInput'), function () {
+    return (lastAdminObjectsResponse && lastAdminObjectsResponse.objects)
+      ? lastAdminObjectsResponse.objects.map(function (o) { return o.name; })
+      : [];
+  });
+  initAutocomplete(document.getElementById('objectForemanInput'), function () {
+    return Object.keys(adminAssigneeMap);
+  });
+  initAutocomplete(document.getElementById('taskAssigneeInput'), function () {
+    return Object.keys(adminAssigneeMap);
+  });
+  initAutocomplete(document.getElementById('taskObjectInput'), function () {
+    return validObjects;
+  });
+
+  var objectAddStatusEl = document.getElementById('objectAddStatus');
+  function setObjectAddStatus(text, kind) {
+    stopWaitIndicator(objectAddStatusEl);
+    objectAddStatusEl.textContent = text;
+    objectAddStatusEl.className = kind || '';
+  }
+  // Форма "Добавить объект" по умолчанию скрыта — открывается только по
+  // нажатию кнопки (чтобы не загромождать экран при обычном поиске объекта).
+  document.getElementById('showAddObjectFormBtn').addEventListener('click', function () {
+    var card = document.getElementById('addObjectCard');
+    var btn = document.getElementById('showAddObjectFormBtn');
+    var opening = card.style.display === 'none';
+    card.style.display = opening ? 'block' : 'none';
+    btn.textContent = opening ? '× Скрыть форму' : '+ Добавить объект';
+    if (opening) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  document.getElementById('objectAddBtn').addEventListener('click', function () {
+    var btn = document.getElementById('objectAddBtn');
+    var nameInput = document.getElementById('objectNameInput');
+    var addressInput = document.getElementById('objectAddressInput');
+    var shift1StartInput = document.getElementById('objectShift1StartInput');
+    var shift1EndInput = document.getElementById('objectShift1EndInput');
+    var shift2StartInput = document.getElementById('objectShift2StartInput');
+    var shift2EndInput = document.getElementById('objectShift2EndInput');
+    var foremanInput = document.getElementById('objectForemanInput');
+    var name = nameInput.value.trim();
+    if (!name) {
+      setObjectAddStatus('Укажите название объекта', 'error');
+      return;
+    }
+    btn.disabled = true;
+    startWaitIndicator(objectAddStatusEl, 'Добавляем…');
+    apiPost({
+      action: 'adminAddObject',
+      phone: currentUser && currentUser.phone,
+      name: name,
+      address: addressInput.value.trim(),
+      shift1Start: shift1StartInput.value,
+      shift1End: shift1EndInput.value,
+      shift2Start: shift2StartInput.value,
+      shift2End: shift2EndInput.value,
+      foremanPhone: resolveForemanPhoneFromInput_(foremanInput)
+    })
+      .then(function (res) {
+        btn.disabled = false;
+        if (res.status === 'ok') {
+          setObjectAddStatus('Объект добавлен', 'success');
+          nameInput.value = '';
+          addressInput.value = '';
+          shift1StartInput.value = '';
+          shift1EndInput.value = '';
+          shift2StartInput.value = '';
+          shift2EndInput.value = '';
+          foremanInput.value = '';
+          document.getElementById('addObjectCard').style.display = 'none';
+          document.getElementById('showAddObjectFormBtn').textContent = '+ Добавить объект';
+          renderAdminObjectsList(res);
+        } else {
+          setObjectAddStatus(res.message || 'Не удалось добавить объект', 'error');
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        setObjectAddStatus('Ошибка соединения: ' + err, 'error');
+      });
+  });
+  if (currentUser && currentUser.name && currentUser.phone) {
+    showScanScreen();
+  } else {
+    showLoginScreen();
+  }
+
+  var policyModal = document.getElementById('policyModal');
+  document.getElementById('policyLink').addEventListener('click', function () {
+    policyModal.classList.add('open');
+  });
+  document.getElementById('closePolicyBtn').addEventListener('click', function () {
+    policyModal.classList.remove('open');
+  });
+
+  var regPhoneEl = document.getElementById('regPhone');
+
+  // --- Фото лица ---
+  // Камера открывается на весь экран (как обычная камера в телефоне),
+  // а не встроенным блоком в длинной форме регистрации — раньше кнопку
+  // "Сделать фото" было легко не заметить, если она уезжала за пределы
+  // видимой области экрана.
+  var camPreview = document.getElementById('camPreview');
+  var camCanvas = document.getElementById('camCanvas');
+  var photoPreview = document.getElementById('photoPreview');
+  var startCamBtn = document.getElementById('startCamBtn');
+  var captureBtn = document.getElementById('captureBtn');
+  var retakeBtn = document.getElementById('retakeBtn');
+  var cameraOverlay = document.getElementById('cameraOverlay');
+  var camCloseBtn = document.getElementById('camCloseBtn');
+  var capturedPhoto = null;
+  var camStream = null;
+
+  function closeCameraOverlay() {
+    if (camStream) {
+      camStream.getTracks().forEach(function (t) { t.stop(); });
+      camStream = null;
+    }
+    cameraOverlay.classList.remove('open');
+  }
+
+  startCamBtn.addEventListener('click', function () {
+    cameraOverlay.classList.add('open');
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+        width: { ideal: 1280 },
+        height: { ideal: 1280 }
+      }
+    })
+      .then(function (stream) {
+        camStream = stream;
+        camPreview.srcObject = stream;
+      })
+      .catch(function (err) {
+        closeCameraOverlay();
+        setRegStatus('Не удалось включить камеру: ' + err, 'error');
+      });
+  });
+
+  camCloseBtn.addEventListener('click', function () {
+    closeCameraOverlay();
+  });
+
+  captureBtn.addEventListener('click', function () {
+    camCanvas.width = camPreview.videoWidth;
+    camCanvas.height = camPreview.videoHeight;
+    var ctx = camCanvas.getContext('2d');
+    ctx.translate(camCanvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(camPreview, 0, 0, camCanvas.width, camCanvas.height);
+    capturedPhoto = camCanvas.toDataURL('image/jpeg', 0.85);
+
+    closeCameraOverlay();
+    startCamBtn.style.display = 'none';
+    photoPreview.src = capturedPhoto;
+    photoPreview.style.display = 'block';
+    retakeBtn.style.display = 'block';
+  });
+
+  retakeBtn.addEventListener('click', function () {
+    capturedPhoto = null;
+    photoPreview.style.display = 'none';
+    retakeBtn.style.display = 'none';
+    startCamBtn.style.display = 'block';
+  });
+
+  function formatRuPhone(digits) {
+    // digits: only 0-9, already normalized to start with 7
+    var d = digits;
+    var out = '+7';
+    if (d.length > 1) out += ' (' + d.substring(1, 4);
+    if (d.length >= 4) out += ')';
+    if (d.length >= 5) out += ' ' + d.substring(4, 7);
+    if (d.length >= 8) out += '-' + d.substring(7, 9);
+    if (d.length >= 10) out += '-' + d.substring(9, 11);
+    return out;
+  }
+
+  function attachPhoneFormatting(el) {
+    el.addEventListener('input', function () {
+      var digits = el.value.replace(/\D/g, '');
+      if (digits.length > 0 && digits[0] === '8') digits = '7' + digits.substring(1);
+      if (digits.length > 0 && digits[0] !== '7') digits = '7' + digits;
+      digits = digits.substring(0, 11);
+      el.value = digits.length > 0 ? formatRuPhone(digits) : '';
+    });
+  }
+  attachPhoneFormatting(regPhoneEl);
+
+  function isValidRuPhone(value) {
+    var digits = value.replace(/\D/g, '');
+    return digits.length === 11 && digits[0] === '7';
+  }
+
+  // --- Вход по номеру телефона (для уже зарегистрированных) ---
+  var loginPhoneEl = document.getElementById('loginPhone');
+  attachPhoneFormatting(loginPhoneEl);
+
+  document.getElementById('loginBtn').addEventListener('click', function () {
+    var phone = loginPhoneEl.value.trim();
+    if (!isValidRuPhone(phone)) {
+      setLoginStatus('Введите номер телефона полностью, в формате +7 (900) 000-00-00', 'error');
+      return;
+    }
+    document.getElementById('loginBtn').disabled = true;
+    startWaitIndicator(loginStatus, 'Вход');
+    apiPost({ action: 'login', phone: phone })
+      .then(function (res) {
+        document.getElementById('loginBtn').disabled = false;
+        if (res.status === 'ok') {
+          currentUser = { name: res.name, phone: res.phone };
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentUser)); } catch (e) {}
+          stopWaitIndicator(loginStatus);
+          showScanScreen();
+        } else {
+          // Номер не найден — скорее всего, человек ещё не регистрировался.
+          setLoginStatus((res.message || 'Номер не найден') + ' Если вы здесь впервые — нажмите «Зарегистрироваться» ниже.', 'error');
+          var nu = document.getElementById('newUserCard');
+          nu.classList.remove('attn'); void nu.offsetWidth; nu.classList.add('attn');
+          try { nu.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+        }
+      })
+      .catch(function (err) {
+        document.getElementById('loginBtn').disabled = false;
+        setLoginStatus('Ошибка соединения: ' + err, 'error');
+      });
+  });
+
+  document.getElementById('goToRegLink').addEventListener('click', function () {
+    // Переносим уже введённый на экране входа номер в форму регистрации,
+    // чтобы не набирать его дважды.
+    if (loginPhoneEl.value.trim()) {
+      regPhoneEl.value = loginPhoneEl.value.trim();
+    }
+    setLoginStatus('');
+    showRegScreen();
+  });
+
+  document.getElementById('goToLoginLink').addEventListener('click', function () {
+    if (regPhoneEl.value.trim()) {
+      loginPhoneEl.value = regPhoneEl.value.trim();
+    }
+    setRegStatus('');
+    showLoginScreen();
+  });
+
+  document.getElementById('regBtn').addEventListener('click', function () {
+    if (!googleIdToken) {
+      setRegStatus('Сначала войдите через Google.', 'error');
+      updateGoogleGateVisibility();
+      return;
+    }
+    var lastName = document.getElementById('regLastName').value.trim();
+    var firstName = document.getElementById('regFirstName').value.trim();
+    var middleName = document.getElementById('regMiddleName').value.trim();
+    var phone = regPhoneEl.value.trim();
+    var name = [lastName, firstName, middleName].filter(Boolean).join(' ');
+    if (!lastName || !firstName || !phone) {
+      setRegStatus('Заполните фамилию, имя и телефон', 'error');
+      return;
+    }
+    if (!isValidRuPhone(phone)) {
+      setRegStatus('Введите номер телефона полностью, в формате +7 (900) 000-00-00', 'error');
+      return;
+    }
+    if (!capturedPhoto) {
+      setRegStatus('Сделайте фото лица', 'error');
+      return;
+    }
+    if (!document.getElementById('consentCheckbox').checked) {
+      setRegStatus('Необходимо согласие на обработку персональных данных', 'error');
+      return;
+    }
+    document.getElementById('regBtn').disabled = true;
+    // Регистрация включает загрузку фото на Google Диск, поэтому обычно
+    // идёт дольше, чем отметка прихода/ухода — показываем это в подсказке.
+    startWaitIndicator(regStatus, 'Регистрация');
+    apiPost({ action: 'register', name: name, phone: phone, photo: capturedPhoto, googleIdToken: googleIdToken })
+      .then(function (res) {
+        document.getElementById('regBtn').disabled = false;
+        if (res.status === 'ok') {
+          currentUser = { name: res.name, phone: res.phone };
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentUser)); } catch (e) {}
+          stopWaitIndicator(regStatus);
+          showScanScreen();
+        } else {
+          setRegStatus('Ошибка: ' + (res.message || 'неизвестная'), 'error');
+        }
+      })
+      .catch(function (err) {
+        document.getElementById('regBtn').disabled = false;
+        setRegStatus('Ошибка соединения: ' + err, 'error');
+      });
+  });
+
+  document.getElementById('switchUserLink').addEventListener('click', function () {
+    if (confirm('Сменить пользователя на этом устройстве? Нужно будет войти по номеру телефона (или зарегистрироваться, если вы новый сотрудник).')) {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      if (currentUser && currentUser.phone) {
+        try { localStorage.removeItem(statsCacheKey(currentUser.phone)); } catch (e) {}
+        // Кэш "видел ли этот телефон кнопки админа" — привязан к номеру,
+        // так что новому человеку он и так не покажется, но на всякий
+        // случай подчищаем за уходящим пользователем.
+        try { localStorage.removeItem(adminStatusCacheKey(currentUser.phone)); } catch (e) {}
+      }
+      currentUser = null;
+      shiftStatusKnown = false;
+      document.getElementById('regLastName').value = '';
+      document.getElementById('regFirstName').value = '';
+      document.getElementById('regMiddleName').value = '';
+      document.getElementById('regPhone').value = '';
+      loginPhoneEl.value = '';
+      capturedPhoto = null;
+      photoPreview.style.display = 'none';
+      retakeBtn.style.display = 'none';
+      startCamBtn.style.display = 'block';
+      document.getElementById('consentCheckbox').checked = false;
+      googleIdToken = null;
+      document.getElementById('googleConfirmedEmail').textContent = '';
+      setLoginStatus('');
+      showLoginScreen();
+    }
+  });
+
+  // --- Сканирование ---
+  var scannedObject = null;
+  var html5QrCode = null;
+
+  function setStatus(text, kind) {
+    stopWaitIndicator(statusEl);
+    statusEl.textContent = text;
+    statusEl.className = kind || '';
+  }
+
+  // Индикатор ожидания ответа сервера: крутящийся значок + счётчик секунд,
+  // который сам показывает, сколько реально уже идёт ожидание, вместо
+  // молчаливого "Отправка…", из-за которого непонятно, зависло всё или
+  // просто ждёт. Подсказка меняется, если ответ задерживается дольше обычного.
+  function startWaitIndicator(el, label) {
+    stopWaitIndicator(el);
+    var start = Date.now();
+    function render() {
+      var sec = Math.max(0, Math.round((Date.now() - start) / 1000));
+      var hint = '';
+      if (sec >= 8) {
+        hint = ' — сервер отвечает дольше обычного, ещё немного';
+      } else if (sec >= 3) {
+        hint = ' — обычно занимает несколько секунд';
+      }
+      el.innerHTML = '<span class="spinner"></span><span>' + label + '… ' + sec + ' с' + hint + '</span>';
+      el.className = 'waiting';
+    }
+    render();
+    el._waitTimer = setInterval(render, 1000);
+  }
+
+  function stopWaitIndicator(el) {
+    if (el._waitTimer) {
+      clearInterval(el._waitTimer);
+      el._waitTimer = null;
+    }
+  }
+
+  // Кнопка теперь одна — её текст ("Отметить приход" / "Отметить уход")
+  // заранее отражает текущий статус смены (см. applyActionButtonState),
+  // а нажатие сразу запускает камеру. Отдельной кнопки "Сканировать QR-код"
+  // больше нет — сканирование и отметка объединены в одно действие.
+  document.getElementById('actionBtn').addEventListener('click', function () {
+    document.getElementById('actionBtn').style.display = 'none';
+    setStatus('');
+    // Запрашиваем геолокацию сразу, параллельно со сканированием QR —
+    // к моменту успешного скана (и вызова sendEvent) результат обычно уже
+    // готов, и заметной дополнительной задержки не добавляется.
+    geoPositionPromise = getGeoPositionPromise();
+    html5QrCode = new Html5Qrcode('reader');
+    html5QrCode.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: 220 },
+      function (decodedText) {
+        var trimmed = String(decodedText).trim();
+
+        html5QrCode.stop().then(function () {
+          document.getElementById('reader').innerHTML = '';
+        });
+
+        if (validObjectsLoaded && validObjects.indexOf(trimmed) === -1) {
+          setStatus('Этот QR-код не относится ни к одному известному объекту', 'error');
+          document.getElementById('actionBtn').style.display = 'block';
+          scannedObject = null;
+          return;
+        }
+
+        // Смена уже открыта, но на ДРУГОМ объекте — нельзя ни открыть новую,
+        // ни закрыть эту (сервер тоже это проверит, но лучше сразу
+        // предупредить, не тратя время на отправку).
+        if (currentShiftOpen && currentOpenObjectName !== trimmed) {
+          setStatus('Вы ещё не закончили работу на объекте «' + currentOpenObjectName + '». Сначала отметьте там уход.', 'error');
+          document.getElementById('actionBtn').style.display = 'block';
+          scannedObject = null;
+          return;
+        }
+
+        scannedObject = trimmed;
+        var lbl = document.getElementById('objectLabel');
+        lbl.style.display = 'block';
+        lbl.textContent = 'Объект: ' + trimmed;
+        // Тип события уже известен по статусу, полученному ДО сканирования —
+        // отдельного подтверждения не требуется, отправляем сразу.
+        sendEvent(currentShiftOpen ? 'Уход' : 'Приход');
+      }
+    ).catch(function (err) {
+      setStatus('Не удалось включить камеру: ' + err, 'error');
+      document.getElementById('actionBtn').style.display = 'block';
+    });
+  });
+
+  // Показывает на главном экране (ещё до сканирования QR-кода), открыта
+  // ли сейчас у сотрудника смена, и если да — на каком объекте. Это то,
+  // что видно сразу при входе в приложение, а не только после сканирования.
+  function renderShiftBanner(shiftOpen, openObjectName) {
+    var banner = document.getElementById('shiftStatusBanner');
+    if (!banner) return;
+    if (shiftOpen) {
+      banner.textContent = '🟢 Смена открыта: ' + openObjectName;
+      banner.className = 'shiftBanner shiftBanner-open';
+    } else {
+      banner.textContent = '⚪ Смена сейчас не открыта';
+      banner.className = 'shiftBanner shiftBanner-closed';
+    }
+  }
+
+  // Запрашивает актуальный статус смены и обновляет баннер — независимо от
+  // того, сканировал ли сотрудник в этот момент QR-код (в отличие от
+  // checkShiftStatus, которая ещё и управляет кнопками "Приход"/"Уход").
+  function refreshShiftBanner() {
+    var banner = document.getElementById('shiftStatusBanner');
+    if (!currentUser || !currentUser.phone) {
+      if (banner) banner.className = 'shiftBanner';
+      return;
+    }
+    apiPost({ action: 'status', phone: currentUser.phone })
+      .then(function (res) {
+        renderShiftBanner(res.shiftOpen === true, res.openObjectName || null);
+      })
+      .catch(function () {
+        // при ошибке связи баннер просто не обновляем, чтобы не показывать
+        // неверную информацию — останется прежнее (последнее известное) значение
+      });
+  }
+
+  // Заранее (ещё до сканирования QR-кода) запоминаем статус смены — он
+  // определяет и текст/цвет единственной кнопки, и то, какой eventType
+  // будет отправлен сразу после успешного скана.
+  var currentShiftOpen = false;
+  var currentOpenObjectName = null;
+  // Становится true после первой успешной проверки статуса в этой сессии.
+  // Пока false — показываем индикатор ожидания (идёт первая проверка).
+  // Когда уже true — при повторных заходах на главный экран (например,
+  // после возврата из админ-панели) сразу показываем последний известный
+  // статус без "кручения", а актуальность на сервере проверяем тихо в фоне.
+  var shiftStatusKnown = false;
+
+  function applyActionButtonState(shiftOpen, openObjectName) {
+    currentShiftOpen = shiftOpen;
+    currentOpenObjectName = openObjectName;
+    var btn = document.getElementById('actionBtn');
+    btn.style.display = 'block';
+    btn.disabled = false;
+    if (shiftOpen) {
+      btn.textContent = 'Отметить уход';
+      btn.className = 'action-out';
+    } else {
+      btn.textContent = 'Отметить приход';
+      btn.className = 'action-in';
+    }
+    setStatus('');
+    // Центральная кнопка нижней навигации отражает то же состояние —
+    // красная и "Уход", когда смена открыта, зелёная и "Приход" иначе.
+    var navBtn = document.getElementById('navCheckinBtn');
+    var navLabel = document.getElementById('navCheckinLabel');
+    if (navBtn) navBtn.className = 'navCheckinBtn' + (shiftOpen ? ' action-out' : '');
+    if (navLabel) navLabel.textContent = shiftOpen ? 'Уход' : 'Приход';
+  }
+
+  function checkShiftStatus() {
+    if (!currentUser || !currentUser.phone) {
+      applyActionButtonState(false, null);
+      return;
+    }
+    if (shiftStatusKnown) {
+      // Статус уже известен с прошлой проверки в этой сессии (например,
+      // человек просто зашёл в админ-панель и вернулся назад) — сразу
+      // показываем последнее известное значение, без "кручения", а
+      // актуальность тихо проверяем в фоне (см. ниже).
+      applyActionButtonState(currentShiftOpen, currentOpenObjectName);
+    } else {
+      // Первая проверка статуса в этой сессии — пока он не известен, а
+      // из-за "холодного старта" Apps Script это иногда не доли секунды,
+      // а несколько секунд. Раньше кнопка просто не была видна — выглядело
+      // как будто экран завис. Показываем живой индикатор ожидания, как
+      // при отправке отметки.
+      var btn = document.getElementById('actionBtn');
+      btn.style.display = 'none';
+      startWaitIndicator(statusEl, 'Проверка статуса');
+    }
+    apiPost({ action: 'status', phone: currentUser.phone })
+      .then(function (res) {
+        var shiftOpen = res.shiftOpen === true;
+        var openObjectName = res.openObjectName || null;
+        shiftStatusKnown = true;
+        applyActionButtonState(shiftOpen, openObjectName);
+        renderShiftBanner(shiftOpen, openObjectName);
+      })
+      .catch(function () {
+        if (!shiftStatusKnown) {
+          applyActionButtonState(false, null); // при ошибке связи по умолчанию разрешаем начать смену
+        }
+        // если статус уже был известен — тихо оставляем прежнее (последнее
+        // известное) значение на кнопке, ничего не меняем
+      });
+  }
+
+  // ПЛАН Б: что делать, если "оптимистичный" успех (показанный сразу, не
+  // дожидаясь сервера) не подтвердился. Показываем это заметно и
+  // однозначно — тихо промолчать здесь нельзя, от этого зависит табель.
+  // Требуем явного "Понятно", чтобы человек точно это увидел, и сразу же
+  // перепроверяем реальный статус смены на сервере.
+  function showSendFailure(message) {
+    if (navigator.vibrate) {
+      try { navigator.vibrate([200, 100, 200]); } catch (e) {}
+    }
+    stopWaitIndicator(statusEl);
+    statusEl.className = 'error';
+    statusEl.innerHTML =
+      '<div class="failAlert">' +
+        '<div class="failAlertTitle">⚠️ Не подтверждено сервером</div>' +
+        '<div>' + message + '</div>' +
+        '<div>Проверьте статус смены — возможно, отметку нужно повторить.</div>' +
+        '<button id="ackFailBtn" type="button">Понятно, проверить статус</button>' +
+      '</div>';
+    document.getElementById('ackFailBtn').addEventListener('click', function () {
+      setStatus('');
+      checkShiftStatus();
+    });
+  }
+
+  function sendEvent(eventType) {
+    if (!scannedObject || !currentUser) return;
+    document.getElementById('actionBtn').style.display = 'none';
+
+    var objectAtSend = scannedObject;
+    var eventTypeAtSend = eventType;
+    document.getElementById('objectLabel').style.display = 'none';
+    scannedObject = null;
+
+    // Оптимистичный интерфейс: запись в таблицу на сервере происходит
+    // почти мгновенно, а вот подтверждающий ответ иногда идёт ещё 10-15
+    // секунд из-за особенностей инфраструктуры Apps Script (см. пояснения
+    // в чате). Ждать все эти секунды с пустым экраном хуже, чем сразу
+    // показать ожидаемый результат — включая баннер статуса смены и кнопку
+    // следующего действия — а если сервер в итоге откажет (в том числе
+    // из-за GPS-проверки — см. showGeoBlockedAlert), заметно откатить это.
+    var optimisticShiftOpen = (eventTypeAtSend === 'Приход');
+    var optimisticOpenObjectName = optimisticShiftOpen ? objectAtSend : null;
+    renderShiftBanner(optimisticShiftOpen, optimisticOpenObjectName);
+    // applyActionButtonState сама очищает статус (setStatus('')) — поэтому
+    // сообщение "Записано" выставляем ПОСЛЕ неё, а не до.
+    applyActionButtonState(optimisticShiftOpen, optimisticOpenObjectName);
+    setStatus('Записано: ' + currentUser.name + ', ' + eventTypeAtSend + ' (объект: ' + objectAtSend + ')', 'success');
+
+    (geoPositionPromise || getGeoPositionPromise()).then(function (geo) {
+      apiPost({
+        action: 'log',
+        name: currentUser.name,
+        phone: currentUser.phone,
+        objectName: objectAtSend,
+        eventType: eventTypeAtSend,
+        geo: geo
+      })
+        .then(function (res) {
+          if (res.status === 'ok') {
+            // Подтверждено — просто уточняем точное серверное время, статус
+            // и кнопка уже показывают верную картину (обновили оптимистично).
+            setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time, 'success');
+            if (eventTypeAtSend === 'Уход') {
+              // Смена только что закрыта — в фоне сразу подтягиваем свежую
+              // статистику и сохраняем её на телефоне. Так при следующем
+              // открытии "Личного кабинета" (даже в другой день) он сразу
+              // покажет эту смену, без ожидания сервера.
+              refreshStatsCache(currentUser.phone, function (fresh) {
+                if (screenStats.style.display === 'block') {
+                  renderStats(fresh);
+                }
+              });
+            }
+          } else if (res.reason === 'geo_blocked') {
+            showGeoBlockedAlert(res.message || 'Вы находитесь не на объекте.');
+          } else {
+            showSendFailure(res.message || 'сервер отклонил отметку без пояснения');
+          }
+        })
+        .catch(function (err) {
+          showSendFailure('не удалось получить подтверждение от сервера (' + err + ')');
+        });
+    });
+  }
+
+  // Специальный, подчёркнуто тревожный экран — именно для случая попытки
+  // отметиться далеко от объекта (а не обычного сбоя сети/сервера, для
+  // которого есть showSendFailure). Цель — чтобы человек, один раз увидев
+  // это, больше не пытался отметиться по фото QR-кода из другого места.
+  function showGeoBlockedAlert(message) {
+    if (navigator.vibrate) {
+      try { navigator.vibrate([250, 100, 250, 100, 400]); } catch (e) {}
+    }
+    stopWaitIndicator(statusEl);
+    statusEl.className = 'error geoBlockedAlert';
+    statusEl.innerHTML =
+      '<div class="geoAlertBox">' +
+        '<div class="geoAlertIcon">🚫</div>' +
+        '<div class="geoAlertTitle">ОТМЕТКА НЕ ЗАСЧИТАНА</div>' +
+        '<div class="geoAlertText">' + message + '</div>' +
+        '<div class="geoAlertNote">Система фиксирует такие попытки. Отметиться можно только находясь непосредственно на объекте.</div>' +
+        '<button id="geoAlertAckBtn" type="button">Понятно</button>' +
+      '</div>';
+    document.getElementById('geoAlertAckBtn').addEventListener('click', function () {
+      setStatus('');
+      checkShiftStatus();
+    });
+  }
+
+  // ===== ТЕСТОВЫЙ РЕЖИМ (для просмотра экранов без камеры/сервера) =====
+  // Кнопка 🧪 скрыта от всех по умолчанию. Чтобы включить её на СВОЁМ
+  // устройстве — один раз открыть сайт со специальной добавкой в конце
+  // адреса: ?debug=sevmod (например: https://.../index.html?debug=sevmod).
+  // После этого выбор запоминается в localStorage именно этого браузера —
+  // повторять не нужно, и другие люди, открывая обычную ссылку без этой
+  // добавки, кнопку никогда не увидят.
+  var DEBUG_SECRET = 'sevmod';
+  var DEBUG_STORAGE_KEY = 'attendance_debug_unlocked_v1';
+  var debugToggle = document.getElementById('debugToggle');
+  var debugPanel = document.getElementById('debugPanel');
+  (function initDebugVisibility() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('debug') === DEBUG_SECRET) {
+        localStorage.setItem(DEBUG_STORAGE_KEY, '1');
+      }
+      if (localStorage.getItem(DEBUG_STORAGE_KEY) === '1') {
+        debugToggle.classList.add('debugVisible');
+      }
+    } catch (e) {
+      // localStorage недоступен (приватный режим и т.п.) — просто не
+      // показываем кнопку, это не критично
+    }
+  })();
+  debugToggle.addEventListener('click', function () {
+    debugPanel.classList.toggle('open');
+  });
+
+  document.getElementById('dbgLogin').addEventListener('click', function () {
+    showLoginScreen();
+    debugPanel.classList.remove('open');
+  });
+
+  document.getElementById('dbgReg').addEventListener('click', function () {
+    // В тестовом режиме пропускаем реальный вход через Google, чтобы можно
+    // было посмотреть форму регистрации без настроенного GOOGLE_CLIENT_ID.
+    googleIdToken = 'debug-fake-token';
+    document.getElementById('googleConfirmedEmail').textContent = 'Тестовый режим: вход через Google пропущен';
+    showRegScreen();
+    debugPanel.classList.remove('open');
+  });
+
+  document.getElementById('dbgScanStart').addEventListener('click', function () {
+    showScanScreen();
+    document.getElementById('reader').innerHTML = '';
+    document.getElementById('objectLabel').style.display = 'none';
+    document.getElementById('status').textContent = '';
+    debugPanel.classList.remove('open');
+  });
+
+  document.getElementById('dbgScanFound').addEventListener('click', function () {
+    showScanScreen();
+    scannedObject = 'Befree Балкания Nova';
+    var lbl = document.getElementById('objectLabel');
+    lbl.textContent = 'Объект: ' + scannedObject;
+    lbl.style.display = 'block';
+    applyActionButtonState(false, null);
+    debugPanel.classList.remove('open');
+  });
+
+  document.getElementById('dbgScanFoundActive').addEventListener('click', function () {
+    showScanScreen();
+    scannedObject = 'Befree Балкания Nova';
+    var lbl = document.getElementById('objectLabel');
+    lbl.textContent = 'Объект: ' + scannedObject;
+    lbl.style.display = 'block';
+    applyActionButtonState(true, scannedObject);
+    debugPanel.classList.remove('open');
+  });
+
+  document.getElementById('dbgPolicy').addEventListener('click', function () {
+    policyModal.classList.add('open');
+    debugPanel.classList.remove('open');
+  });
+
+  document.getElementById('dbgStats').addEventListener('click', function () {
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenStats.style.display = 'block';
+    document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Иван Иванов';
+    renderStats({
+      monthHours: '86:30',
+      monthPay: 34600,
+      monthLateMinutes: 47,
+      totalHours: '412:15',
+      totalPay: 165000,
+      totalLateMinutes: 132,
+      days: [
+        { date: '24.09.2026', arrival: '08:17', departure: '17:11', hours: '8:54', pay: 3660, lateMinutes: 17 },
+        { date: '23.09.2026', arrival: '07:58', departure: '17:00', hours: '9:02', pay: 3566, lateMinutes: 0 },
+        { date: '22.09.2026', arrival: '08:00', departure: '16:45', hours: '8:45', pay: 3500, lateMinutes: 0 },
+        { date: '19.09.2026', arrival: '08:30', departure: '17:20', hours: '8:50', pay: 3667, lateMinutes: 30 }
+      ]
+    });
+    debugPanel.classList.remove('open');
+  });
+</script>
+</body>
+</html>
