@@ -57,7 +57,10 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    height: 100%;
+    /* min-height, а не height: иначе на длинных экранах body не растёт и его
+       нижний отступ (место под нижнюю панель) оказывается не под контентом —
+       конец страницы прятался под панелью навигации. */
+    min-height: 100%;
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -834,7 +837,6 @@
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
   #screenExpHub, #screenExpView { width: 100%; max-width: 440px; }
   .expSumList { display: grid; gap: 8px; }
-  .expSumGroup { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 8px 0 0; }
   .expSumTile {
     display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 12px 14px;
     background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
@@ -844,7 +846,6 @@
   .expSumTile .lbl { flex: 1; min-width: 0; font-size: 15px; }
   .expSumTile .val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .expSumTile .chev { color: var(--muted); font-size: 18px; }
-  .expSumTile.sub { margin-left: 18px; width: calc(100% - 18px); }
   .expUpdated { font-size: 12px; color: var(--muted); margin-top: 10px; }
   .expChips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; -webkit-overflow-scrolling: touch; }
   .expChip {
@@ -3950,17 +3951,20 @@
     var box = document.getElementById('expSummary');
     var items = expOverview.summary || [];
     if (!items.length) { box.innerHTML = '<div class="statsEmpty">В шапке листа расходов нет сводки</div>'; return; }
-    var inGroup = false;
+    // Все строки сводки — равноправные статусы. Если в шапке таблицы у статуса
+    // нет суммы (как у «Под отчет»), считаем её по строкам с этим статусом.
+    var rows = expRows_();
     box.innerHTML = '<div class="expSumList">' + items.map(function (x) {
-      if (x.value === null || x.value === undefined) {
-        inGroup = true;
-        return '<div class="expSumGroup">' + escapeHtml(x.label) + '</div>';
+      var value = x.value;
+      if (value === null || value === undefined) {
+        var k = expKey_(x.label);
+        value = rows.reduce(function (a, r) { return a + (expKey_(r.status) === k ? (Number(r.total) || 0) : 0); }, 0);
       }
       var color = x.color && !/^#?(fff|ffffff)$/i.test(x.color) ? x.color : 'var(--border)';
-      return '<button type="button" class="expSumTile' + (inGroup ? ' sub' : '') + '" data-status="' + escapeHtml(x.label) + '">' +
+      return '<button type="button" class="expSumTile" data-status="' + escapeHtml(x.label) + '">' +
         '<span class="swatch" style="background:' + escapeHtml(color) + '"></span>' +
         '<span class="lbl">' + escapeHtml(x.label) + '</span>' +
-        '<span class="val">' + money_(x.value) + '</span><span class="chev" aria-hidden="true">›</span></button>';
+        '<span class="val">' + money_(value) + '</span><span class="chev" aria-hidden="true">›</span></button>';
     }).join('') + '</div>';
     document.getElementById('expUpdated').textContent = 'Данные таблицы на ' + (expOverview.updatedAt || '') + '. Нажмите на строку, чтобы увидеть, кому и сколько.';
   }
@@ -4003,7 +4007,7 @@
     var statusNames = {}, order = [];
     (expOverview.summary || []).forEach(function (x) {
       var k = expKey_(x.label);
-      if (x.value !== null && x.value !== undefined && !statusNames[k]) { statusNames[k] = x.label; order.push(k); }
+      if (!statusNames[k]) { statusNames[k] = x.label; order.push(k); }
     });
     var present = {};
     rows.forEach(function (r) {
