@@ -1,3 +1,6 @@
+// v37: расходы за период — adminAddExpense принимает dateTo; за каждый день
+//      периода (включительно, до 62 дней) пишется отдельная строка с той же
+//      ставкой. Ответ дополнительно содержит rowTo и days.
 // v36: ключ Яндекс.Геокодера больше не хранится в коде — читается из свойств
 //      скрипта (Настройки проекта → Свойства скрипта → YANDEX_GEOCODER_API_KEY).
 // v35: расходы пишутся в лист "Расходы SEVMOD" НАШЕЙ таблицы (а не во внешнюю); если листа нет — создаётся.
@@ -332,7 +335,7 @@ function doPost(e) {
     }
     if (data.action === 'adminAddExpense') {
       return jsonOutput(adminAddExpense(data.phone, data.date, data.worker, data.brigadier,
-        data.objectName, data.rate, data.comment));
+        data.objectName, data.rate, data.comment, data.dateTo));
     }
     if (data.action === 'adminExpenseLookups') {
       return jsonOutput(adminExpenseLookups(data.phone));
@@ -2739,12 +2742,27 @@ function expenseLayout_() {
   return { error: 'В листе «' + EXPENSE_SHEET_NAME + '» не найдена строка заголовков (Дата, Работник, Объект, Ставка).' };
 }
 
-function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment) {
+var EXPENSE_MAX_DAYS = 62;
+
+// dateToIso — необязательный конец периода (включительно). Если он задан и
+// позже dateIso, на каждый день периода пишется отдельная строка.
+function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso) {
   var auth = adminAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
 
   var date = parseIsoDate_(dateIso);
   if (!date) return { status: 'error', message: 'Укажите дату' };
+  var dateTo = dateToIso ? parseIsoDate_(dateToIso) : date;
+  if (!dateTo) return { status: 'error', message: 'Неверная дата окончания периода' };
+  if (dateTo < date) return { status: 'error', message: 'Дата окончания раньше даты начала' };
+  var dates = [];
+  for (var d = new Date(date.getTime()); d <= dateTo; d.setDate(d.getDate() + 1)) {
+    dates.push(new Date(d.getTime()));
+    if (dates.length > EXPENSE_MAX_DAYS) {
+      return { status: 'error', message: 'Слишком длинный период — не больше ' + EXPENSE_MAX_DAYS + ' дней' };
+    }
+  }
+  var days = dates.length;
   worker = String(worker || '').trim();
   brigadier = String(brigadier || '').trim();
   objectName = String(objectName || '').trim();
@@ -2777,20 +2795,29 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
       }
     }
     var row = lastUsed + 1;
-    if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
+    var rowTo = row + days - 1;
+    if (rowTo > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), rowTo - sheet.getMaxRows());
 
-    sheet.getRange(row, cols.date).setValue(date).setNumberFormat('dd.MM.yyyy');
-    sheet.getRange(row, cols.worker).setValue(worker);
-    if (cols.brigadier) sheet.getRange(row, cols.brigadier).setValue(brigadier);
-    sheet.getRange(row, cols.object).setValue(objectName);
-    sheet.getRange(row, cols.rate).setValue(amount);
-    if (cols.comment) sheet.getRange(row, cols.comment).setValue(comment);
+    // Одна колонка — один вызов setValues на все дни периода.
+    function fill_(col, value) {
+      var vals = [];
+      for (var k = 0; k < days; k++) vals.push([value]);
+      return sheet.getRange(row, col, days, 1).setValues(vals);
+    }
+    sheet.getRange(row, cols.date, days, 1)
+      .setValues(dates.map(function (x) { return [x]; }))
+      .setNumberFormat('dd.MM.yyyy');
+    fill_(cols.worker, worker);
+    if (cols.brigadier) fill_(cols.brigadier, brigadier);
+    fill_(cols.object, objectName);
+    fill_(cols.rate, amount);
+    if (cols.comment) fill_(cols.comment, comment);
     SpreadsheetApp.flush();
 
     var warn = [];
     if (!cols.brigadier && brigadier) warn.push('в таблице нет столбца «Бригадир» — бригадир не записан');
     if (!cols.comment && comment) warn.push('в таблице нет столбца «Комментарий» — комментарий не записан');
-    return { status: 'ok', row: row, warning: warn.join('; ') };
+    return { status: 'ok', row: row, rowTo: rowTo, days: days, warning: warn.join('; ') };
   } finally {
     lock.releaseLock();
   }

@@ -796,6 +796,39 @@
   .absReqBtns button { margin-top: 0; padding: 10px; font-size: 14px; }
   .absReqBtns .rejectBtn { background: var(--red); }
 
+  /* ===== Расходы: поле даты и календарь с выбором периода ===== */
+  .dateField {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    text-align: left; font-weight: 400; color: var(--text); background: var(--card);
+    border: 1px solid var(--border); padding: 13px; margin: 0 0 14px;
+  }
+  .dateField .dateFieldIcon { color: var(--muted); font-size: 18px; line-height: 1; }
+  .calHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .calHead button { width: 40px; height: 40px; margin: 0; padding: 0; font-size: 20px; background: none; color: var(--text); border: 1px solid var(--border); }
+  .calTitle { font-weight: 600; font-size: 16px; text-transform: capitalize; }
+  .calGrid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 4px; }
+  .calDow { text-align: center; font-size: 12px; color: var(--muted); padding: 4px 0; }
+  .calDow.we { color: var(--red); }
+  .calDay {
+    margin: 0; padding: 0; height: 42px; font-size: 15px; font-weight: 500;
+    background: none; color: var(--text); border-radius: 0;
+  }
+  .calDay.we { color: var(--red); }
+  .calDay.today { font-weight: 800; text-decoration: underline; }
+  .calDay.inRange { background: rgba(66,133,244,0.18); }
+  .calDay.start, .calDay.end { background: var(--blue); color: #fff; }
+  .calDay.start { border-radius: 10px 0 0 10px; }
+  .calDay.end { border-radius: 0 10px 10px 0; }
+  .calDay.start.end { border-radius: 10px; }
+  .calSummary { min-height: 40px; margin: 10px 0 0; font-size: 14px; line-height: 1.4; }
+  .calSummary.error { color: var(--red); }
+  .calHint { font-size: 12px; color: var(--muted); }
+  .calBtns { display: flex; gap: 8px; }
+  .calBtns button { margin-top: 8px; }
+  .calBtns .calCancel { background: var(--muted); }
+  #expDateModal .modalBox { max-width: 400px; }
+  #expPeriodNote { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
+
   /* ===== Нижняя навигация ===== */
   /* Показывается только когда человек вошёл (см. showBottomNav/hideBottomNav
      в скрипте) — скрыта на экранах входа/регистрации. Центральная кнопка
@@ -1310,8 +1343,10 @@
       <div class="switchUser"><a id="adminExpenseBackLink">← Панель администратора</a></div>
     </div>
     <div class="card">
-      <label for="expDate">Дата</label>
-      <input id="expDate" type="date">
+      <label for="expDateBtn">Дата или период</label>
+      <button id="expDateBtn" class="dateField" type="button" aria-haspopup="dialog">
+        <span id="expDateText">—</span><span class="dateFieldIcon" aria-hidden="true">📅</span>
+      </button>
       <label for="expWorker" style="margin-top:10px;">Работник</label>
       <input id="expWorker" type="text" autocomplete="off" placeholder="Например: Умар">
       <label for="expBrigadier" style="margin-top:10px;">Бригадир</label>
@@ -1322,8 +1357,27 @@
       <input id="expRate" type="number" inputmode="decimal" min="0" step="any" placeholder="Например: 4000">
       <label for="expComment" style="margin-top:10px;">Комментарий</label>
       <input id="expComment" type="text" maxlength="500" placeholder="Необязательно">
+      <div id="expPeriodNote" hidden></div>
       <button id="expSubmitBtn" type="button" style="margin-top:10px;">Добавить в таблицу</button>
       <div id="expStatus"></div>
+    </div>
+
+    <!-- Календарь: одно нажатие — одна дата, второе — конец периода. -->
+    <div id="expDateModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="expCalTitle">
+      <div class="modalBox">
+        <div class="calHead">
+          <button id="expCalPrev" type="button" aria-label="Предыдущий месяц">‹</button>
+          <div id="expCalTitle" class="calTitle"></div>
+          <button id="expCalNext" type="button" aria-label="Следующий месяц">›</button>
+        </div>
+        <div id="expCalGrid" class="calGrid"></div>
+        <div id="expCalSummary" class="calSummary"></div>
+        <div class="calHint">Нажмите один день — будет одна дата. Нажмите второй день — получится период (с первого по второй включительно).</div>
+        <div class="calBtns">
+          <button id="expCalCancel" class="calCancel" type="button">Отмена</button>
+          <button id="expCalDone" type="button">Готово</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -3289,8 +3343,8 @@
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'none';
     screenAdminExpense.style.display = 'block';
-    var dateEl = document.getElementById('expDate');
-    if (!dateEl.value) dateEl.value = isoToday_();
+    if (!expRange.from) { expRange.from = isoToday_(); expRange.to = expRange.from; }
+    renderExpDateField();
     setExpStatus('');
     loadExpLookups();
     showBottomNav();
@@ -3314,6 +3368,142 @@
   });
   initAutocomplete(document.getElementById('expObject'), function () { return expLookups.objects; });
 
+  // ----- Дата / период расходов -----
+  var EXP_MAX_DAYS = 62;
+  var expRange = { from: '', to: '' };          // применённый выбор (ISO)
+  var expDraft = { from: '', to: '' };          // выбор внутри открытого календаря
+  var expPickingEnd = false;                    // true — первый день нажат, ждём конец периода
+  var expCalMonth = null;                       // Date — 1-е число показанного месяца
+  var MONTHS_RU = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+  var DOW_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+
+  function isoOf_(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function dateOfIso_(iso) {
+    var p = String(iso).split('-');
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  }
+  function daysBetween_(fromIso, toIso) {
+    return Math.round((dateOfIso_(toIso) - dateOfIso_(fromIso)) / 86400000) + 1;
+  }
+  function daysWord_(n) {
+    var m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'день';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'дня';
+    return 'дней';
+  }
+  function rangeText_(r) {
+    if (!r.from) return '—';
+    if (!r.to || r.to === r.from) return fmtIsoRu_(r.from);
+    var n = daysBetween_(r.from, r.to);
+    return fmtIsoRu_(r.from) + ' – ' + fmtIsoRu_(r.to) + ' (' + n + ' ' + daysWord_(n) + ')';
+  }
+
+  function renderExpDateField() {
+    document.getElementById('expDateText').textContent = rangeText_(expRange);
+    renderExpPeriodNote();
+  }
+  // Под формой: сколько строк будет добавлено и на какую сумму (для периода).
+  function renderExpPeriodNote() {
+    var el = document.getElementById('expPeriodNote');
+    var n = expRange.from ? daysBetween_(expRange.from, expRange.to || expRange.from) : 1;
+    if (n <= 1) { el.hidden = true; return; }
+    var rate = Number(String(document.getElementById('expRate').value).replace(',', '.'));
+    el.textContent = 'Будет добавлено ' + n + ' строк — по одной на каждый день' +
+      (rate > 0 ? ': ' + n + ' × ' + rate.toLocaleString('ru-RU') + ' ₽ = ' + (n * rate).toLocaleString('ru-RU') + ' ₽' : '') + '.';
+    el.hidden = false;
+  }
+  document.getElementById('expRate').addEventListener('input', renderExpPeriodNote);
+
+  function renderExpCal() {
+    var y = expCalMonth.getFullYear(), m = expCalMonth.getMonth();
+    document.getElementById('expCalTitle').textContent = MONTHS_RU[m] + ' ' + y;
+    var grid = document.getElementById('expCalGrid');
+    grid.innerHTML = '';
+    DOW_RU.forEach(function (name, i) {
+      var h = document.createElement('div');
+      h.className = 'calDow' + (i >= 5 ? ' we' : '');
+      h.textContent = name;
+      grid.appendChild(h);
+    });
+    var lead = (new Date(y, m, 1).getDay() + 6) % 7;   // понедельник — первый
+    for (var i = 0; i < lead; i++) grid.appendChild(document.createElement('div'));
+    var daysInMonth = new Date(y, m + 1, 0).getDate();
+    var today = isoToday_();
+    var to = expDraft.to || expDraft.from;
+    for (var day = 1; day <= daysInMonth; day++) {
+      var iso = isoOf_(new Date(y, m, day));
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'calDay';
+      var dow = (lead + day - 1) % 7;
+      if (dow >= 5) b.classList.add('we');
+      if (iso === today) b.classList.add('today');
+      if (expDraft.from && iso >= expDraft.from && iso <= to) {
+        b.classList.add('inRange');
+        if (iso === expDraft.from) b.classList.add('start');
+        if (iso === to) b.classList.add('end');
+      }
+      b.textContent = day;
+      b.dataset.iso = iso;
+      grid.appendChild(b);
+    }
+    var sum = document.getElementById('expCalSummary');
+    var n = expDraft.from ? daysBetween_(expDraft.from, to) : 0;
+    if (n > EXP_MAX_DAYS) {
+      sum.className = 'calSummary error';
+      sum.textContent = 'Слишком длинный период: ' + n + ' ' + daysWord_(n) + '. Максимум — ' + EXP_MAX_DAYS + '.';
+    } else {
+      sum.className = 'calSummary';
+      sum.textContent = !expDraft.from ? 'Выберите дату'
+        : (expDraft.to && expDraft.to !== expDraft.from ? 'Период: ' : 'Дата: ') + rangeText_(expDraft) +
+          (expPickingEnd ? '. Нажмите последний день, если нужен период.' : '');
+    }
+    document.getElementById('expCalDone').disabled = !expDraft.from || n > EXP_MAX_DAYS;
+  }
+
+  document.getElementById('expCalGrid').addEventListener('click', function (e) {
+    var iso = e.target && e.target.dataset && e.target.dataset.iso;
+    if (!iso) return;
+    if (!expPickingEnd || iso < expDraft.from) {
+      // первое нажатие — начинаем новый выбор
+      expDraft = { from: iso, to: '' };
+      expPickingEnd = true;
+    } else {
+      // второе нажатие — конец периода (тот же день — одна дата)
+      expDraft.to = iso === expDraft.from ? '' : iso;
+      expPickingEnd = false;
+    }
+    renderExpCal();
+  });
+  document.getElementById('expCalPrev').addEventListener('click', function () {
+    expCalMonth = new Date(expCalMonth.getFullYear(), expCalMonth.getMonth() - 1, 1);
+    renderExpCal();
+  });
+  document.getElementById('expCalNext').addEventListener('click', function () {
+    expCalMonth = new Date(expCalMonth.getFullYear(), expCalMonth.getMonth() + 1, 1);
+    renderExpCal();
+  });
+  var expDateModal = document.getElementById('expDateModal');
+  function closeExpCal() { expDateModal.classList.remove('open'); }
+  document.getElementById('expDateBtn').addEventListener('click', function () {
+    expDraft = { from: expRange.from, to: expRange.to && expRange.to !== expRange.from ? expRange.to : '' };
+    expPickingEnd = false;
+    var base = dateOfIso_(expRange.from || isoToday_());
+    expCalMonth = new Date(base.getFullYear(), base.getMonth(), 1);
+    renderExpCal();
+    expDateModal.classList.add('open');
+  });
+  document.getElementById('expCalCancel').addEventListener('click', closeExpCal);
+  expDateModal.addEventListener('click', function (e) { if (e.target === expDateModal) closeExpCal(); });
+  document.getElementById('expCalDone').addEventListener('click', function () {
+    if (!expDraft.from) return;
+    expRange = { from: expDraft.from, to: expDraft.to || expDraft.from };
+    renderExpDateField();
+    closeExpCal();
+  });
+
   document.getElementById('goToAdminExpenseBtn').addEventListener('click', function () {
     showAdminExpenseScreen();
   });
@@ -3326,7 +3516,8 @@
     var payload = {
       action: 'adminAddExpense',
       phone: currentUser && currentUser.phone,
-      date: document.getElementById('expDate').value,
+      date: expRange.from,
+      dateTo: expRange.to || expRange.from,
       worker: document.getElementById('expWorker').value.trim(),
       brigadier: document.getElementById('expBrigadier').value.trim(),
       objectName: document.getElementById('expObject').value.trim(),
@@ -3343,12 +3534,20 @@
       .then(function (res) {
         btn.disabled = false;
         if (res.status === 'ok') {
-          setExpStatus('✓ Добавлено в таблицу (строка ' + res.row + ')' + (res.warning ? '. Внимание: ' + res.warning : ''), 'success');
+          var sentDays = daysBetween_(payload.date, payload.dateTo);
+          var where = res.rowTo && res.rowTo !== res.row ? 'строки ' + res.row + '–' + res.rowTo : 'строка ' + res.row;
+          var msg = '✓ Добавлено в таблицу (' + where + ')';
+          if (sentDays > 1 && !res.days) {
+            // Старый серверный скрипт не знает про период и записал одну строку.
+            msg += '. Внимание: записана только первая дата — обновите скрипт в таблице до v37';
+          }
+          setExpStatus(msg + (res.warning ? '. Внимание: ' + res.warning : ''), 'success');
           // Дата, объект и бригадир обычно повторяются при вводе подряд —
           // оставляем; очищаем то, что меняется от записи к записи.
           document.getElementById('expWorker').value = '';
           document.getElementById('expRate').value = '';
           document.getElementById('expComment').value = '';
+          renderExpPeriodNote();
           if (payload.worker && expLookups.workers.indexOf(payload.worker) < 0) expLookups.workers.push(payload.worker);
           if (payload.brigadier && expLookups.brigadiers.indexOf(payload.brigadier) < 0) expLookups.brigadiers.push(payload.brigadier);
         } else {
