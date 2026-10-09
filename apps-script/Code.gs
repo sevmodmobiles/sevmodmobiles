@@ -1,3 +1,8 @@
+// v38: расходы пишутся в рабочий лист "Расходы SEVMOD (копия)" (заголовки в
+//      8-й строке, над ними итоги). Лист больше не создаётся сам. Дополнительно
+//      заполняются колонки этого листа: "Месяц цифрой", "Кол-во человек" (1),
+//      "Итого", "Статус" (НЕ ОПЛАЧЕНО). Если в колонке у предыдущей строки
+//      формула — она протягивается на новые строки вместо значения.
 // v37: расходы за период — adminAddExpense принимает dateTo; за каждый день
 //      периода (включительно, до 62 дней) пишется отдельная строка с той же
 //      ставкой. Ответ дополнительно содержит rowTo и days.
@@ -2688,20 +2693,18 @@ function adminAbsencePending(phone) {
 }
 
 
-// ===== v34/v35: Расходы (админ) — запись в лист "Расходы SEVMOD" нашей таблицы =====
-var EXPENSE_SHEET_NAME = 'Расходы SEVMOD';
-var EXPENSE_HEADERS = ['Дата', 'Работник', 'Бригадир', 'Объект', 'Ставка', 'Комментарий'];
+// ===== Расходы (админ) — запись в лист "Расходы SEVMOD (копия)" нашей таблицы =====
+var EXPENSE_SHEET_NAME = 'Расходы SEVMOD (копия)';
+var EXPENSE_DEFAULT_STATUS = 'НЕ ОПЛАЧЕНО';
 
 // Находит (или создаёт) лист и строку заголовков (в первых 30 строках: есть
 // "Дата", "Работник", "Объект", "Ставка"), возвращает номера колонок по
 // названиям — запись не ломается, если порядок столбцов изменили.
-// Если лист пустой (или в нём только один заголовок-подпись), записывает
-// стандартные заголовки в первую строку.
 function expenseLayout_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(EXPENSE_SHEET_NAME);
-  if (!sheet) sheet = ss.insertSheet(EXPENSE_SHEET_NAME);
-  var width = Math.max(sheet.getLastColumn(), EXPENSE_HEADERS.length);
+  if (!sheet) return { error: 'В таблице нет листа «' + EXPENSE_SHEET_NAME + '».' };
+  var width = Math.max(sheet.getLastColumn(), 6);
   var rows = Math.max(1, Math.min(30, sheet.getMaxRows()));
   var top = sheet.getRange(1, 1, rows, width).getValues();
 
@@ -2717,6 +2720,10 @@ function expenseLayout_() {
         else if (h.indexOf('объект') === 0 && !cols.object) cols.object = c + 1;
         else if (h.indexOf('ставка') === 0 && !cols.rate) cols.rate = c + 1;
         else if (h.indexOf('комментар') === 0 && !cols.comment) cols.comment = c + 1;
+        else if (h.indexOf('месяц') === 0 && !cols.month) cols.month = c + 1;
+        else if (h.indexOf('кол-во') === 0 && !cols.count) cols.count = c + 1;
+        else if (h.indexOf('итого') === 0 && !cols.total) cols.total = c + 1;
+        else if (h.indexOf('статус') === 0 && !cols.status) cols.status = c + 1;
       }
       if (cols.date && cols.rate && cols.worker && cols.object) {
         return { sheet: sheet, headerRow: r + 1, cols: cols };
@@ -2727,18 +2734,6 @@ function expenseLayout_() {
 
   var found = find_();
   if (found) return found;
-
-  // Пустой лист (или одна подпись в A1) — ставим стандартные заголовки.
-  var filled = 0;
-  top.forEach(function (row) { row.forEach(function (v) { if (String(v).trim()) filled++; }); });
-  if (filled <= 1) {
-    sheet.getRange(1, 1, 1, EXPENSE_HEADERS.length).setValues([EXPENSE_HEADERS]).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-    return {
-      sheet: sheet, headerRow: 1,
-      cols: { date: 1, worker: 2, brigadier: 3, object: 4, rate: 5, comment: 6 }
-    };
-  }
   return { error: 'В листе «' + EXPENSE_SHEET_NAME + '» не найдена строка заголовков (Дата, Работник, Объект, Ставка).' };
 }
 
@@ -2812,6 +2807,26 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     fill_(cols.object, objectName);
     fill_(cols.rate, amount);
     if (cols.comment) fill_(cols.comment, comment);
+
+    // Служебные колонки рабочего листа. Формулу из предыдущей строки
+    // протягиваем, иначе пишем значение по умолчанию.
+    function fillAuto_(col, valueForDate) {
+      if (!col) return;
+      // Колонку считает ARRAYFORMULA (в заголовке или первой строке данных) —
+      // не трогаем, иначе формула сломается.
+      var top2 = sheet.getRange(lay.headerRow, col, 2, 1).getFormulas();
+      if (/ARRAYFORMULA/i.test(top2[0][0] + top2[1][0])) return;
+      var formula = lastUsed > lay.headerRow ? sheet.getRange(lastUsed, col).getFormulaR1C1() : '';
+      if (formula) {
+        sheet.getRange(row, col, days, 1).setFormulaR1C1(formula);
+      } else {
+        sheet.getRange(row, col, days, 1).setValues(dates.map(function (x) { return [valueForDate(x)]; }));
+      }
+    }
+    fillAuto_(cols.month, function (x) { return x.getMonth() + 1; });
+    fillAuto_(cols.count, function () { return 1; });
+    fillAuto_(cols.total, function () { return amount; });
+    fillAuto_(cols.status, function () { return EXPENSE_DEFAULT_STATUS; });
     SpreadsheetApp.flush();
 
     var warn = [];
