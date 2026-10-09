@@ -1,3 +1,8 @@
+// v39: расходы — значения проверяются по выпадающим спискам листа (проверка
+//      данных) ДО записи: если, например, объекта нет в списке колонки
+//      "Объект", ничего не пишется и возвращается понятная ошибка (раньше
+//      строка записывалась частично). Регистр букв подгоняется под список.
+//      adminExpenseLookups берёт подсказки из этих же списков.
 // v38: расходы пишутся в рабочий лист "Расходы SEVMOD (копия)" (заголовки в
 //      8-й строке, над ними итоги). Лист больше не создаётся сам. Дополнительно
 //      заполняются колонки этого листа: "Месяц цифрой", "Кол-во человек" (1),
@@ -2739,6 +2744,43 @@ function expenseLayout_() {
 
 var EXPENSE_MAX_DAYS = 62;
 
+// Разрешённые значения ячейки из её проверки данных (выпадающий список из
+// перечня или из диапазона). null — проверки нет или она не списочная.
+// strict — недопустимое значение таблица отклонит.
+function expenseAllowed_(sheet, row, col) {
+  if (!col) return null;
+  var rule = sheet.getRange(row, col).getDataValidation();
+  if (!rule) return null;
+  var type = rule.getCriteriaType();
+  var args = rule.getCriteriaValues();
+  var list = [];
+  if (type === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+    list = (args[0] || []).map(String);
+  } else if (type === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
+    args[0].getDisplayValues().forEach(function (r) { r.forEach(function (v) { list.push(v); }); });
+  } else {
+    return null;
+  }
+  var seen = {}, values = [];
+  list.forEach(function (v) {
+    v = String(v).trim();
+    if (v && !seen[v]) { seen[v] = true; values.push(v); }
+  });
+  return { values: values, strict: !rule.getAllowInvalid() };
+}
+
+// Подгоняет значение под список (без учёта регистра и лишних пробелов).
+// Возвращает значение из списка, исходное (если списка нет / он не строгий)
+// или null (строгий список, значения в нём нет).
+function expenseMatch_(allowed, value) {
+  if (!value || !allowed) return value;
+  var key = value.replace(/\s+/g, ' ').toLowerCase();
+  for (var i = 0; i < allowed.values.length; i++) {
+    if (allowed.values[i].replace(/\s+/g, ' ').toLowerCase() === key) return allowed.values[i];
+  }
+  return allowed.strict ? null : value;
+}
+
 // dateToIso — необязательный конец периода (включительно). Если он задан и
 // позже dateIso, на каждый день периода пишется отдельная строка.
 function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso) {
@@ -2791,6 +2833,34 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     }
     var row = lastUsed + 1;
     var rowTo = row + days - 1;
+
+    // Проверка по выпадающим спискам листа — до записи, чтобы не оставить
+    // недописанных строк. Правило берём у строки, куда пишем (или у
+    // последней заполненной, если ниже проверки нет).
+    function allowedFor_(col) {
+      if (!col) return null;
+      return expenseAllowed_(sheet, Math.min(row, sheet.getMaxRows()), col) ||
+        (lastUsed > lay.headerRow ? expenseAllowed_(sheet, lastUsed, col) : null);
+    }
+    var checks = [
+      { col: cols.worker, label: 'Работник', get: function () { return worker; }, set: function (v) { worker = v; } },
+      { col: cols.brigadier, label: 'Бригадир', get: function () { return brigadier; }, set: function (v) { brigadier = v; } },
+      { col: cols.object, label: 'Объект', get: function () { return objectName; }, set: function (v) { objectName = v; } }
+    ];
+    for (var ci = 0; ci < checks.length; ci++) {
+      var ch = checks[ci];
+      var allowed = allowedFor_(ch.col);
+      var matched = expenseMatch_(allowed, ch.get());
+      if (matched === null) {
+        return {
+          status: 'error',
+          message: '«' + ch.get() + '» нет в списке колонки «' + ch.label + '» листа «' + EXPENSE_SHEET_NAME +
+            '». Выберите значение из подсказки или добавьте его в список проверки данных в таблице.'
+        };
+      }
+      ch.set(matched);
+    }
+    var statusValue = expenseMatch_(allowedFor_(cols.status), EXPENSE_DEFAULT_STATUS) || '';
     if (rowTo > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), rowTo - sheet.getMaxRows());
 
     // Одна колонка — один вызов setValues на все дни периода.
@@ -2826,7 +2896,7 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     fillAuto_(cols.month, function (x) { return x.getMonth() + 1; });
     fillAuto_(cols.count, function () { return 1; });
     fillAuto_(cols.total, function () { return amount; });
-    fillAuto_(cols.status, function () { return EXPENSE_DEFAULT_STATUS; });
+    fillAuto_(cols.status, function () { return statusValue; });
     SpreadsheetApp.flush();
 
     var warn = [];
@@ -2851,11 +2921,26 @@ function adminExpenseLookups(phone) {
       if (n) workers[n] = true;
     });
   }
+  var objects = null;
   try {
     var lay = expenseLayout_();
     if (!lay.error) {
       var sheet = lay.sheet, first = lay.headerRow + 1;
       var last = sheet.getLastRow();
+      // Если в колонке строгий выпадающий список — подсказываем только его.
+      var probeRow = Math.min(Math.max(first, last), sheet.getMaxRows());
+      var aw = expenseAllowed_(sheet, probeRow, lay.cols.worker);
+      var ab = expenseAllowed_(sheet, probeRow, lay.cols.brigadier);
+      var ao = expenseAllowed_(sheet, probeRow, lay.cols.object);
+      if (ao && ao.strict) objects = ao.values;
+      if ((aw && aw.strict) || (ab && ab.strict)) {
+        return {
+          status: 'ok',
+          workers: (aw && aw.strict ? aw.values : Object.keys(workers)).slice().sort(),
+          brigadiers: (ab && ab.strict ? ab.values : []).slice().sort(),
+          objects: objects || getValidObjects()
+        };
+      }
       if (last >= first) {
         var from = Math.max(first, last - 1500), n = last - from + 1;
         if (lay.cols.worker) sheet.getRange(from, lay.cols.worker, n, 1).getValues().forEach(function (r) {
@@ -2871,6 +2956,6 @@ function adminExpenseLookups(phone) {
     status: 'ok',
     workers: Object.keys(workers).sort(),
     brigadiers: Object.keys(brigadiers).sort(),
-    objects: getValidObjects()
+    objects: objects || getValidObjects()
   };
 }

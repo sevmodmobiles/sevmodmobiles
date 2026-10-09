@@ -3326,6 +3326,8 @@
   function setExpStatus(text, kind) {
     expStatusEl.textContent = text;
     expStatusEl.className = kind || '';
+    // Итог записи — внизу формы, под кнопкой «Приход»: прокручиваем к нему.
+    if (kind && text) expStatusEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   function showAdminExpenseScreen() {
