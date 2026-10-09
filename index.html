@@ -1855,6 +1855,17 @@
         }
         return;
       }
+      openScreenFromState(state);
+    } finally {
+      isBackNavigation = false;
+    }
+  });
+
+  // Открыть экран по записи истории ({ screen, ...параметры }). Используется
+  // кнопкой "назад" и при запуске: после обновления страницы (свайп вниз)
+  // браузер сохраняет history.state и #экран в адресе — открываем тот же экран,
+  // а его show*Screen() заново загружает данные.
+  function openScreenFromState(state) {
       switch (state.screen) {
         case 'scan': showScanScreen(); break;
         case 'login': showLoginScreen(); break;
@@ -1874,10 +1885,7 @@
         case 'expView': showExpViewScreen(); break;
         default: showScanScreen();
       }
-    } finally {
-      isBackNavigation = false;
-    }
-  });
+  }
 
   // ===== Нижняя навигация =====
   // Видна только когда человек вошёл в приложение (скрыта на экранах
@@ -4372,7 +4380,16 @@
       });
   });
   if (currentUser && currentUser.name && currentUser.phone) {
-    showScanScreen();
+    // После обновления страницы — тот же экран, что был открыт.
+    var restoreState = (history.state && history.state.screen) ? history.state
+      : (location.hash.length > 1 ? { screen: decodeURIComponent(location.hash.slice(1)) } : null);
+    if (restoreState && restoreState.screen !== 'login' && restoreState.screen !== 'reg') {
+      // экран с параметром, которого нет (например, задача без id) — к списку
+      if (restoreState.screen === 'taskDetail' && !restoreState.taskId) restoreState = { screen: 'tasks' };
+      openScreenFromState(restoreState);
+    } else {
+      showScanScreen();
+    }
   } else {
     showLoginScreen();
   }
