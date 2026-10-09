@@ -1,3 +1,10 @@
+// v47: контракты — adminAddContract: объект, бригадир, сумма договора,
+//      авансы (сумма + дата, статус "По Графику") и оплата по акту (дата
+//      окончания работ, статус "По Акту"). Каждый платёж — строка листа
+//      расходов (работник = бригадир, "Работы" = "Договор", в комментарии —
+//      сумма договора и номер платежа). Запись строк вынесена в
+//      writeExpenseRows_ (общая для расходов и контрактов); статус пишется в
+//      каждую строку свой.
 // v46: статус при добавлении расходов — adminAddExpense принимает status
 //      (значение из выпадающего списка колонки "Статус"; по умолчанию
 //      "НЕ ОПЛАЧЕНО"), adminExpenseLookups отдаёт statuses и defaultStatus.
@@ -384,6 +391,9 @@ function doPost(e) {
     if (data.action === 'adminAddExpense') {
       return jsonOutput(adminAddExpense(data.phone, data.date, data.worker, data.brigadier,
         data.objectName, data.rate, data.comment, data.dateTo, data.entries, data.status));
+    }
+    if (data.action === 'adminAddContract') {
+      return jsonOutput(adminAddContract(data.phone, data.objectName, data.brigadier, data.total, data.payments, data.comment));
     }
     if (data.action === 'adminExpenseOverview') {
       return jsonOutput(adminExpenseOverview(data.phone));
@@ -2768,6 +2778,7 @@ function expenseLayout_() {
         else if (h.indexOf('работник') === 0 && !cols.worker) cols.worker = c + 1;
         else if (h.indexOf('объект') === 0 && !cols.object) cols.object = c + 1;
         else if (h.indexOf('ставка') === 0 && !cols.rate) cols.rate = c + 1;
+        else if (h.indexOf('работы') === 0 && !cols.works) cols.works = c + 1;
         else if (h.indexOf('комментар') === 0 && !cols.comment) cols.comment = c + 1;
         else if (h.indexOf('месяц') === 0 && !cols.month) cols.month = c + 1;
         else if (h.indexOf('кол-во') === 0 && !cols.count) cols.count = c + 1;
@@ -3021,13 +3032,27 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
   // Строки: по дням, внутри дня — по работникам.
   var rowsData = [];
   dates.forEach(function (dt) {
-    people.forEach(function (pp) { rowsData.push({ date: dt, worker: pp.worker, rate: pp.rate }); });
+    people.forEach(function (pp) {
+      rowsData.push({ date: dt, worker: pp.worker, rate: pp.rate, brigadier: brigadier,
+        object: objectName, comment: comment, status: status });
+    });
   });
+  var res = writeExpenseRows_(lists, rowsData);
+  if (res.status === 'ok') { res.days = days; res.people = people.length; }
+  return res;
+}
+
+// Записывает строки в лист расходов (после последней строки с данными,
+// затем сортировка по дате). rowsData: [{ date, worker, brigadier, object,
+// rate, comment, works, status }]; status — как ввели (подгоняется под список
+// колонки "Статус", пустой — по умолчанию). Используется расходами и
+// контрактами.
+function writeExpenseRows_(lists, rowsData) {
   var count = rowsData.length;
+  if (!count) return { status: 'error', message: 'Нечего записывать' };
   if (count > EXPENSE_MAX_ROWS) {
     return { status: 'error', message: 'Слишком много строк за раз (' + count + '). Сократите период или число работников.' };
   }
-
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -3036,24 +3061,25 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     var sheet = lay.sheet, cols = lay.cols;
     applyExpenseStrictLists_(sheet, lay, lists);
 
+    // Статусы — строго из списка колонки, до записи.
+    if (cols.status) {
+      var statusList = expenseStatusList_(sheet, lay);
+      for (var si = 0; si < count; si++) {
+        var raw = String(rowsData[si].status || '').trim();
+        var picked = pickFromList_(statusList, raw || EXPENSE_DEFAULT_STATUS);
+        if (picked === null) {
+          if (raw) return { status: 'error', message: 'Статуса «' + raw + '» нет в списке колонки «Статус».' };
+          picked = '';
+        }
+        rowsData[si].statusValue = picked;
+      }
+    }
+
     var lastUsed = expenseLastDataRow_(sheet, lay);
     var row = lastUsed + 1;
     var rowTo = row + count - 1;
     if (rowTo > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), rowTo - sheet.getMaxRows());
-
     var warn = [];
-    // Статус — выбранный в приложении (или по умолчанию), строго из списка.
-    var statusValue = '';
-    if (cols.status) {
-      var statusList = expenseStatusList_(sheet, lay);
-      statusValue = pickFromList_(statusList, String(status || '').trim() || EXPENSE_DEFAULT_STATUS);
-      if (statusValue === null) {
-        if (String(status || '').trim()) {
-          return { status: 'error', message: 'Статуса «' + String(status).trim() + '» нет в списке колонки «Статус».' };
-        }
-        statusValue = '';
-      }
-    }
 
     function column_(col, fn) {
       if (!col) return null;
@@ -3061,10 +3087,11 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     }
     column_(cols.date, function (x) { return x.date; }).setNumberFormat('dd.MM.yyyy');
     column_(cols.worker, function (x) { return x.worker; });
-    column_(cols.brigadier, function () { return brigadier; });
-    column_(cols.object, function () { return objectName; });
+    column_(cols.brigadier, function (x) { return x.brigadier || ''; });
+    column_(cols.object, function (x) { return x.object || ''; });
     column_(cols.rate, function (x) { return x.rate; });
-    column_(cols.comment, function () { return comment; });
+    column_(cols.comment, function (x) { return x.comment || ''; });
+    if (rowsData.some(function (x) { return x.works; })) column_(cols.works, function (x) { return x.works || ''; });
 
     // Служебные колонки: формулу предыдущей строки протягиваем, иначе значение.
     function fillAuto_(col, fn) {
@@ -3078,7 +3105,7 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     fillAuto_(cols.month, function (x) { return x.date.getMonth() + 1; });
     fillAuto_(cols.count, function () { return 1; });
     fillAuto_(cols.total, function (x) { return x.rate; });
-    fillAuto_(cols.status, function () { return statusValue; });
+    column_(cols.status, function (x) { return x.statusValue || ''; });
     SpreadsheetApp.flush();
 
     var sorted = false;
@@ -3089,16 +3116,64 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     } catch (e) {
       warn.push('строки добавлены в конец, но отсортировать лист по дате не удалось: ' + e.message);
     }
-    if (!cols.brigadier && brigadier) warn.push('в таблице нет столбца «Бригадир» — бригадир не записан');
-    if (!cols.comment && comment) warn.push('в таблице нет столбца «Комментарий» — комментарий не записан');
+    if (!cols.brigadier && rowsData.some(function (x) { return x.brigadier; })) warn.push('в таблице нет столбца «Бригадир» — бригадир не записан');
+    if (!cols.comment && rowsData.some(function (x) { return x.comment; })) warn.push('в таблице нет столбца «Комментарий» — комментарий не записан');
     var total = rowsData.reduce(function (a, x) { return a + x.rate; }, 0);
-    return {
-      status: 'ok', row: row, rowTo: rowTo, days: days, rows: count, people: people.length,
-      total: total, sorted: sorted, warning: warn.join('; ')
-    };
+    return { status: 'ok', row: row, rowTo: rowTo, rows: count, total: total, sorted: sorted, warning: warn.join('; ') };
   } finally {
     lock.releaseLock();
   }
+}
+
+// ----- Контракт: авансы (По Графику) + оплата по акту (По Акту) -----
+// payments: [{ kind: 'advance' | 'act', date: 'yyyy-MM-dd', amount }].
+// Сумма платежей должна равняться сумме договора. Каждый платёж — строка
+// листа расходов: работник = бригадир (кому платим), объект, сумма, статус.
+var CONTRACT_STATUS_ADVANCE = 'По Графику';
+var CONTRACT_STATUS_ACT = 'По Акту';
+
+function adminAddContract(phone, objectName, brigadier, totalSum, payments, comment) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  var lists = getExpenseRefLists_();
+  var obj = pickFromList_(lists.objects, objectName);
+  if (!obj) return { status: 'error', message: obj === null ? 'Объекта «' + String(objectName).trim() + '» нет в списке.' : 'Укажите объект' };
+  var brig = pickFromList_(lists.brigadiers, brigadier);
+  if (!brig) return { status: 'error', message: brig === null ? 'Бригадира «' + String(brigadier).trim() + '» нет в списке.' : 'Укажите бригадира' };
+  var payee = pickFromList_(lists.workers, brig);
+  if (!payee) {
+    return { status: 'error', message: '«' + brig + '» нет в колонке «Работники» листа «' + EXPENSE_REF_SHEET_NAME + '» — добавьте его туда.' };
+  }
+  var total = Number(String(totalSum).replace(/\s/g, '').replace(',', '.'));
+  if (!isFinite(total) || total <= 0) return { status: 'error', message: 'Укажите сумму договора' };
+  if (!payments || !payments.length) return { status: 'error', message: 'Нет платежей' };
+  comment = String(comment || '').trim().slice(0, 400);
+
+  var nAdv = payments.filter(function (p) { return p && p.kind === 'advance'; }).length;
+  var advNo = 0, sum = 0, rowsData = [];
+  for (var i = 0; i < payments.length; i++) {
+    var p = payments[i] || {};
+    var d = parseIsoDate_(p.date);
+    var isAct = p.kind === 'act';
+    var label = isAct ? 'Оплата по акту' : 'Аванс ' + (++advNo) + ' из ' + nAdv;
+    if (!d) return { status: 'error', message: 'Укажите дату: ' + label };
+    var amt = Number(String(p.amount).replace(/\s/g, '').replace(',', '.'));
+    if (!isFinite(amt) || amt < 0) return { status: 'error', message: 'Неверная сумма: ' + label };
+    if (amt === 0) continue;
+    sum += amt;
+    rowsData.push({
+      date: d, worker: payee, brigadier: brig, object: obj, rate: amt,
+      status: isAct ? CONTRACT_STATUS_ACT : CONTRACT_STATUS_ADVANCE,
+      works: 'Договор',
+      comment: 'Договор ' + String(Math.round(total)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' ₽: ' + label + (comment ? '. ' + comment : '')
+    });
+  }
+  if (Math.abs(sum - total) > 0.5) {
+    return { status: 'error', message: 'Сумма платежей (' + sum + ') не равна сумме договора (' + total + ')' };
+  }
+  var res = writeExpenseRows_(lists, rowsData);
+  if (res.status === 'ok') { res.advances = nAdv; res.contractTotal = total; }
+  return res;
 }
 
 // По листу расходов: состав бригад (работники самой поздней даты, на которую

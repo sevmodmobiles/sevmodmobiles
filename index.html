@@ -759,7 +759,7 @@
   #screenScan #reader { margin-top: 8px; }
 
   /* ===== Отсутствия (отгулы / больничные) ===== */
-  #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView { display: none; }
+  #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView, #screenExpContract { display: none; }
   .absTotals { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
   .absTable { width: 100%; border-collapse: collapse; font-size: 13px; }
   .absTable th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--border); }
@@ -832,20 +832,32 @@
   #expDateModal .modalBox { max-width: 400px; }
   #expPeriodNote { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
   .pickError { font-size: 13px; color: var(--red); margin: -8px 0 12px; }
+  .ctAdvRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 8px; align-items: end; margin-bottom: 8px; }
+  .ctAdvRow > div { min-width: 0; }
+  .ctAdvRow label { margin-bottom: 4px; }
+  .ctAdvRow input { margin: 0; width: 100%; min-width: 0; padding: 12px 10px; }
+  .ctAdvRow .ctDel { width: 44px; height: 48px; margin: 0; padding: 0; font-size: 20px; background: none; color: var(--muted); border: 1px solid var(--border); }
+  .ctAdvRow.manual input.ctAmt { border-color: var(--blue); }
+  .ctLink { display: inline-block; width: auto; margin: -6px 0 12px; padding: 0; background: none; color: var(--blue); font-weight: 600; font-size: 14px; }
+  .ctSub { border: 1px dashed var(--border); border-radius: 12px; padding: 12px; margin-bottom: 14px; }
+  .ctAct { background: var(--bg); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+  .ctAct .ctActSum { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ctHint { font-size: 12px; color: var(--muted); margin: -8px 0 12px; }
   .statusSelectWrap { position: relative; }
   .statusSelectWrap .dot { position: absolute; left: 14px; top: 23px; width: 12px; height: 12px; border-radius: 50%; pointer-events: none; }
   .statusSelectWrap select { padding-left: 36px; }
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
-  #screenExpHub, #screenExpView { width: 100%; max-width: 440px; }
-  .expSumList { display: grid; gap: 8px; }
+  #screenExpHub, #screenExpView, #screenExpContract { width: 100%; max-width: 440px; }
+  .expSumList { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
   .expSumTile {
-    display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 12px 14px;
-    background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
+    display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 8px 14px;
+    background: none; color: var(--text); border: none; border-bottom: 1px solid var(--border); border-radius: 0;
     font-weight: 500; text-align: left;
   }
-  .expSumTile .swatch { width: 12px; height: 32px; border-radius: 4px; flex: none; }
+  .expSumTile:last-child { border-bottom: none; }
+  .expSumTile .swatch { width: 10px; height: 22px; border-radius: 3px; flex: none; }
   .expSumTile .lbl { flex: 1; min-width: 0; font-size: 15px; }
   .expSumTile .val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .expSumTile .chev { color: var(--muted); font-size: 18px; }
@@ -1418,7 +1430,63 @@
     </div>
     <div class="card">
       <button id="expGoAddBtn" type="button">Добавить расходы</button>
+      <button id="expGoContractBtn" type="button" style="background: #8e5bd8;">Добавить контракт</button>
       <button id="expGoViewBtn" type="button" style="background: var(--blue);">Посмотреть расходы</button>
+    </div>
+  </div>
+
+  <!-- Экран "Добавить контракт": объект, бригадир, сумма договора, авансы
+       (статус "По Графику") и оплата по акту (статус "По Акту"). -->
+  <div id="screenExpContract">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Добавить контракт</h1>
+      <div class="switchUser"><a id="ctBackLink">← Расходы</a></div>
+    </div>
+    <div class="card">
+      <label for="ctObject">Объект</label>
+      <input id="ctObject" type="text" autocomplete="off" placeholder="Выберите из списка">
+      <div id="ctObjectErr" class="pickError" hidden></div>
+      <button id="ctNewObjToggle" type="button" class="ctLink">+ Нет в списке — добавить объект</button>
+      <div id="ctNewObj" class="ctSub" hidden>
+        <label for="ctObjName">Название объекта</label>
+        <input id="ctObjName" type="text" placeholder="Например: ЖК Самолёт, корпус 2">
+        <label for="ctObjAddress">Адрес (с указанием города)</label>
+        <input id="ctObjAddress" type="text" placeholder="Например: Санкт-Петербург, ул. Ленина, 10">
+        <div class="shiftTimesRow">
+          <div><label for="ctObjS1a">Смена 1, начало</label><input id="ctObjS1a" type="time"></div>
+          <div><label for="ctObjS1b">Смена 1, конец</label><input id="ctObjS1b" type="time"></div>
+        </div>
+        <div class="shiftTimesRow">
+          <div><label for="ctObjS2a">Смена 2, начало</label><input id="ctObjS2a" type="time"></div>
+          <div><label for="ctObjS2b">Смена 2, конец</label><input id="ctObjS2b" type="time"></div>
+        </div>
+        <label for="ctObjForeman">Ответственный прораб</label>
+        <input id="ctObjForeman" type="text" autocomplete="off" placeholder="Начните вводить имя…">
+        <button id="ctObjCreateBtn" type="button" style="margin-top:4px;">Создать объект</button>
+        <div id="ctObjStatus"></div>
+      </div>
+
+      <label for="ctBrig">Бригадир</label>
+      <input id="ctBrig" type="text" autocomplete="off" placeholder="Выберите из списка">
+      <div id="ctBrigErr" class="pickError" hidden></div>
+
+      <label for="ctTotal">Общая сумма договора, ₽</label>
+      <input id="ctTotal" type="number" inputmode="decimal" min="0" step="any" placeholder="Например: 300000">
+
+      <label>Авансы — статус «По Графику»</label>
+      <div class="ctHint" style="margin-top:-2px;">Сумма договора делится на равные доли между всеми платежами. Можно вписать свою сумму — остальные пересчитаются.</div>
+      <div id="ctAdvList"></div>
+      <button id="ctAddAdv" type="button" class="ctLink" style="margin-top:0;">+ Добавить аванс</button>
+
+      <label for="ctActDate">По акту — дата окончания работ</label>
+      <input id="ctActDate" type="date">
+      <div class="ctAct">Оплата по акту (статус «По Акту»): <span id="ctActSum" class="ctActSum">—</span></div>
+
+      <label for="ctComment">Комментарий</label>
+      <input id="ctComment" type="text" maxlength="400" placeholder="Необязательно">
+      <div id="ctNote" class="ctHint" style="margin-top:0;"></div>
+      <button id="ctSubmit" type="button" style="margin-top:10px; background: #8e5bd8;">Добавить контракт</button>
+      <div id="ctStatus"></div>
     </div>
   </div>
 
@@ -1803,6 +1871,7 @@
   var screenAdminExpense = document.getElementById('screenAdminExpense');
   var screenExpHub = document.getElementById('screenExpHub');
   var screenExpView = document.getElementById('screenExpView');
+  var screenExpContract = document.getElementById('screenExpContract');
   var bottomNav = document.getElementById('bottomNav');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
@@ -1892,6 +1961,7 @@
         case 'adminExpense': showAdminExpenseScreen(); break;
         case 'expHub': showExpHubScreen(); break;
         case 'expView': showExpViewScreen(); break;
+        case 'expContract': showExpContractScreen(); break;
         default: showScanScreen();
       }
   }
@@ -1938,6 +2008,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
@@ -1996,6 +2067,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenLogin.style.display = 'block';
     hideBottomNav();
     pushScreenState('login');
@@ -2017,6 +2089,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
     hideBottomNav();
@@ -2169,6 +2242,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
@@ -2194,6 +2268,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
@@ -2232,6 +2307,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenAbsence.style.display = 'block';
 
     var isPartial = absenceMode === 'partial';
@@ -2382,6 +2458,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     hideAdminPopup_();
     saveNotified_(adminPendingCount);
     loadAdminAbsences();
@@ -2472,6 +2549,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenProfile.style.display = 'block';
     document.getElementById('profileWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     refreshAdminStatus();
@@ -2587,6 +2665,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenTaskDetail.style.display = 'block';
     document.getElementById('taskDetailLoading').style.display = 'block';
     document.getElementById('taskDetailBody').style.display = 'none';
@@ -2769,6 +2848,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenAdmin.style.display = 'block';
     showBottomNav();
     setActiveNav('profile');
@@ -2793,6 +2873,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenTaskManage.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
@@ -2818,6 +2899,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
     showBottomNav();
@@ -2842,6 +2924,7 @@
     screenAdminExpense.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenAdminObjects.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
     loadAdminObjects();
@@ -3515,6 +3598,7 @@
     screenAdminAbsences.style.display = 'none';
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
+    screenExpContract.style.display = 'none';
     screenAdminExpense.style.display = 'block';
     if (!expRange.from) { expRange.from = isoToday_(); expRange.to = expRange.from; }
     renderExpDateField();
@@ -3951,7 +4035,7 @@
   function hideAllForExp_() {
     [screenLogin, screenReg, screenScan, screenAdmin, screenAdminRates, screenAdminObjects, screenTaskManage,
      screenStats, screenTasks, screenTaskDetail, screenProfile, screenAbsence, screenAdminAbsences,
-     screenAdminExpense, screenExpHub, screenExpView].forEach(function (el) { el.style.display = 'none'; });
+     screenAdminExpense, screenExpHub, screenExpView, screenExpContract].forEach(function (el) { el.style.display = 'none'; });
   }
   // Цвет статуса — из цвета ячейки сводки в таблице (белый/пустой не используем).
   function expStatusColor_(status) {
@@ -4228,6 +4312,186 @@
   document.getElementById('expViewBackLink').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('expGoAddBtn').addEventListener('click', function () { showAdminExpenseScreen(); });
   document.getElementById('expGoViewBtn').addEventListener('click', function () { showExpViewScreen(); });
+
+  // ===== Контракт: объект, бригадир, сумма, авансы (По Графику) + оплата по акту (По Акту) =====
+  var ctAdv = [];                  // [{ amount, date, manual }]
+  var CT_DEFAULT_ADVANCES = 3;
+  var ctPickObject = { id: 'ctObject', label: 'объект', items: function () { return expLookups.objects; } };
+  var ctPickBrig = { id: 'ctBrig', label: 'бригадира', items: function () { return expLookups.brigadiers; } };
+  initAutocomplete(document.getElementById('ctObject'), function () { return expLookups.objects; });
+  initAutocomplete(document.getElementById('ctBrig'), function () { return expLookups.brigadiers; });
+  initAutocomplete(document.getElementById('ctObjForeman'), function () { return Object.keys(adminAssigneeMap); });
+  [ctPickObject, ctPickBrig].forEach(function (f) {
+    var el = document.getElementById(f.id);
+    el.addEventListener('blur', function () { setTimeout(function () { enforcePick(f); }, 200); });
+    el.addEventListener('change', function () { showPickError(f.id, ''); });
+  });
+  function ctNum_(v) { var n = Number(String(v || '').replace(/\s/g, '').replace(',', '.')); return isFinite(n) ? n : 0; }
+  function ctTotal_() { return ctNum_(document.getElementById('ctTotal').value); }
+
+  // Равные доли: ручные суммы остаются, остаток делится поровну между
+  // остальными авансами и оплатой по акту (оплате по акту — остаток копеек/рублей).
+  function ctRecalc() {
+    var total = ctTotal_();
+    var manualSum = 0, autoIdx = [];
+    ctAdv.forEach(function (a, i) { if (a.manual) manualSum += ctNum_(a.amount); else autoIdx.push(i); });
+    var rest = total - manualSum;
+    var share = autoIdx.length + 1 > 0 ? Math.floor(Math.max(rest, 0) / (autoIdx.length + 1)) : 0;
+    autoIdx.forEach(function (i) { ctAdv[i].amount = total > 0 ? String(share) : ''; });
+    var act = total - ctAdv.reduce(function (a, x) { return a + ctNum_(x.amount); }, 0);
+    var actEl = document.getElementById('ctActSum');
+    actEl.textContent = total > 0 ? money_(act) : '—';
+    actEl.style.color = act < 0 ? 'var(--red)' : '';
+    // поля сумм обновляем на месте, не пересоздавая (чтобы не терять фокус)
+    document.querySelectorAll('#ctAdvList .ctAdvRow').forEach(function (rowEl, i) {
+      var inp = rowEl.querySelector('.ctAmt');
+      if (document.activeElement !== inp) inp.value = ctAdv[i].amount;
+      rowEl.classList.toggle('manual', !!ctAdv[i].manual);
+    });
+    var n = ctAdv.length;
+    document.getElementById('ctNote').textContent = total > 0
+      ? 'Будет добавлено ' + (n + 1) + ' ' + ((n + 1) % 10 === 1 && (n + 1) % 100 !== 11 ? 'строка' : ((n + 1) % 10 >= 2 && (n + 1) % 10 <= 4 && ((n + 1) % 100 < 12 || (n + 1) % 100 > 14) ? 'строки' : 'строк')) +
+        ': ' + n + ' ' + (n % 10 === 1 && n % 100 !== 11 ? 'аванс' : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'аванса' : 'авансов')) +
+        ' («По Графику») и оплата по акту («По Акту»), всего ' + money_(total) + '.'
+      : '';
+    return act;
+  }
+  function ctRenderAdv() {
+    document.getElementById('ctAdvList').innerHTML = ctAdv.map(function (a, i) {
+      return '<div class="ctAdvRow" data-i="' + i + '">' +
+        '<div><label for="ctAmt' + i + '">Аванс ' + (i + 1) + ', ₽</label>' +
+        '<input id="ctAmt' + i + '" class="ctAmt" type="number" inputmode="decimal" min="0" step="any" value="' + escapeHtml(a.amount) + '"></div>' +
+        '<div><label for="ctDate' + i + '">Дата</label>' +
+        '<input id="ctDate' + i + '" class="ctDate" type="date" value="' + escapeHtml(a.date) + '"></div>' +
+        '<button type="button" class="ctDel" aria-label="Убрать аванс ' + (i + 1) + '">×</button></div>';
+    }).join('');
+    ctRecalc();
+  }
+  document.getElementById('ctAdvList').addEventListener('input', function (e) {
+    var rowEl = e.target.closest('.ctAdvRow'); if (!rowEl) return;
+    var a = ctAdv[Number(rowEl.dataset.i)];
+    if (e.target.classList.contains('ctAmt')) { a.amount = e.target.value; a.manual = e.target.value !== ''; ctRecalc(); }
+    if (e.target.classList.contains('ctDate')) a.date = e.target.value;
+  });
+  document.getElementById('ctAdvList').addEventListener('click', function (e) {
+    if (!e.target.classList.contains('ctDel')) return;
+    ctAdv.splice(Number(e.target.closest('.ctAdvRow').dataset.i), 1);
+    ctRenderAdv();
+  });
+  document.getElementById('ctAddAdv').addEventListener('click', function () {
+    ctAdv.push({ amount: '', date: '', manual: false });
+    ctRenderAdv();
+  });
+  document.getElementById('ctTotal').addEventListener('input', ctRecalc);
+
+  function ctResetForm() {
+    ['ctObject', 'ctBrig', 'ctTotal', 'ctActDate', 'ctComment'].forEach(function (id) { document.getElementById(id).value = ''; });
+    [ctPickObject, ctPickBrig].forEach(function (f) { showPickError(f.id, ''); });
+    ctAdv = [];
+    for (var i = 0; i < CT_DEFAULT_ADVANCES; i++) ctAdv.push({ amount: '', date: '', manual: false });
+    ctRenderAdv();
+  }
+  ctResetForm();
+
+  // Сотрудники — для поля «Ответственный прораб» нового объекта.
+  function ctEnsureAssignees() {
+    if (Object.keys(adminAssigneeMap).length) return;
+    apiPost({ action: 'adminGetEmployees', phone: currentUser && currentUser.phone }).then(function (res) {
+      if (!res || res.status !== 'ok' || !res.employees) return;
+      res.employees.forEach(function (emp) { adminAssigneeMap[emp.name + ' — ' + emp.phone] = { phone: emp.phone, name: emp.name }; });
+    }).catch(function () {});
+  }
+
+  function showExpContractScreen() {
+    hideAllForExp_();
+    screenExpContract.style.display = 'block';
+    showBottomNav();
+    setActiveNav('expenses');
+    pushScreenState('expContract');
+    document.getElementById('ctStatus').textContent = '';
+    loadExpLookups();
+  }
+
+  document.getElementById('ctNewObjToggle').addEventListener('click', function () {
+    var box = document.getElementById('ctNewObj');
+    box.hidden = !box.hidden;
+    this.textContent = box.hidden ? '+ Нет в списке — добавить объект' : '× Скрыть форму нового объекта';
+    if (!box.hidden) {
+      ctEnsureAssignees();
+      var typed = document.getElementById('ctObject').value.trim();
+      if (typed && !document.getElementById('ctObjName').value) document.getElementById('ctObjName').value = typed;
+      document.getElementById('ctObjName').focus();
+    }
+  });
+  document.getElementById('ctObjCreateBtn').addEventListener('click', function () {
+    var btn = this, st = document.getElementById('ctObjStatus');
+    var name = document.getElementById('ctObjName').value.trim();
+    if (!name) { st.textContent = 'Укажите название объекта'; st.className = 'error'; return; }
+    btn.disabled = true; st.textContent = 'Создаю объект…'; st.className = '';
+    apiPost({
+      action: 'adminAddObject', phone: currentUser && currentUser.phone, name: name,
+      address: document.getElementById('ctObjAddress').value.trim(),
+      shift1Start: document.getElementById('ctObjS1a').value, shift1End: document.getElementById('ctObjS1b').value,
+      shift2Start: document.getElementById('ctObjS2a').value, shift2End: document.getElementById('ctObjS2b').value,
+      foremanPhone: resolveForemanPhoneFromInput_(document.getElementById('ctObjForeman'))
+    }).then(function (res) {
+      btn.disabled = false;
+      if (res.status !== 'ok') { st.textContent = res.message || 'Не удалось создать объект'; st.className = 'error'; return; }
+      if (expLookups.objects.indexOf(name) < 0) expLookups.objects.push(name);
+      document.getElementById('ctObject').value = name;
+      showPickError('ctObject', '');
+      ['ctObjName', 'ctObjAddress', 'ctObjS1a', 'ctObjS1b', 'ctObjS2a', 'ctObjS2b', 'ctObjForeman'].forEach(function (id) { document.getElementById(id).value = ''; });
+      document.getElementById('ctNewObj').hidden = true;
+      document.getElementById('ctNewObjToggle').textContent = '+ Нет в списке — добавить объект';
+      st.textContent = '';
+      document.getElementById('ctStatus').textContent = '✓ Объект «' + name + '» создан и выбран';
+      document.getElementById('ctStatus').className = 'success';
+    }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+  });
+
+  function setCtStatus(text, kind) {
+    var el = document.getElementById('ctStatus');
+    el.textContent = text; el.className = kind || '';
+    if (kind && text) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  document.getElementById('ctSubmit').addEventListener('click', function () {
+    var btn = this;
+    var okPicks = [ctPickObject, ctPickBrig].map(enforcePick).every(Boolean);
+    var objectName = document.getElementById('ctObject').value.trim();
+    var brig = document.getElementById('ctBrig').value.trim();
+    var total = ctTotal_();
+    if (!okPicks) return setCtStatus('Выберите объект и бригадира из списков', 'error');
+    if (!objectName) return setCtStatus('Укажите объект', 'error');
+    if (!brig) return setCtStatus('Укажите бригадира', 'error');
+    if (!(total > 0)) return setCtStatus('Укажите сумму договора', 'error');
+    var act = ctRecalc();
+    if (act < 0) return setCtStatus('Авансы больше суммы договора — уменьшите суммы', 'error');
+    for (var i = 0; i < ctAdv.length; i++) {
+      if (ctNum_(ctAdv[i].amount) > 0 && !ctAdv[i].date) return setCtStatus('Укажите дату аванса ' + (i + 1), 'error');
+    }
+    var actDate = document.getElementById('ctActDate').value;
+    if (act > 0 && !actDate) return setCtStatus('Укажите дату окончания работ (по акту)', 'error');
+    var payments = ctAdv.map(function (a) { return { kind: 'advance', date: a.date, amount: ctNum_(a.amount) }; })
+      .concat([{ kind: 'act', date: actDate, amount: act }]);
+    btn.disabled = true;
+    setCtStatus('Записываю в таблицу…');
+    apiPost({
+      action: 'adminAddContract', phone: currentUser && currentUser.phone,
+      objectName: objectName, brigadier: brig, total: total, payments: payments,
+      comment: document.getElementById('ctComment').value.trim()
+    }).then(function (res) {
+      btn.disabled = false;
+      if (!res || res.status !== 'ok') {
+        return setCtStatus((res && res.message) || 'Скрипт в таблице не принял контракт — проверьте, что развёрнута версия v47', 'error');
+      }
+      setCtStatus('✓ Контракт добавлен: ' + brig + ', ' + objectName + ', ' + money_(total) + ' — ' + res.rows +
+        ' платеж' + (res.rows === 1 ? '' : (res.rows < 5 ? 'а' : 'ей')) + ' в таблице' + (res.warning ? '. Внимание: ' + res.warning : ''), 'success');
+      expOverview = null;
+      ctResetForm();
+    }).catch(function (err) { btn.disabled = false; setCtStatus('Ошибка соединения: ' + err, 'error'); });
+  });
+  document.getElementById('ctBackLink').addEventListener('click', function () { showExpHubScreen(); });
+  document.getElementById('expGoContractBtn').addEventListener('click', function () { showExpContractScreen(); });
 
   // ===== Админ: согласование отгулов — обработчики =====
   document.getElementById('goToAdminAbsencesBtn').addEventListener('click', function () {
