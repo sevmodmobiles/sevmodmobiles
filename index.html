@@ -737,12 +737,23 @@
   #debugPanel button:last-child { margin-bottom: 0; }
 
   /* ===== Отсутствия (отгулы / больничные) ===== */
-  #screenAbsence { display: none; }
+  #screenAbsence, #screenAdminAbsences { display: none; }
   .absTotals { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
   .absTable { width: 100%; border-collapse: collapse; font-size: 13px; }
   .absTable th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--border); }
   .absTable td { padding: 8px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
   .absTable td.num, .absTable th.num { text-align: right; white-space: nowrap; }
+  .absTag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .absTag.ok { background: rgba(52,168,83,0.18); color: #2e9a4d; }
+  .absTag.wait { background: rgba(245,180,0,0.22); color: #b98600; }
+  .absTag.no { background: rgba(234,67,53,0.18); color: #d93025; }
+  .absReq { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .absReqHead { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .absReqName { font-weight: 600; }
+  .absReqMeta { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .absReqBtns { display: flex; gap: 8px; margin-top: 8px; }
+  .absReqBtns button { margin-top: 0; padding: 10px; font-size: 14px; }
+  .absReqBtns .rejectBtn { background: var(--red); }
 
   /* ===== Нижняя навигация ===== */
   /* Показывается только когда человек вошёл (см. showBottomNav/hideBottomNav
@@ -1133,6 +1144,10 @@
       <div class="card">
         <button id="goToAdminObjectsBtn" type="button">Объекты</button>
       </div>
+
+      <div class="card">
+        <button id="goToAdminAbsencesBtn" type="button">Согласовать отгулы</button>
+      </div>
     </div>
   </div>
 
@@ -1223,6 +1238,18 @@
     </div>
     <div class="card">
       <button id="profilePolicyBtn" type="button" style="background:var(--muted);">Политика обработки персональных данных</button>
+    </div>
+  </div>
+
+  <!-- Экран "Согласование отгулов" (подэкран панели администратора):
+       заявки сотрудников; ожидающие — сверху. -->
+  <div id="screenAdminAbsences">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Согласование отгулов</h1>
+      <div class="switchUser"><a id="adminAbsencesBackLink">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <div id="adminAbsencesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
   </div>
 
@@ -1508,6 +1535,7 @@
   var screenTaskDetail = document.getElementById('screenTaskDetail');
   var screenProfile = document.getElementById('screenProfile');
   var screenAbsence = document.getElementById('screenAbsence');
+  var screenAdminAbsences = document.getElementById('screenAdminAbsences');
   var bottomNav = document.getElementById('bottomNav');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
@@ -1582,6 +1610,7 @@
         case 'taskManage': showTaskManageScreen(); break;
         case 'profile': showProfileScreen(); break;
         case 'absence': showAbsenceScreen(state.mode); break;
+        case 'adminAbsences': showAdminAbsencesScreen(); break;
         default: showScanScreen();
       }
     } finally {
@@ -1627,6 +1656,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
@@ -1680,6 +1710,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenLogin.style.display = 'block';
     hideBottomNav();
     pushScreenState('login');
@@ -1697,6 +1728,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
     hideBottomNav();
@@ -1843,6 +1875,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
@@ -1864,6 +1897,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
@@ -1898,6 +1932,7 @@
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenAbsence.style.display = 'block';
 
     var isPartial = absenceMode === 'partial';
@@ -1936,6 +1971,11 @@
     absenceStatusEl.className = kind || '';
   }
 
+  function absStatusTag_(status) {
+    var cls = status === 'Согласовано' ? 'ok' : (status === 'Не согласовано' ? 'no' : 'wait');
+    return '<span class="absTag ' + cls + '">' + escapeHtml(status || 'На согласовании') + '</span>';
+  }
+
   function renderAbsences(res) {
     var listEl = document.getElementById('absenceList');
     var totalsEl = document.getElementById('absenceTotals');
@@ -1945,20 +1985,21 @@
       return;
     }
     totalsEl.innerHTML =
-      'Отгулы: <b>' + fmtNum_(res.totals.leaveDays) + ' дн.</b> (' + fmtNum_(res.totals.leaveHours) + ' ч)<br>' +
-      'Больничные: <b>' + fmtNum_(res.totals.sickDays) + ' дн.</b>';
+      'Отгулы (согласованные): <b>' + fmtNum_(res.totals.leaveDays) + ' дн.</b> (' + fmtNum_(res.totals.leaveHours) + ' ч)<br>' +
+      'Больничные (согласованные): <b>' + fmtNum_(res.totals.sickDays) + ' дн.</b>' +
+      (res.totals.pendingDays > 0 ? '<br>На согласовании: <b>' + fmtNum_(res.totals.pendingDays) + ' дн.</b>' : '');
     if (!res.items.length) {
       listEl.innerHTML = '<div class="statsEmpty">В этом году отсутствий пока нет</div>';
       return;
     }
-    listEl.innerHTML = '<table class="absTable"><thead><tr><th>Тип</th><th>Когда</th><th class="num">Часов</th><th class="num">Дней</th></tr></thead><tbody>' +
+    listEl.innerHTML = '<table class="absTable"><thead><tr><th>Тип</th><th>Когда</th><th class="num">Часов</th><th class="num">Дней</th><th>Статус</th></tr></thead><tbody>' +
       res.items.map(function (it) {
         var when;
         if (it.timeFrom) when = fmtIsoRu_(it.dateFrom) + ', ' + escapeHtml(it.timeFrom) + '–' + escapeHtml(it.timeTo);
         else if (it.dateFrom === it.dateTo) when = fmtIsoRu_(it.dateFrom);
         else when = fmtIsoRu_(it.dateFrom) + ' – ' + fmtIsoRu_(it.dateTo);
         return '<tr><td>' + escapeHtml(it.type) + '</td><td>' + when + '</td><td class="num">' +
-          fmtNum_(it.hours) + '</td><td class="num">' + fmtNum_(it.days) + '</td></tr>';
+          fmtNum_(it.hours) + '</td><td class="num">' + fmtNum_(it.days) + '</td><td>' + absStatusTag_(it.status) + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
 
@@ -1969,6 +2010,81 @@
       .catch(function (err) {
         document.getElementById('absenceList').innerHTML =
           '<div class="statsEmpty">Ошибка соединения</div>';
+      });
+  }
+
+  // --- Админ: согласование отгулов ---
+  function showAdminAbsencesScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
+    screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'block';
+    loadAdminAbsences();
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('adminAbsences');
+  }
+
+  function renderAdminAbsences(res) {
+    var listEl = document.getElementById('adminAbsencesList');
+    if (!res || res.status !== 'ok') {
+      listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Не удалось загрузить') + '</div>';
+      return;
+    }
+    if (!res.items.length) {
+      listEl.innerHTML = '<div class="statsEmpty">Заявок пока нет</div>';
+      return;
+    }
+    listEl.innerHTML = res.items.map(function (it) {
+      var when;
+      if (it.timeFrom) when = fmtIsoRu_(it.dateFrom) + ', ' + escapeHtml(it.timeFrom) + '–' + escapeHtml(it.timeTo);
+      else if (it.dateFrom === it.dateTo) when = fmtIsoRu_(it.dateFrom);
+      else when = fmtIsoRu_(it.dateFrom) + ' – ' + fmtIsoRu_(it.dateTo);
+      var btns = '';
+      if (it.status !== 'Согласовано') btns += '<button type="button" data-id="' + it.id + '" data-decision="approve">Согласовать</button>';
+      if (it.status !== 'Не согласовано') btns += '<button type="button" class="rejectBtn" data-id="' + it.id + '" data-decision="reject">Отклонить</button>';
+      return '<div class="absReq">' +
+        '<div class="absReqHead"><span class="absReqName">' + escapeHtml(it.name) + '</span>' + absStatusTag_(it.status) + '</div>' +
+        '<div class="absReqMeta">' + escapeHtml(it.type) + ' · ' + when + '<br>' +
+          fmtNum_(it.hours) + ' ч · ' + fmtNum_(it.days) + ' дн.' +
+          (it.comment ? '<br>«' + escapeHtml(it.comment) + '»' : '') +
+          (it.decidedBy && it.status !== 'На согласовании' ? '<br>Решил(а): ' + escapeHtml(it.decidedBy) : '') +
+        '</div>' +
+        '<div class="absReqBtns">' + btns + '</div></div>';
+    }).join('');
+    listEl.querySelectorAll('button[data-decision]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        listEl.querySelectorAll('button').forEach(function (x) { x.disabled = true; });
+        apiPost({
+          action: 'adminDecideAbsence',
+          phone: currentUser && currentUser.phone,
+          id: Number(b.getAttribute('data-id')),
+          decision: b.getAttribute('data-decision')
+        })
+          .then(renderAdminAbsences)
+          .catch(function (err) {
+            listEl.querySelectorAll('button').forEach(function (x) { x.disabled = false; });
+            alert('Ошибка соединения: ' + err);
+          });
+      });
+    });
+  }
+
+  function loadAdminAbsences() {
+    document.getElementById('adminAbsencesList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetAbsences', phone: currentUser && currentUser.phone })
+      .then(renderAdminAbsences)
+      .catch(function () {
+        document.getElementById('adminAbsencesList').innerHTML = '<div class="statsEmpty">Ошибка соединения</div>';
       });
   }
 
@@ -1987,6 +2103,7 @@
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenProfile.style.display = 'block';
     document.getElementById('profileWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     refreshAdminStatus();
@@ -2097,6 +2214,7 @@
     screenTasks.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenTaskDetail.style.display = 'block';
     document.getElementById('taskDetailLoading').style.display = 'block';
     document.getElementById('taskDetailBody').style.display = 'none';
@@ -2275,6 +2393,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenAdmin.style.display = 'block';
     showBottomNav();
     setActiveNav('profile');
@@ -2295,6 +2414,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenTaskManage.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
@@ -2316,6 +2436,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
     showBottomNav();
@@ -2336,6 +2457,7 @@
     screenTaskDetail.style.display = 'none';
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
+    screenAdminAbsences.style.display = 'none';
     screenAdminObjects.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
     loadAdminObjects();
@@ -2942,6 +3064,14 @@
     if (actionBtn.style.display !== 'none' && !actionBtn.disabled) {
       actionBtn.click();
     }
+  });
+
+  // ===== Админ: согласование отгулов — обработчики =====
+  document.getElementById('goToAdminAbsencesBtn').addEventListener('click', function () {
+    showAdminAbsencesScreen();
+  });
+  document.getElementById('adminAbsencesBackLink').addEventListener('click', function () {
+    showAdminScreen();
   });
 
   // ===== Экран "Отсутствия" — обработчики =====
