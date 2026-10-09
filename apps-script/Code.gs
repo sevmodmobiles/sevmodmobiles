@@ -1,3 +1,7 @@
+// v41: расходы — после каждой записи строки листа "Расходы SEVMOD (копия)"
+//      сортируются по колонке "Дата" (новые записи встают по хронологии между
+//      старыми), на строке заголовков всегда стоит фильтр (создаётся, если его
+//      нет). Пункт меню "Отсортировать расходы по дате" — для ручных правок.
 // v40: расходы — сломанная проверка данных (выпадающий список ссылается на
 //      лист, которого в таблице нет, например "Справочники" из таблицы
 //      финдира) больше не роняет запись с ошибкой "Диапазон не найден".
@@ -386,6 +390,7 @@ function onOpen() {
     .addItem('Геокодировать все адреса объектов (разово)', 'geocodeAllObjects')
     .addItem('Синхронизировать объекты с финдиром сейчас (разово)', 'syncObjectsWithFindirManual')
     .addItem('Включить автосинхронизацию объектов с финдиром (раз)', 'setupFindirSyncTrigger')
+    .addItem('Отсортировать расходы по дате', 'sortExpensesByDateManual')
     .addToUi();
 }
 
@@ -2802,6 +2807,46 @@ function repairExpenseValidation_(sheet, headerRow, col, isObjectCol, row, days)
   return null;
 }
 
+// Последняя строка с данными (есть работник, объект или ставка); headerRow,
+// если данных нет. Формулы, протянутые вниз по пустым строкам, не считаются.
+function expenseLastDataRow_(sheet, lay) {
+  var first = lay.headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < first) return lay.headerRow;
+  var n = lastRow - first + 1;
+  var cols = lay.cols;
+  var blocks = [cols.worker, cols.object, cols.rate].map(function (c) {
+    return sheet.getRange(first, c, n, 1).getValues();
+  });
+  for (var i = n - 1; i >= 0; i--) {
+    if (String(blocks[0][i][0]).trim() || String(blocks[1][i][0]).trim() || String(blocks[2][i][0]).trim()) {
+      return first + i;
+    }
+  }
+  return lay.headerRow;
+}
+
+// Фильтр на строке заголовков (если его нет) и сортировка строк с данными по
+// дате. Формулы в строках (=MONTH(B…), =E…*H…) Google при сортировке
+// переносит вместе со строкой.
+function sortExpensesByDate_(sheet, lay) {
+  var lastCol = sheet.getLastColumn();
+  if (!sheet.getFilter()) {
+    sheet.getRange(lay.headerRow, 1, sheet.getMaxRows() - lay.headerRow + 1, lastCol).createFilter();
+  }
+  var last = expenseLastDataRow_(sheet, lay);
+  if (last - lay.headerRow < 2) return;
+  sheet.getRange(lay.headerRow + 1, 1, last - lay.headerRow, lastCol)
+    .sort({ column: lay.cols.date, ascending: true });
+}
+
+function sortExpensesByDateManual() {
+  var lay = expenseLayout_();
+  if (lay.error) { SpreadsheetApp.getUi().alert(lay.error); return; }
+  sortExpensesByDate_(lay.sheet, lay);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Расходы отсортированы по дате', 'SEVMOD', 3);
+}
+
 // Подгоняет значение под список (без учёта регистра и лишних пробелов).
 // Возвращает значение из списка, исходное (если списка нет / он не строгий)
 // или null (строгий список, значения в нём нет).
@@ -2849,21 +2894,8 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     if (lay.error) return { status: 'error', message: lay.error };
     var sheet = lay.sheet, cols = lay.cols;
 
-    // Первая свободная строка: после последней, где уже есть работник/объект/ставка.
-    var first = lay.headerRow + 1;
-    var lastRow = sheet.getLastRow();
-    var lastUsed = lay.headerRow;
-    if (lastRow >= first) {
-      var n = lastRow - first + 1;
-      var keyCols = [cols.worker, cols.object, cols.rate];
-      var blocks = keyCols.map(function (c) { return sheet.getRange(first, c, n, 1).getValues(); });
-      for (var i = n - 1; i >= 0; i--) {
-        if (String(blocks[0][i][0]).trim() || String(blocks[1][i][0]).trim() || String(blocks[2][i][0]).trim()) {
-          lastUsed = first + i;
-          break;
-        }
-      }
-    }
+    // Пишем после последней строки с данными, затем сортируем по дате.
+    var lastUsed = expenseLastDataRow_(sheet, lay);
     var row = lastUsed + 1;
     var rowTo = row + days - 1;
 
@@ -2943,9 +2975,18 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     fillAuto_(cols.status, function () { return statusValue; });
     SpreadsheetApp.flush();
 
+    var sorted = false;
+    try {
+      sortExpensesByDate_(sheet, lay);
+      SpreadsheetApp.flush();
+      sorted = true;
+    } catch (e) {
+      warn.push('строки добавлены в конец, но отсортировать лист по дате не удалось: ' + e.message);
+    }
+
     if (!cols.brigadier && brigadier) warn.push('в таблице нет столбца «Бригадир» — бригадир не записан');
     if (!cols.comment && comment) warn.push('в таблице нет столбца «Комментарий» — комментарий не записан');
-    return { status: 'ok', row: row, rowTo: rowTo, days: days, warning: warn.join('; ') };
+    return { status: 'ok', row: row, rowTo: rowTo, days: days, sorted: sorted, warning: warn.join('; ') };
   } finally {
     lock.releaseLock();
   }

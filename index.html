@@ -3537,19 +3537,21 @@
         btn.disabled = false;
         if (res.status === 'ok') {
           var sentDays = daysBetween_(payload.date, payload.dateTo);
-          var where = res.rowTo && res.rowTo !== res.row ? 'строки ' + res.row + '–' + res.rowTo : 'строка ' + res.row;
-          var msg = '✓ Добавлено в таблицу (' + where + ')';
+          var n = res.days || 1;
+          var msg = '✓ ' + payload.worker + ': добавлено ' + n + ' ' + (n === 1 ? 'строка' : (n < 5 ? 'строки' : 'строк')) +
+            ' (' + fmtIsoRu_(payload.date) + (n > 1 ? ' – ' + fmtIsoRu_(payload.dateTo) : '') + ')' +
+            (res.sorted ? ', таблица отсортирована по дате' : '');
           if (sentDays > 1 && !res.days) {
             // Старый серверный скрипт не знает про период и записал одну строку.
             msg += '. Внимание: записана только первая дата — обновите скрипт в таблице до v37';
           }
           setExpStatus(msg + (res.warning ? '. Внимание: ' + res.warning : ''), 'success');
-          // Дата, объект и бригадир обычно повторяются при вводе подряд —
-          // оставляем; очищаем то, что меняется от записи к записи.
-          document.getElementById('expWorker').value = '';
-          document.getElementById('expRate').value = '';
-          document.getElementById('expComment').value = '';
-          renderExpPeriodNote();
+          // Форма обнуляется полностью: дата — снова сегодня, поля пустые.
+          ['expWorker', 'expBrigadier', 'expObject', 'expRate', 'expComment'].forEach(function (id) {
+            document.getElementById(id).value = '';
+          });
+          expRange = { from: isoToday_(), to: isoToday_() };
+          renderExpDateField();
           if (payload.worker && expLookups.workers.indexOf(payload.worker) < 0) expLookups.workers.push(payload.worker);
           if (payload.brigadier && expLookups.brigadiers.indexOf(payload.brigadier) < 0) expLookups.brigadiers.push(payload.brigadier);
         } else {
