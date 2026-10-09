@@ -1271,6 +1271,7 @@
       <h2 style="margin-top:0;">Отсутствия</h2>
       <button id="profileAbsenceBtn" type="button">Запросить отгул / больничный</button>
       <button id="profileLateBtn" type="button">Приду позже / уйду раньше</button>
+      <div class="switchUser"><a id="profileAllAbsencesLink">Все запросы</a></div>
     </div>
     <div class="card">
       <button id="profilePolicyBtn" type="button" style="background:var(--muted);">Политика обработки персональных данных</button>
@@ -1323,7 +1324,7 @@
       <button id="absenceSubmitBtn" type="button" style="margin-top:10px;">Отправить заявку</button>
       <div id="absenceStatus"></div>
     </div>
-    <div class="card">
+    <div class="card" id="absenceListCard">
       <h2 style="margin-top:0;">Мои отсутствия за <span id="absenceYear"></span> год</h2>
       <div id="absenceTotals" class="absTotals"></div>
       <div id="absenceList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
@@ -3194,6 +3195,11 @@
   });
   document.getElementById('profileLateBtn').addEventListener('click', function () {
     showAbsenceScreen('partial');
+  });
+  // "Все запросы" — сразу к списку текущих и прошлых заявок
+  document.getElementById('profileAllAbsencesLink').addEventListener('click', function () {
+    showAbsenceScreen('full');
+    document.getElementById('absenceListCard').scrollIntoView({ block: 'start' });
   });
   document.getElementById('absenceBackLink').addEventListener('click', function () {
     showProfileScreen();
