@@ -1,3 +1,6 @@
+// v46: статус при добавлении расходов — adminAddExpense принимает status
+//      (значение из выпадающего списка колонки "Статус"; по умолчанию
+//      "НЕ ОПЛАЧЕНО"), adminExpenseLookups отдаёт statuses и defaultStatus.
 // v45: статусы расходов — в выпадающий список колонки "Статус" скрипт сам
 //      добавляет все статусы из сводки в шапке листа ("По Акту", "По Графику",
 //      "Под отчет" и т.д.), которых там нет; уже имеющиеся значения остаются.
@@ -380,7 +383,7 @@ function doPost(e) {
     }
     if (data.action === 'adminAddExpense') {
       return jsonOutput(adminAddExpense(data.phone, data.date, data.worker, data.brigadier,
-        data.objectName, data.rate, data.comment, data.dateTo, data.entries));
+        data.objectName, data.rate, data.comment, data.dateTo, data.entries, data.status));
     }
     if (data.action === 'adminExpenseOverview') {
       return jsonOutput(adminExpenseOverview(data.phone));
@@ -2969,7 +2972,7 @@ var EXPENSE_MAX_ROWS = 600;
 // Запись расходов. Работники — либо один (worker + rate), либо список entries
 // [{ worker, rate }] (бригада: у каждого своя ставка). dateToIso — конец
 // периода (включительно): на каждый день и каждого работника — своя строка.
-function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso, entries) {
+function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso, entries, status) {
   var auth = adminAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
 
@@ -3039,12 +3042,18 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     if (rowTo > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), rowTo - sheet.getMaxRows());
 
     var warn = [];
-    // Статус по умолчанию — если он допустим выпадающим списком колонки.
-    var statusAllowed = cols.status ? expenseAllowed_(sheet, row, cols.status) : null;
-    if (statusAllowed && statusAllowed.broken) {
-      statusAllowed = repairExpenseValidation_(sheet, lay.headerRow, cols.status, false, row, count);
+    // Статус — выбранный в приложении (или по умолчанию), строго из списка.
+    var statusValue = '';
+    if (cols.status) {
+      var statusList = expenseStatusList_(sheet, lay);
+      statusValue = pickFromList_(statusList, String(status || '').trim() || EXPENSE_DEFAULT_STATUS);
+      if (statusValue === null) {
+        if (String(status || '').trim()) {
+          return { status: 'error', message: 'Статуса «' + String(status).trim() + '» нет в списке колонки «Статус».' };
+        }
+        statusValue = '';
+      }
     }
-    var statusValue = expenseMatch_(statusAllowed, EXPENSE_DEFAULT_STATUS) || '';
 
     function column_(col, fn) {
       if (!col) return null;
@@ -3180,6 +3189,18 @@ function ensureExpenseStatuses_(sheet, lay) {
   sheet.getRange(lay.headerRow + 1, col, n, 1).setDataValidation(newRule);
 }
 
+// Допустимые статусы: выпадающий список колонки "Статус" (после
+// ensureExpenseStatuses_), а если его нет — статусы из сводки шапки.
+function expenseStatusList_(sheet, lay) {
+  if (!lay.cols.status) return [];
+  try { ensureExpenseStatuses_(sheet, lay); } catch (e) { /* список ниже всё равно прочитаем */ }
+  var allowed = expenseAllowed_(sheet, lay.headerRow + 1, lay.cols.status);
+  if (allowed && !allowed.broken && allowed.values.length) return allowed.values;
+  var out = expenseSummary_(sheet, lay).map(function (x) { return x.label; });
+  if (!pickFromList_(out, EXPENSE_DEFAULT_STATUS)) out.unshift(EXPENSE_DEFAULT_STATUS);
+  return out;
+}
+
 // Сводка (шапка листа) + строки расходов для экранов "Расходы" и
 // "Посмотреть расходы".
 function adminExpenseOverview(phone) {
@@ -3242,6 +3263,14 @@ function adminExpenseLookups(phone) {
   function sorted_(a) { return a.slice().sort(function (x, y) { return x.localeCompare(y, 'ru'); }); }
   var hist = { brigades: {}, lastRates: {} };
   try { hist = expenseHistory_(); } catch (e) { /* подсказки необязательны */ }
+  var statuses = [], statusColors = {};
+  try {
+    var lay = expenseLayout_();
+    if (!lay.error) {
+      statuses = expenseStatusList_(lay.sheet, lay);
+      expenseSummary_(lay.sheet, lay).forEach(function (x) { statusColors[x.label.toLowerCase()] = x.color; });
+    }
+  } catch (e) { /* без списка статусов форма предложит только статус по умолчанию */ }
   return {
     status: 'ok',
     strict: true,
@@ -3250,6 +3279,9 @@ function adminExpenseLookups(phone) {
     objects: sorted_(lists.objects),
     brigades: hist.brigades,
     lastRates: hist.lastRates,
+    statuses: statuses,
+    statusColors: statusColors,
+    defaultStatus: pickFromList_(statuses, EXPENSE_DEFAULT_STATUS) || EXPENSE_DEFAULT_STATUS,
     refSheet: EXPENSE_REF_SHEET_NAME
   };
 }

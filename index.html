@@ -832,6 +832,9 @@
   #expDateModal .modalBox { max-width: 400px; }
   #expPeriodNote { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
   .pickError { font-size: 13px; color: var(--red); margin: -8px 0 12px; }
+  .statusSelectWrap { position: relative; }
+  .statusSelectWrap .dot { position: absolute; left: 14px; top: 23px; width: 12px; height: 12px; border-radius: 50%; pointer-events: none; }
+  .statusSelectWrap select { padding-left: 36px; }
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
@@ -1476,6 +1479,11 @@
       <label for="expObject" style="margin-top:10px;">Объект</label>
       <input id="expObject" type="text" autocomplete="off" placeholder="Выберите из списка">
       <div id="expObjectErr" class="pickError" hidden></div>
+      <label for="expPayStatus" style="margin-top:10px;">Статус</label>
+      <div class="statusSelectWrap">
+        <span id="expPayStatusDot" class="dot" aria-hidden="true"></span>
+        <select id="expPayStatus"><option value="НЕ ОПЛАЧЕНО">НЕ ОПЛАЧЕНО</option></select>
+      </div>
       <label for="expComment" style="margin-top:10px;">Комментарий</label>
       <input id="expComment" type="text" maxlength="500" placeholder="Необязательно">
       <div id="expPeriodNote" hidden></div>
@@ -3523,8 +3531,11 @@
         if (res && res.status === 'ok') {
           expLookups = {
             workers: res.workers || [], brigadiers: res.brigadiers || [], objects: res.objects || [],
-            brigades: res.brigades || {}, lastRates: res.lastRates || {}, loaded: true
+            brigades: res.brigades || {}, lastRates: res.lastRates || {}, loaded: true,
+            statuses: res.statuses || [], defaultStatus: res.defaultStatus || 'НЕ ОПЛАЧЕНО',
+            statusColors: res.statusColors || {}
           };
+          renderPayStatusOptions();
           if (!expLookups.workers.length) {
             showPickError('expWorker', 'Список работников пуст — заполните колонку «Работники» на листе «' +
               (res.refSheet || 'Справочник расходов') + '» в таблице.');
@@ -3664,6 +3675,27 @@
   });
 
   function expBrigadeMode() { return !document.getElementById('expBrigadeWrap').hidden; }
+
+  // ----- Статус записи: по умолчанию «НЕ ОПЛАЧЕНО», можно выбрать любой из списка -----
+  function expDefaultStatus_() { return expLookups.defaultStatus || 'НЕ ОПЛАЧЕНО'; }
+  function renderPayStatusOptions() {
+    var sel = document.getElementById('expPayStatus');
+    var list = (expLookups.statuses && expLookups.statuses.length) ? expLookups.statuses.slice() : [expDefaultStatus_()];
+    if (list.indexOf(expDefaultStatus_()) < 0) list.unshift(expDefaultStatus_());
+    var current = sel.value || expDefaultStatus_();
+    sel.innerHTML = list.map(function (st) {
+      return '<option value="' + escapeHtml(st) + '">' + escapeHtml(st) + '</option>';
+    }).join('');
+    sel.value = list.indexOf(current) >= 0 ? current : expDefaultStatus_();
+    updatePayStatusDot();
+  }
+  function updatePayStatusDot() {
+    var st = document.getElementById('expPayStatus').value;
+    var c = (expLookups.statusColors || {})[String(st).toLowerCase()];
+    if (!c || /^#?(fff|ffffff)$/i.test(c)) c = expOverview ? expStatusColor_(st) : 'var(--muted)';
+    document.getElementById('expPayStatusDot').style.background = c;
+  }
+  document.getElementById('expPayStatus').addEventListener('change', updatePayStatusDot);
 
   // ----- Дата / период расходов -----
   var EXP_MAX_DAYS = 62;
@@ -3833,7 +3865,8 @@
       brigadier: document.getElementById('expBrigadier').value.trim(),
       objectName: document.getElementById('expObject').value.trim(),
       rate: document.getElementById('expRate').value,
-      comment: document.getElementById('expComment').value.trim()
+      comment: document.getElementById('expComment').value.trim(),
+      status: document.getElementById('expPayStatus').value
     };
     var picksOk = EXP_PICK_FIELDS.map(enforcePick).every(Boolean);
     payload.worker = document.getElementById('expWorker').value.trim();
@@ -3872,6 +3905,7 @@
           }
           var msg = '✓ ' + whoText + ': добавлено ' + rowsN + ' ' + (rowsN % 10 === 1 && rowsN % 100 !== 11 ? 'строка' : (rowsN % 10 >= 2 && rowsN % 10 <= 4 && (rowsN % 100 < 12 || rowsN % 100 > 14) ? 'строки' : 'строк')) +
             ' (' + fmtIsoRu_(payload.date) + (n > 1 ? ' – ' + fmtIsoRu_(payload.dateTo) : '') + ')' +
+            ', статус «' + payload.status + '»' +
             (res.sorted ? ', таблица отсортирована по дате' : '');
           if (sentDays > 1 && !res.days) {
             // Старый серверный скрипт не знает про период и записал одну строку.
@@ -3883,6 +3917,10 @@
             document.getElementById(id).value = '';
           });
           document.getElementById('expAddWorker').value = '';
+          document.getElementById('expPayStatus').value = expDefaultStatus_();
+          updatePayStatusDot();
+          // Сводка «Расходы» должна загрузиться заново — суммы изменились.
+          expOverview = null;
           expRange = { from: isoToday_(), to: isoToday_() };
           // Запомненный состав этой бригады обновляем локально (сервер вернёт его же при следующей загрузке).
           if (payload.entries) {
