@@ -1,3 +1,9 @@
+// v44: обзор расходов для приложения — adminExpenseOverview: сводка из шапки
+//      листа "Расходы SEVMOD (копия)" (строки над заголовками: подпись, сумма,
+//      цвет ячейки — "ОПЛАЧЕНО", "НЕ ОПЛАЧЕНО", "По Акту", "Под отчет",
+//      "Кирилл", "Влад" и т.д., как их считают формулы таблицы) и все строки
+//      расходов (дата, работник, бригадир, объект, ставка, итого, статус,
+//      дата погашения, комментарий).
 // v43: расходы по бригадам. adminAddExpense принимает entries [{worker, rate}]
 //      — несколько работников с бригадиром, у каждого своя ставка; строка на
 //      каждый день и каждого работника. adminExpenseLookups дополнительно
@@ -370,6 +376,9 @@ function doPost(e) {
     if (data.action === 'adminAddExpense') {
       return jsonOutput(adminAddExpense(data.phone, data.date, data.worker, data.brigadier,
         data.objectName, data.rate, data.comment, data.dateTo, data.entries));
+    }
+    if (data.action === 'adminExpenseOverview') {
+      return jsonOutput(adminExpenseOverview(data.phone));
     }
     if (data.action === 'adminExpenseLookups') {
       return jsonOutput(adminExpenseLookups(data.phone));
@@ -2745,7 +2754,8 @@ function expenseLayout_() {
       for (var c = 0; c < width; c++) {
         var h = String(top[r][c] || '').trim().toLowerCase();
         if (!h) continue;
-        if (h.indexOf('дата') === 0 && !cols.date) cols.date = c + 1;
+        if (h.indexOf('дата погаш') === 0 && !cols.payDate) cols.payDate = c + 1;
+        else if (h.indexOf('дата') === 0 && !cols.date) cols.date = c + 1;
         else if (h.indexOf('бригадир') === 0 && !cols.brigadier) cols.brigadier = c + 1;
         else if (h.indexOf('работник') === 0 && !cols.worker) cols.worker = c + 1;
         else if (h.indexOf('объект') === 0 && !cols.object) cols.object = c + 1;
@@ -3107,6 +3117,77 @@ function expenseHistory_() {
     out.brigades[b] = Object.keys(m).map(function (w) { return { worker: w, rate: m[w] }; });
   });
   return out;
+}
+
+// Сводка (шапка листа) + строки расходов для экранов "Расходы" и
+// "Посмотреть расходы".
+function adminExpenseOverview(phone) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  var lay = expenseLayout_();
+  if (lay.error) return { status: 'error', message: lay.error };
+  var sheet = lay.sheet, cols = lay.cols;
+  var lastCol = sheet.getLastColumn();
+  var tz = Session.getScriptTimeZone();
+
+  // Шапка: в каждой строке над заголовками — подпись и (правее) число.
+  var summary = [];
+  if (lay.headerRow > 1) {
+    var top = sheet.getRange(1, 1, lay.headerRow - 1, lastCol);
+    var disp = top.getDisplayValues(), vals = top.getValues(), bgs = top.getBackgrounds();
+    for (var r = 0; r < disp.length; r++) {
+      var labelCol = -1;
+      for (var c = 0; c < lastCol; c++) {
+        var t = String(disp[r][c]).trim();
+        if (!t || /^заполняется/i.test(t) || typeof vals[r][c] === 'number') continue;
+        labelCol = c; break;
+      }
+      if (labelCol < 0) continue;
+      var value = null;
+      for (var c2 = labelCol + 1; c2 < lastCol; c2++) {
+        if (typeof vals[r][c2] === 'number') { value = vals[r][c2]; break; }
+      }
+      summary.push({ label: String(disp[r][labelCol]).trim(), value: value, color: bgs[r][labelCol] });
+    }
+  }
+
+  // Строки расходов.
+  var rows = [];
+  var last = expenseLastDataRow_(sheet, lay);
+  var first = lay.headerRow + 1;
+  if (last >= first) {
+    var n = last - first + 1;
+    var data = sheet.getRange(first, 1, n, lastCol).getValues();
+    function v_(row, col) { return col ? row[col - 1] : ''; }
+    function iso_(x) { return x instanceof Date ? Utilities.formatDate(x, tz, 'yyyy-MM-dd') : ''; }
+    for (var i = 0; i < n; i++) {
+      var row = data[i];
+      var worker = String(v_(row, cols.worker) || '').trim();
+      var rate = Number(v_(row, cols.rate)) || 0;
+      if (!worker && !rate) continue;
+      var cnt = Number(v_(row, cols.count)) || 1;
+      var total = Number(v_(row, cols.total));
+      if (!isFinite(total) || v_(row, cols.total) === '') total = rate * cnt;
+      rows.push([
+        iso_(v_(row, cols.date)),
+        worker,
+        String(v_(row, cols.brigadier) || '').trim(),
+        String(v_(row, cols.object) || '').trim(),
+        rate,
+        total,
+        String(v_(row, cols.status) || '').trim(),
+        iso_(v_(row, cols.payDate)),
+        String(v_(row, cols.comment) || '').trim()
+      ]);
+    }
+  }
+  return {
+    status: 'ok',
+    summary: summary,
+    fields: ['date', 'worker', 'brigadier', 'object', 'rate', 'total', 'status', 'payDate', 'comment'],
+    rows: rows,
+    updatedAt: Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy HH:mm')
+  };
 }
 
 // Списки для формы — те же, что проверяются при записи (жёсткий выбор):
