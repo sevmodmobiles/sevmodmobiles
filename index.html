@@ -735,6 +735,116 @@
     background: #555;
   }
   #debugPanel button:last-child { margin-bottom: 0; }
+
+  /* ===== Нижняя навигация ===== */
+  /* Показывается только когда человек вошёл (см. showBottomNav/hideBottomNav
+     в скрипте) — скрыта на экранах входа/регистрации. Центральная кнопка
+     QR — это то же самое действие "Отметить приход/уход", что и раньше
+     было единственной кнопкой на главном экране; теперь оно доступно с
+     любого экрана одним нажатием, без обязательного перехода на Главную. */
+  body { padding-bottom: 104px; }
+  #bottomNav {
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    justify-content: center;
+    padding: 0 10px env(safe-area-inset-bottom, 0px);
+  }
+  #bottomNav.visible { display: flex; }
+  #bottomNavInner {
+    width: 100%;
+    max-width: 440px;
+    display: flex;
+    align-items: flex-start;
+  }
+  .navItem {
+    appearance: none;
+    background: none;
+    border: none;
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 3px;
+    padding: 10px 2px 8px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.1;
+    cursor: pointer;
+    position: relative;
+  }
+  .navItem svg {
+    width: 23px;
+    height: 23px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .navItem.active { color: var(--green); }
+  .navItem .navItemBadge {
+    position: absolute;
+    top: 4px;
+    right: calc(50% - 16px);
+    background: var(--red);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    line-height: 16px;
+    border-radius: 8px;
+    text-align: center;
+    padding: 0 3px;
+  }
+  .navCheckinItem {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+  }
+  .navCheckinBtn {
+    appearance: none;
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    border: none;
+    background: var(--green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: -22px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+    cursor: pointer;
+  }
+  .navCheckinBtn.action-out { background: var(--red); }
+  .navCheckinBtn svg {
+    width: 25px;
+    height: 25px;
+    stroke: #fff;
+    fill: none;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .navCheckinLabel {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    margin-top: 4px;
+  }
 </style>
 </head>
 <body>
@@ -831,14 +941,16 @@
       <div id="reader"></div>
       <div id="objectLabel"></div>
       <div id="status"></div>
-      <button id="myTasksBtn" type="button" style="background:var(--muted); position:relative;">Мои задачи<span id="myTasksBadge" class="taskBadge" style="display:none;"></span></button>
-      <!-- Обе кнопки ниже видны только тем, у кого стоит галочка "Админ" в
-           листе "Сотрудники" — проверяется автоматически при входе на этот
-           экран (см. refreshAdminStatus в скрипте), без отдельного входа
-           через Google. Обычный сотрудник их не видит вообще. -->
-      <button id="taskManageBtn" type="button" style="display:none; background:var(--green);">Поставить задачу</button>
-      <button id="myStatsBtn" type="button">Мой кабинет</button>
-      <button id="adminPanelBtn" type="button" style="display:none; background:var(--blue);">Админ панель</button>
+      <!-- Переходы на "Мои задачи" / "Мой кабинет" / админ-раздел теперь
+           живут в нижней навигации и на экране "Профиль" — здесь на
+           Главной остаётся только сама отметка прихода/ухода. Элементы
+           ниже скрыты, но оставлены в разметке "на всякий случай" (на них
+           по-прежнему ссылается несколько мест в коде ради обратной
+           совместимости бейджа задач). -->
+      <button id="myTasksBtn" type="button" style="display:none; position:relative;">Мои задачи<span id="myTasksBadge" class="taskBadge" style="display:none;"></span></button>
+      <button id="taskManageBtn" type="button" style="display:none;">Поставить задачу</button>
+      <button id="myStatsBtn" type="button" style="display:none;">Мой кабинет</button>
+      <button id="adminPanelBtn" type="button" style="display:none;">Админ панель</button>
     </div>
   </div>
 
@@ -1082,6 +1194,54 @@
     </div>
   </div>
 
+  <!-- Экран "Профиль" — кто вошёл, смена пользователя, политика
+       обработки данных, а для админов ещё и быстрый вход в админ-панель.
+       Открывается с нижней навигации (значок справа). -->
+  <div id="screenProfile">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Профиль</h1>
+      <div class="whoami">Вы вошли как: <b id="profileWhoamiName"></b></div>
+      <div class="switchUser"><a id="profileSwitchUserLink">Это не я / сменить пользователя</a></div>
+    </div>
+    <div class="card" id="profileAdminCard" style="display:none;">
+      <h2 style="margin-top:0;">Администрирование</h2>
+      <button id="profileAdminPanelBtn" type="button" style="background:var(--blue);">Админ-панель</button>
+      <button id="profileTaskManageBtn" type="button">Поставить задачу</button>
+    </div>
+    <div class="card">
+      <button id="profilePolicyBtn" type="button" style="background:var(--muted);">Политика обработки персональных данных</button>
+    </div>
+  </div>
+
+  <!-- ===== Нижняя навигация ===== -->
+  <div id="bottomNav">
+    <div id="bottomNavInner">
+      <button id="navHomeBtn" type="button" class="navItem">
+        <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9a1 1 0 0 0 1 1h3v-6h6v6h3a1 1 0 0 0 1-1v-9"/></svg>
+        Главная
+      </button>
+      <button id="navTasksBtn" type="button" class="navItem">
+        <svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="4" rx="1"/><path d="M6 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1"/><path d="M9 12h6M9 16h6"/></svg>
+        Задачи
+        <span id="navTasksBadge" class="navItemBadge" style="display:none;"></span>
+      </button>
+      <div class="navCheckinItem">
+        <button id="navCheckinBtn" type="button" class="navCheckinBtn">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h4M14 18h4M18 14v8M14 21h1"/></svg>
+        </button>
+        <div class="navCheckinLabel" id="navCheckinLabel">Приход</div>
+      </div>
+      <button id="navStatsBtn" type="button" class="navItem">
+        <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></svg>
+        Кабинет
+      </button>
+      <button id="navProfileBtn" type="button" class="navItem">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+        Профиль
+      </button>
+    </div>
+  </div>
+
   <!-- ===== ТЕСТОВЫЙ РЕЖИМ: кнопка + панель для просмотра экранов ===== -->
   <button id="debugToggle" type="button">🧪</button>
   <div id="debugPanel">
@@ -1292,6 +1452,8 @@
   var screenTaskManage = document.getElementById('screenTaskManage');
   var screenTasks = document.getElementById('screenTasks');
   var screenTaskDetail = document.getElementById('screenTaskDetail');
+  var screenProfile = document.getElementById('screenProfile');
+  var bottomNav = document.getElementById('bottomNav');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
     stopWaitIndicator(regStatus);
@@ -1363,12 +1525,38 @@
         case 'adminRates': showAdminRatesScreen(); break;
         case 'adminObjects': showAdminObjectsScreen(); break;
         case 'taskManage': showTaskManageScreen(); break;
+        case 'profile': showProfileScreen(); break;
         default: showScanScreen();
       }
     } finally {
       isBackNavigation = false;
     }
   });
+
+  // ===== Нижняя навигация =====
+  // Видна только когда человек вошёл в приложение (скрыта на экранах
+  // входа/регистрации — см. showLoginScreen/showRegScreen), и подсвечивает
+  // текущий раздел. Экран задачи (screenTaskDetail) и экраны
+  // администрирования объектов/ставок доступны по-прежнему только через
+  // переходы внутри приложения — в самой навигации у них нет отдельного
+  // значка, чтобы не перегружать её.
+  function showBottomNav() { bottomNav.classList.add('visible'); }
+  function hideBottomNav() { bottomNav.classList.remove('visible'); }
+
+  var NAV_ACTIVE_MAP = {
+    scan: 'navHomeBtn',
+    tasks: 'navTasksBtn',
+    taskDetail: 'navTasksBtn',
+    stats: 'navStatsBtn',
+    profile: 'navProfileBtn'
+  };
+  function setActiveNav(screenName) {
+    var activeId = NAV_ACTIVE_MAP[screenName] || null;
+    ['navHomeBtn', 'navTasksBtn', 'navStatsBtn', 'navProfileBtn'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle('active', id === activeId);
+    });
+  }
 
   function showScanScreen() {
     screenLogin.style.display = 'none';
@@ -1380,25 +1568,30 @@
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
     refreshTasksBadge();
     refreshAdminStatus();
+    showBottomNav();
+    setActiveNav('scan');
     pushScreenState('scan');
   }
 
   // Красная точка-счётчик на кнопке "Мои задачи" — показывает, сколько
   // сейчас невыполненных задач, и сама исчезает, когда их не осталось.
   function updateTasksBadge(count) {
-    var badge = document.getElementById('myTasksBadge');
-    if (!badge) return;
-    if (count > 0) {
-      badge.textContent = count > 9 ? '9+' : String(count);
-      badge.style.display = 'block';
-    } else {
-      badge.style.display = 'none';
-    }
+    var text = count > 9 ? '9+' : String(count);
+    [document.getElementById('myTasksBadge'), document.getElementById('navTasksBadge')].forEach(function (badge) {
+      if (!badge) return;
+      if (count > 0) {
+        badge.textContent = text;
+        badge.style.display = 'block';
+      } else {
+        badge.style.display = 'none';
+      }
+    });
   }
 
   function refreshTasksBadge() {
@@ -1427,7 +1620,9 @@
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenLogin.style.display = 'block';
+    hideBottomNav();
     pushScreenState('login');
   }
 
@@ -1441,8 +1636,10 @@
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
+    hideBottomNav();
     pushScreenState('reg');
   }
 
@@ -1506,10 +1703,14 @@
   }
 
   function updateAdminButtonsVisibility(isAdmin) {
-    var btn = document.getElementById('adminPanelBtn');
-    if (btn) btn.style.display = isAdmin ? 'block' : 'none';
-    var taskBtn = document.getElementById('taskManageBtn');
-    if (taskBtn) taskBtn.style.display = isAdmin ? 'block' : 'none';
+    // Старые кнопки adminPanelBtn/taskManageBtn на Главной теперь всегда
+    // скрыты (см. screenScan) — доступ для админов переехал на экран
+    // "Профиль" (profileAdminCard ниже), чтобы не дублировать одно и то
+    // же на Главной экране.
+    var profileCard = document.getElementById('profileAdminCard');
+    if (profileCard) profileCard.style.display = isAdmin ? 'block' : 'none';
+    var profileTaskBtn = document.getElementById('profileTaskManageBtn');
+    if (profileTaskBtn) profileTaskBtn.style.display = isAdmin ? 'block' : 'none';
   }
 
   function refreshAdminStatus() {
@@ -1580,9 +1781,12 @@
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
+    showBottomNav();
+    setActiveNav('stats');
     pushScreenState('stats');
   }
 
@@ -1597,10 +1801,35 @@
     screenTaskManage.style.display = 'none';
     screenStats.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
+    showBottomNav();
+    setActiveNav('tasks');
     pushScreenState('tasks');
+  }
+
+  // --- Профиль — кто вошёл, смена пользователя, политика обработки
+  // данных, и (только для админов) быстрый доступ в панель
+  // администратора. Открывается значком "Профиль" в нижней навигации. ---
+  function showProfileScreen() {
+    screenLogin.style.display = 'none';
+    screenReg.style.display = 'none';
+    screenScan.style.display = 'none';
+    screenAdmin.style.display = 'none';
+    screenAdminRates.style.display = 'none';
+    screenAdminObjects.style.display = 'none';
+    screenTaskManage.style.display = 'none';
+    screenStats.style.display = 'none';
+    screenTasks.style.display = 'none';
+    screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'block';
+    document.getElementById('profileWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
+    refreshAdminStatus();
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('profile');
   }
 
   // Единое отображение статуса — переиспользуется и в списке у сотрудника,
@@ -1703,10 +1932,13 @@
     screenAdminObjects.style.display = 'none';
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenTaskDetail.style.display = 'block';
     document.getElementById('taskDetailLoading').style.display = 'block';
     document.getElementById('taskDetailBody').style.display = 'none';
     loadTaskDetail();
+    showBottomNav();
+    setActiveNav('taskDetail');
     pushScreenState('taskDetail', { taskId: taskId });
   }
 
@@ -1877,7 +2109,10 @@
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenAdmin.style.display = 'block';
+    showBottomNav();
+    setActiveNav('profile');
     pushScreenState('admin');
   }
 
@@ -1893,9 +2128,12 @@
     screenAdminObjects.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenTaskManage.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
+    showBottomNav();
+    setActiveNav('profile');
     pushScreenState('taskManage');
   }
 
@@ -1910,8 +2148,11 @@
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
+    showBottomNav();
+    setActiveNav('profile');
     pushScreenState('adminRates');
   }
 
@@ -1926,9 +2167,12 @@
     screenTaskManage.style.display = 'none';
     screenTasks.style.display = 'none';
     screenTaskDetail.style.display = 'none';
+    screenProfile.style.display = 'none';
     screenAdminObjects.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
     loadAdminObjects();
+    showBottomNav();
+    setActiveNav('profile');
     pushScreenState('adminObjects');
   }
 
@@ -2505,6 +2749,47 @@
     showAdminScreen();
   });
 
+  // ===== Нижняя навигация — обработчики =====
+  document.getElementById('navHomeBtn').addEventListener('click', function () {
+    showScanScreen();
+  });
+  document.getElementById('navTasksBtn').addEventListener('click', function () {
+    showTasksScreen();
+  });
+  document.getElementById('navStatsBtn').addEventListener('click', function () {
+    showStatsScreen();
+  });
+  document.getElementById('navProfileBtn').addEventListener('click', function () {
+    showProfileScreen();
+  });
+  // Центральная кнопка — то же самое "Отметить приход/уход", что раньше
+  // было единственной кнопкой на Главной. Работает с любого экрана: сперва
+  // переходим на Главную (там и камера, и статус смены), затем сразу же
+  // запускаем сканирование — так, будто сами нажали кнопку там.
+  document.getElementById('navCheckinBtn').addEventListener('click', function () {
+    if (screenScan.style.display !== 'block') {
+      showScanScreen();
+    }
+    var actionBtn = document.getElementById('actionBtn');
+    if (actionBtn.style.display !== 'none' && !actionBtn.disabled) {
+      actionBtn.click();
+    }
+  });
+
+  // ===== Экран "Профиль" — обработчики =====
+  document.getElementById('profileSwitchUserLink').addEventListener('click', function () {
+    document.getElementById('switchUserLink').click();
+  });
+  document.getElementById('profilePolicyBtn').addEventListener('click', function () {
+    policyModal.classList.add('open');
+  });
+  document.getElementById('profileAdminPanelBtn').addEventListener('click', function () {
+    showAdminScreen();
+  });
+  document.getElementById('profileTaskManageBtn').addEventListener('click', function () {
+    showTaskManageScreen();
+  });
+
   // Список объектов по умолчанию скрыт (каждый объект и так разворачивается
   // в большую форму редактирования) — эта ссылка показывает/прячет его
   // целиком, свёрнутым (<details> без open), в обратном порядке.
@@ -3015,6 +3300,12 @@
       btn.className = 'action-in';
     }
     setStatus('');
+    // Центральная кнопка нижней навигации отражает то же состояние —
+    // красная и "Уход", когда смена открыта, зелёная и "Приход" иначе.
+    var navBtn = document.getElementById('navCheckinBtn');
+    var navLabel = document.getElementById('navCheckinLabel');
+    if (navBtn) navBtn.className = 'navCheckinBtn' + (shiftOpen ? ' action-out' : '');
+    if (navLabel) navLabel.textContent = shiftOpen ? 'Уход' : 'Приход';
   }
 
   function checkShiftStatus() {
