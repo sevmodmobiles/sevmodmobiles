@@ -736,6 +736,19 @@
   }
   #debugPanel button:last-child { margin-bottom: 0; }
 
+  /* ===== Главный экран: компактная вёрстка, чтобы шапка, статус смены и
+     кнопка "Отметить приход/уход" помещались на экране без прокрутки
+     (внизу ещё фиксированная навигация). ===== */
+  #screenScan .logo-card { padding: 10px 14px; margin-bottom: 10px; }
+  #screenScan .logo { width: 34%; max-width: 110px; margin-bottom: 4px; }
+  #screenScan h1 { font-size: 17px; margin: 0 0 2px; }
+  #screenScan .whoami { margin: 0; }
+  #screenScan .switchUser { margin-top: 2px; }
+  #screenScan .card { margin-bottom: 10px; }
+  #screenScan .card:not(.logo-card) { padding: 14px; }
+  #screenScan h2 { margin: 0 0 8px; }
+  #screenScan #reader { margin-top: 8px; }
+
   /* ===== Отсутствия (отгулы / больничные) ===== */
   #screenAbsence, #screenAdminAbsences { display: none; }
   .absTotals { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
@@ -747,6 +760,28 @@
   .absTag.ok { background: rgba(52,168,83,0.18); color: #2e9a4d; }
   .absTag.wait { background: rgba(245,180,0,0.22); color: #b98600; }
   .absTag.no { background: rgba(234,67,53,0.18); color: #d93025; }
+  .hasDot { position: relative; }
+  button.hasDot.dotOn::after {
+    content: ''; position: absolute; top: 50%; right: 14px; transform: translateY(-50%);
+    width: 12px; height: 12px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 0 2px var(--card);
+  }
+  .navItem.dotOn::after {
+    content: ''; position: absolute; top: 8px; right: calc(50% - 17px);
+    width: 10px; height: 10px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 0 2px var(--card);
+  }
+  #adminPopup {
+    display: none; position: fixed; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top, 0px));
+    max-width: 416px; margin: 0 auto; z-index: 2000;
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    border-left: 5px solid var(--red); border-radius: 12px; padding: 12px 14px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.3); align-items: center; gap: 10px;
+  }
+  #adminPopup.open { display: flex; }
+  #adminPopupText { flex: 1; font-size: 14px; line-height: 1.35; cursor: pointer; }
+  #adminPopupOpenBtn { width: auto; margin: 0; padding: 8px 12px; font-size: 14px; }
+  #adminPopupCloseBtn { width: auto; margin: 0; padding: 6px 8px; font-size: 16px; background: none; color: var(--muted); }
   .absReq { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
   .absReqHead { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
   .absReqName { font-weight: 600; }
@@ -1146,7 +1181,7 @@
       </div>
 
       <div class="card">
-        <button id="goToAdminAbsencesBtn" type="button">Согласовать отгулы</button>
+        <button id="goToAdminAbsencesBtn" type="button" class="hasDot">Согласовать отгулы</button>
       </div>
     </div>
   </div>
@@ -1228,7 +1263,8 @@
     </div>
     <div class="card" id="profileAdminCard" style="display:none;">
       <h2 style="margin-top:0;">Администрирование</h2>
-      <button id="profileAdminPanelBtn" type="button" style="background:var(--blue);">Админ-панель</button>
+      <button id="profileAdminPanelBtn" type="button" class="hasDot" style="background:var(--blue);">Админ-панель</button>
+      <button id="profileAbsenceApproveBtn" type="button" class="hasDot">Согласовать отгулы</button>
       <button id="profileTaskManageBtn" type="button">Поставить задачу</button>
     </div>
     <div class="card">
@@ -1292,6 +1328,13 @@
       <div id="absenceTotals" class="absTotals"></div>
       <div id="absenceList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
+  </div>
+
+  <!-- Всплывающее уведомление админу о новых заявках на отгул -->
+  <div id="adminPopup">
+    <div id="adminPopupText"></div>
+    <button id="adminPopupOpenBtn" type="button">Открыть</button>
+    <button id="adminPopupCloseBtn" type="button" aria-label="Закрыть">✕</button>
   </div>
 
   <!-- ===== Нижняя навигация ===== -->
@@ -1664,6 +1707,7 @@
     refreshAdminStatus();
     showBottomNav();
     setActiveNav('scan');
+    pollAdminPending();
     pushScreenState('scan');
   }
 
@@ -2013,6 +2057,58 @@
       });
   }
 
+  // --- Админ: красные точки и всплывающее уведомление о заявках ---
+  // Точки ставятся на иконку "Профиль", кнопки "Админ-панель" / "Согласовать
+  // отгулы" в профиле и "Согласовать отгулы" в панели администратора, пока
+  // есть заявки на согласовании. Всплывающая плашка показывается, когда число
+  // ожидающих стало БОЛЬШЕ, чем админу уже сообщали (хранится на телефоне).
+  // Это работает, пока приложение открыто (проверка раз в минуту); пуш на
+  // закрытое приложение потребует отдельного подключения (Firebase).
+  var adminPendingCount = 0;
+  function notifiedKey_() { return 'attendance_absence_notified_' + String((currentUser && currentUser.phone) || ''); }
+  function loadNotified_() {
+    try { return Number(localStorage.getItem(notifiedKey_())) || 0; } catch (e) { return 0; }
+  }
+  function saveNotified_(n) {
+    try { localStorage.setItem(notifiedKey_(), String(n)); } catch (e) {}
+  }
+  function setAdminDots_(on) {
+    ['navProfileBtn', 'profileAdminPanelBtn', 'profileAbsenceApproveBtn', 'goToAdminAbsencesBtn'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle('dotOn', !!on);
+    });
+  }
+  function hideAdminPopup_() { document.getElementById('adminPopup').classList.remove('open'); }
+  function setAdminPending(n) {
+    adminPendingCount = Number(n) || 0;
+    setAdminDots_(adminPendingCount > 0);
+    var notified = loadNotified_();
+    if (adminPendingCount < notified) saveNotified_(adminPendingCount);
+    if (adminPendingCount === 0) { hideAdminPopup_(); return; }
+    var onApproval = screenAdminAbsences.style.display === 'block';
+    if (adminPendingCount > loadNotified_() && !onApproval && cameraOverlay && !cameraOverlay.classList.contains('open')) {
+      document.getElementById('adminPopupText').textContent =
+        'Заявок на отгул ждут согласования: ' + adminPendingCount;
+      document.getElementById('adminPopup').classList.add('open');
+      saveNotified_(adminPendingCount);
+    }
+  }
+  function pollAdminPending() {
+    if (!currentUser || !currentUser.phone || !loadAdminStatusCache(currentUser.phone)) {
+      setAdminDots_(false);
+      return;
+    }
+    apiPost({ action: 'adminAbsencePending', phone: currentUser.phone })
+      .then(function (res) { if (res && res.status === 'ok') setAdminPending(res.pendingCount); })
+      .catch(function () { /* тихо: не критично */ });
+  }
+  setInterval(function () {
+    if (document.visibilityState === 'visible' && bottomNav.classList.contains('visible')) pollAdminPending();
+  }, 60000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && bottomNav.classList.contains('visible')) pollAdminPending();
+  });
+
   // --- Админ: согласование отгулов ---
   function showAdminAbsencesScreen() {
     screenLogin.style.display = 'none';
@@ -2028,6 +2124,8 @@
     screenProfile.style.display = 'none';
     screenAbsence.style.display = 'none';
     screenAdminAbsences.style.display = 'block';
+    hideAdminPopup_();
+    saveNotified_(adminPendingCount);
     loadAdminAbsences();
     showBottomNav();
     setActiveNav('profile');
@@ -2040,6 +2138,7 @@
       listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Не удалось загрузить') + '</div>';
       return;
     }
+    setAdminPending(res.pendingCount);
     if (!res.items.length) {
       listEl.innerHTML = '<div class="statsEmpty">Заявок пока нет</div>';
       return;
@@ -2107,6 +2206,7 @@
     screenProfile.style.display = 'block';
     document.getElementById('profileWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     refreshAdminStatus();
+    pollAdminPending();
     showBottomNav();
     setActiveNav('profile');
     pushScreenState('profile');
@@ -3064,6 +3164,20 @@
     if (actionBtn.style.display !== 'none' && !actionBtn.disabled) {
       actionBtn.click();
     }
+  });
+
+  // ===== Всплывающее уведомление админу — обработчики =====
+  document.getElementById('adminPopupOpenBtn').addEventListener('click', function () {
+    hideAdminPopup_();
+    showAdminAbsencesScreen();
+  });
+  document.getElementById('adminPopupText').addEventListener('click', function () {
+    hideAdminPopup_();
+    showAdminAbsencesScreen();
+  });
+  document.getElementById('adminPopupCloseBtn').addEventListener('click', hideAdminPopup_);
+  document.getElementById('profileAbsenceApproveBtn').addEventListener('click', function () {
+    showAdminAbsencesScreen();
   });
 
   // ===== Админ: согласование отгулов — обработчики =====
