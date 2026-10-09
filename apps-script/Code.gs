@@ -1,3 +1,11 @@
+// v42: расходы — жёсткий выбор из списков. Новый лист "Справочник расходов"
+//      (создаётся сам): колонка A "Работники", колонка B "Бригадиры" (если B
+//      пустая — бригадиром можно выбрать любого из работников). Колонкам
+//      "Работник", "Бригадир", "Объект" листа расходов ставятся строгие
+//      выпадающие списки (из справочника и листа "Объекты") — вручную в
+//      таблице ввести другое значение нельзя. adminAddExpense отклоняет
+//      значения не из списков, adminExpenseLookups отдаёт эти списки.
+//      Пункт меню "Включить строгие списки в расходах".
 // v41: расходы — после каждой записи строки листа "Расходы SEVMOD (копия)"
 //      сортируются по колонке "Дата" (новые записи встают по хронологии между
 //      старыми), на строке заголовков всегда стоит фильтр (создаётся, если его
@@ -391,6 +399,7 @@ function onOpen() {
     .addItem('Синхронизировать объекты с финдиром сейчас (разово)', 'syncObjectsWithFindirManual')
     .addItem('Включить автосинхронизацию объектов с финдиром (раз)', 'setupFindirSyncTrigger')
     .addItem('Отсортировать расходы по дате', 'sortExpensesByDateManual')
+    .addItem('Включить строгие списки в расходах', 'applyExpenseStrictListsManual')
     .addToUi();
 }
 
@@ -2807,6 +2816,81 @@ function repairExpenseValidation_(sheet, headerRow, col, isObjectCol, row, days)
   return null;
 }
 
+// ----- Справочник работников и бригадиров для расходов -----
+var EXPENSE_REF_SHEET_NAME = 'Справочник расходов';
+
+function getExpenseRefSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(EXPENSE_REF_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(EXPENSE_REF_SHEET_NAME);
+    sheet.getRange(1, 1, 1, 2).setValues([['Работники', 'Бригадиры']]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidths(1, 2, 220);
+  }
+  return sheet;
+}
+
+function expenseRefColumn_(sheet, col) {
+  var last = sheet.getLastRow();
+  if (last < 2) return [];
+  var seen = {}, out = [];
+  sheet.getRange(2, col, last - 1, 1).getDisplayValues().forEach(function (r) {
+    var v = String(r[0]).trim();
+    if (v && !seen[v]) { seen[v] = true; out.push(v); }
+  });
+  return out;
+}
+
+// { workers, brigadiers, objects, brigadierCol } — списки для жёсткого выбора.
+// Если колонка "Бригадиры" пустая, бригадиры = работники (brigadierCol = 1).
+function getExpenseRefLists_() {
+  var ref = getExpenseRefSheet_();
+  var workers = expenseRefColumn_(ref, 1);
+  var brigadiers = expenseRefColumn_(ref, 2);
+  var brigadierCol = 2;
+  if (!brigadiers.length) { brigadiers = workers; brigadierCol = 1; }
+  return { ref: ref, workers: workers, brigadiers: brigadiers, brigadierCol: brigadierCol, objects: getValidObjects() };
+}
+
+// Строгие выпадающие списки на колонки листа расходов (все строки под
+// заголовком). Пустой список не ставится, чтобы не заблокировать колонку.
+function applyExpenseStrictLists_(sheet, lay, lists) {
+  var n = sheet.getMaxRows() - lay.headerRow;
+  if (n < 1) return;
+  function strict_(col, range) {
+    if (!col) return;
+    var rule = SpreadsheetApp.newDataValidation().requireValueInRange(range, true).setAllowInvalid(false).build();
+    sheet.getRange(lay.headerRow + 1, col, n, 1).setDataValidation(rule);
+  }
+  if (lists.workers.length) strict_(lay.cols.worker, lists.ref.getRange('A2:A'));
+  if (lists.brigadiers.length) strict_(lay.cols.brigadier, lists.ref.getRange(lists.brigadierCol === 2 ? 'B2:B' : 'A2:A'));
+  var objSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
+  if (objSheet && lists.objects.length) strict_(lay.cols.object, objSheet.getRange('A2:A'));
+}
+
+function applyExpenseStrictListsManual() {
+  var lay = expenseLayout_();
+  if (lay.error) { SpreadsheetApp.getUi().alert(lay.error); return; }
+  var lists = getExpenseRefLists_();
+  applyExpenseStrictLists_(lay.sheet, lay, lists);
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    lists.workers.length
+      ? 'Строгие списки включены: работников ' + lists.workers.length + ', объектов ' + lists.objects.length
+      : 'Заполните колонку «Работники» на листе «' + EXPENSE_REF_SHEET_NAME + '» и повторите',
+    'SEVMOD', 5);
+}
+
+// Значение из списка (без учёта регистра/пробелов) или null.
+function pickFromList_(list, value) {
+  var key = String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!key) return '';
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].replace(/\s+/g, ' ').trim().toLowerCase() === key) return list[i];
+  }
+  return null;
+}
+
 // Последняя строка с данными (есть работник, объект или ставка); headerRow,
 // если данных нет. Формулы, протянутые вниз по пустым строкам, не считаются.
 function expenseLastDataRow_(sheet, lay) {
@@ -2878,6 +2962,21 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     }
   }
   var days = dates.length;
+
+  // Жёсткий выбор: работник, бригадир и объект — только из списков.
+  var lists = getExpenseRefLists_();
+  if (!lists.workers.length) {
+    return { status: 'error', message: 'Список работников пуст — заполните колонку «Работники» на листе «' + EXPENSE_REF_SHEET_NAME + '».' };
+  }
+  var pickedWorker = pickFromList_(lists.workers, worker);
+  if (pickedWorker === null) return { status: 'error', message: 'Работника «' + String(worker).trim() + '» нет в списке. Выберите из списка.' };
+  var pickedBrigadier = pickFromList_(lists.brigadiers, brigadier);
+  if (pickedBrigadier === null) return { status: 'error', message: 'Бригадира «' + String(brigadier).trim() + '» нет в списке. Выберите из списка.' };
+  var pickedObject = pickFromList_(lists.objects, objectName);
+  if (pickedObject === null) return { status: 'error', message: 'Объекта «' + String(objectName).trim() + '» нет в списке. Выберите из списка.' };
+  worker = pickedWorker;
+  brigadier = pickedBrigadier;
+  objectName = pickedObject;
   worker = String(worker || '').trim();
   brigadier = String(brigadier || '').trim();
   objectName = String(objectName || '').trim();
@@ -2893,6 +2992,7 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     var lay = expenseLayout_();
     if (lay.error) return { status: 'error', message: lay.error };
     var sheet = lay.sheet, cols = lay.cols;
+    applyExpenseStrictLists_(sheet, lay, lists);
 
     // Пишем после последней строки с данными, затем сортируем по дате.
     var lastUsed = expenseLastDataRow_(sheet, lay);
@@ -2992,57 +3092,19 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
   }
 }
 
-// Подсказки для формы: сотрудники приложения + имена, уже встречающиеся в
-// таблице расходов (работники и бригадиры), + список объектов приложения.
+// Списки для формы — те же, что проверяются при записи (жёсткий выбор):
+// работники и бригадиры из листа "Справочник расходов", объекты из "Объекты".
 function adminExpenseLookups(phone) {
   var auth = adminAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
-  var workers = {}, brigadiers = {};
-  var empSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
-  if (empSheet && empSheet.getLastRow() >= 2) {
-    empSheet.getRange(2, 1, empSheet.getLastRow() - 1, 1).getValues().forEach(function (r) {
-      var n = String(r[0] || '').trim();
-      if (n) workers[n] = true;
-    });
-  }
-  var objects = null;
-  try {
-    var lay = expenseLayout_();
-    if (!lay.error) {
-      var sheet = lay.sheet, first = lay.headerRow + 1;
-      var last = sheet.getLastRow();
-      // Если в колонке строгий выпадающий список — подсказываем только его.
-      var probeRow = Math.min(Math.max(first, last), sheet.getMaxRows());
-      var aw = expenseAllowed_(sheet, probeRow, lay.cols.worker);
-      var ab = expenseAllowed_(sheet, probeRow, lay.cols.brigadier);
-      var ao = expenseAllowed_(sheet, probeRow, lay.cols.object);
-      if (aw && aw.broken) aw = null;
-      if (ab && ab.broken) ab = null;
-      if (ao && ao.broken) ao = null;
-      if (ao && ao.strict) objects = ao.values;
-      if ((aw && aw.strict) || (ab && ab.strict)) {
-        return {
-          status: 'ok',
-          workers: (aw && aw.strict ? aw.values : Object.keys(workers)).slice().sort(),
-          brigadiers: (ab && ab.strict ? ab.values : []).slice().sort(),
-          objects: objects || getValidObjects()
-        };
-      }
-      if (last >= first) {
-        var from = Math.max(first, last - 1500), n = last - from + 1;
-        if (lay.cols.worker) sheet.getRange(from, lay.cols.worker, n, 1).getValues().forEach(function (r) {
-          var v = String(r[0] || '').trim(); if (v) workers[v] = true;
-        });
-        if (lay.cols.brigadier) sheet.getRange(from, lay.cols.brigadier, n, 1).getValues().forEach(function (r) {
-          var v = String(r[0] || '').trim(); if (v) brigadiers[v] = true;
-        });
-      }
-    }
-  } catch (e) { /* подсказки необязательны */ }
+  var lists = getExpenseRefLists_();
+  function sorted_(a) { return a.slice().sort(function (x, y) { return x.localeCompare(y, 'ru'); }); }
   return {
     status: 'ok',
-    workers: Object.keys(workers).sort(),
-    brigadiers: Object.keys(brigadiers).sort(),
-    objects: objects || getValidObjects()
+    strict: true,
+    workers: sorted_(lists.workers),
+    brigadiers: sorted_(lists.brigadiers),
+    objects: sorted_(lists.objects),
+    refSheet: EXPENSE_REF_SHEET_NAME
   };
 }

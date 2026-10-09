@@ -828,6 +828,7 @@
   .calBtns .calCancel { background: var(--muted); }
   #expDateModal .modalBox { max-width: 400px; }
   #expPeriodNote { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
+  .pickError { font-size: 13px; color: var(--red); margin: -8px 0 12px; }
 
   /* ===== Нижняя навигация ===== */
   /* Показывается только когда человек вошёл (см. showBottomNav/hideBottomNav
@@ -1348,11 +1349,14 @@
         <span id="expDateText">—</span><span class="dateFieldIcon" aria-hidden="true">📅</span>
       </button>
       <label for="expWorker" style="margin-top:10px;">Работник</label>
-      <input id="expWorker" type="text" autocomplete="off" placeholder="Например: Умар">
+      <input id="expWorker" type="text" autocomplete="off" placeholder="Выберите из списка">
+      <div id="expWorkerErr" class="pickError" hidden></div>
       <label for="expBrigadier" style="margin-top:10px;">Бригадир</label>
-      <input id="expBrigadier" type="text" autocomplete="off" placeholder="Необязательно">
+      <input id="expBrigadier" type="text" autocomplete="off" placeholder="Необязательно — выберите из списка">
+      <div id="expBrigadierErr" class="pickError" hidden></div>
       <label for="expObject" style="margin-top:10px;">Объект</label>
-      <input id="expObject" type="text" autocomplete="off" placeholder="Начните вводить название">
+      <input id="expObject" type="text" autocomplete="off" placeholder="Выберите из списка">
+      <div id="expObjectErr" class="pickError" hidden></div>
       <label for="expRate" style="margin-top:10px;">Ставка, ₽</label>
       <input id="expRate" type="number" inputmode="decimal" min="0" step="any" placeholder="Например: 4000">
       <label for="expComment" style="margin-top:10px;">Комментарий</label>
@@ -3089,7 +3093,7 @@
       var matches = query
         ? items.filter(function (label) { return label.toLowerCase().indexOf(query) !== -1; })
         : items;
-      matches = matches.slice(0, 40);
+      matches = matches.slice(0, 300);
       if (!matches.length) {
         list.style.display = 'none';
         list.innerHTML = '';
@@ -3358,7 +3362,11 @@
     apiPost({ action: 'adminExpenseLookups', phone: currentUser && currentUser.phone })
       .then(function (res) {
         if (res && res.status === 'ok') {
-          expLookups = { workers: res.workers || [], brigadiers: res.brigadiers || [], objects: res.objects || [] };
+          expLookups = { workers: res.workers || [], brigadiers: res.brigadiers || [], objects: res.objects || [], loaded: true };
+          if (!expLookups.workers.length) {
+            showPickError('expWorker', 'Список работников пуст — заполните колонку «Работники» на листе «' +
+              (res.refSheet || 'Справочник расходов') + '» в таблице.');
+          }
         }
       })
       .catch(function () { /* подсказки необязательны — вводить можно вручную */ });
@@ -3369,6 +3377,45 @@
     return expLookups.brigadiers.length ? expLookups.brigadiers : expLookups.workers;
   });
   initAutocomplete(document.getElementById('expObject'), function () { return expLookups.objects; });
+
+  // ----- Жёсткий выбор из списка: работник, бригадир, объект -----
+  // Ввод с клавиатуры только фильтрует список. Значение не из списка при
+  // уходе с поля стирается (регистр букв подгоняется под список).
+  function pickFromList_(list, value) {
+    var key = String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!key) return '';
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i]).replace(/\s+/g, ' ').trim().toLowerCase() === key) return list[i];
+    }
+    return null;
+  }
+  function showPickError(id, text) {
+    var el = document.getElementById(id + 'Err');
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+  var EXP_PICK_FIELDS = [
+    { id: 'expWorker', label: 'работника', items: function () { return expLookups.workers; } },
+    { id: 'expBrigadier', label: 'бригадира', items: function () { return expLookups.brigadiers; } },
+    { id: 'expObject', label: 'объект', items: function () { return expLookups.objects; } }
+  ];
+  // Возвращает true, если значение пустое или из списка (и подставляет его).
+  function enforcePick(f) {
+    var input = document.getElementById(f.id);
+    var val = input.value.trim();
+    if (!val || !expLookups.loaded) { showPickError(f.id, ''); return true; }
+    var picked = pickFromList_(f.items(), val);
+    if (picked) { input.value = picked; showPickError(f.id, ''); return true; }
+    input.value = '';
+    showPickError(f.id, '«' + val + '» нет в списке — выберите ' + f.label + ' из списка.');
+    return false;
+  }
+  EXP_PICK_FIELDS.forEach(function (f) {
+    var input = document.getElementById(f.id);
+    // после blur автодополнение ещё 150 мс принимает нажатие на пункт списка
+    input.addEventListener('blur', function () { setTimeout(function () { enforcePick(f); }, 200); });
+    input.addEventListener('change', function () { showPickError(f.id, ''); });
+  });
 
   // ----- Дата / период расходов -----
   var EXP_MAX_DAYS = 62;
@@ -3526,6 +3573,11 @@
       rate: document.getElementById('expRate').value,
       comment: document.getElementById('expComment').value.trim()
     };
+    var picksOk = EXP_PICK_FIELDS.map(enforcePick).every(Boolean);
+    payload.worker = document.getElementById('expWorker').value.trim();
+    payload.brigadier = document.getElementById('expBrigadier').value.trim();
+    payload.objectName = document.getElementById('expObject').value.trim();
+    if (!picksOk) { setExpStatus('Выберите значения из списков', 'error'); return; }
     if (!payload.date) { setExpStatus('Укажите дату', 'error'); return; }
     if (!payload.worker) { setExpStatus('Укажите работника', 'error'); return; }
     if (!payload.objectName) { setExpStatus('Укажите объект', 'error'); return; }
@@ -3552,8 +3604,7 @@
           });
           expRange = { from: isoToday_(), to: isoToday_() };
           renderExpDateField();
-          if (payload.worker && expLookups.workers.indexOf(payload.worker) < 0) expLookups.workers.push(payload.worker);
-          if (payload.brigadier && expLookups.brigadiers.indexOf(payload.brigadier) < 0) expLookups.brigadiers.push(payload.brigadier);
+          EXP_PICK_FIELDS.forEach(function (f) { showPickError(f.id, ''); });
         } else {
           setExpStatus(res.message || 'Не удалось записать', 'error');
         }
