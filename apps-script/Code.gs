@@ -1,3 +1,10 @@
+// v53: журнал изменений расходов — каждое удаление и каждая смена статуса из
+//      приложения пишутся в лист "Журнал изменений расходов" (когда, кто,
+//      действие, причина, все поля строки до изменения). Причина удаления
+//      обязательна. Лист журнала защищён: править может только владелец.
+//      Уведомление на почту при удалении — пункт меню "Включить уведомления
+//      об удалении расходов на почту". Восстановление удалённых строк —
+//      выделить строки журнала и выбрать "Восстановить выделенные удаления".
 // v52: удаление расходов из приложения — adminDeleteExpenseRows(phone, items
 //      [{row, key}]): удаляет строки листа расходов, если их отпечаток совпал
 //      (как в adminSetExpenseStatus); изменившиеся/переехавшие — conflicts.
@@ -421,7 +428,7 @@ function doPost(e) {
       return jsonOutput(adminAddContract(data.phone, data.objectName, data.brigadier, data.total, data.payments, data.comment));
     }
     if (data.action === 'adminDeleteExpenseRows') {
-      return jsonOutput(adminDeleteExpenseRows(data.phone, data.items));
+      return jsonOutput(adminDeleteExpenseRows(data.phone, data.items, data.reason));
     }
     if (data.action === 'adminSetExpenseStatus') {
       return jsonOutput(adminSetExpenseStatus(data.phone, data.items, data.status, data.payDate));
@@ -464,6 +471,8 @@ function onOpen() {
     .addItem('Отсортировать расходы по дате', 'sortExpensesByDateManual')
     .addItem('Включить строгие списки в расходах', 'applyExpenseStrictListsManual')
     .addItem('Включить ежедневный перевод платежей по договорам (раз)', 'setupContractDueTrigger')
+    .addItem('Включить уведомления об удалении расходов на почту', 'enableExpenseDeleteNotify')
+    .addItem('Восстановить выделенные удаления (лист журнала)', 'restoreExpenseFromAudit')
     .addToUi();
 }
 
@@ -3419,11 +3428,131 @@ function expenseRowKey_(dateIso, worker, object, rate, status) {
     String(status || '').trim().toLowerCase()].join('|');
 }
 
-// Удаление выбранных строк расходов (с проверкой отпечатка).
-function adminDeleteExpenseRows(phone, items) {
+// ----- Журнал изменений расходов -----
+var AUDIT_SHEET_NAME = 'Журнал изменений расходов';
+var AUDIT_HEADERS = ['Когда', 'Кто', 'Телефон', 'Действие', 'Причина', 'Строка листа', 'Дата', 'Работник', 'Бригадир',
+  'Объект', 'Ставка', 'Итого', 'Статус было', 'Статус стало', 'Дата погашения', 'Комментарий', 'Данные строки (для восстановления)', 'Восстановлено'];
+var AUDIT_COL = { ACTION: 4, DATA: 17, RESTORED: 18 };
+
+function getAuditSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(AUDIT_SHEET_NAME);
+  if (sh) return sh;
+  sh = ss.insertSheet(AUDIT_SHEET_NAME);
+  sh.getRange(1, 1, 1, AUDIT_HEADERS.length).setValues([AUDIT_HEADERS]).setFontWeight('bold');
+  sh.setFrozenRows(1);
+  sh.setColumnWidth(AUDIT_COL.DATA, 120);
+  // Защита: править журнал может только владелец (скрипт работает от него).
+  try {
+    var prot = sh.protect().setDescription('Журнал изменений расходов — только для чтения');
+    var me = Session.getEffectiveUser();
+    prot.addEditor(me);
+    prot.removeEditors(prot.getEditors().filter(function (u) { return u.getEmail() !== me.getEmail(); }));
+    if (prot.canDomainEdit()) prot.setDomainEdit(false);
+  } catch (e) { /* защита — по возможности */ }
+  return sh;
+}
+
+// entries: [{ row, values (вся строка листа), formulas (R1C1), newStatus }]
+function logExpenseChanges_(auth, action, reason, entries, lay) {
+  if (!entries.length) return;
+  var who = findEmployeeByPhone_(auth.phone);
+  var whoName = who ? who.name : '';
+  var cols = lay.cols, tz = Session.getScriptTimeZone(), now = new Date();
+  function v_(vals, c) { return c ? vals[c - 1] : ''; }
+  var out = entries.map(function (e) {
+    var vals = e.values;
+    var packed = JSON.stringify({ v: vals, f: e.formulas || null });
+    return [now, whoName, auth.phone, action, reason || '', e.row,
+      v_(vals, cols.date), v_(vals, cols.worker), v_(vals, cols.brigadier), v_(vals, cols.object),
+      v_(vals, cols.rate), v_(vals, cols.total), v_(vals, cols.status), e.newStatus || '',
+      v_(vals, cols.payDate), v_(vals, cols.comment), packed, ''];
+  });
+  var sh = getAuditSheet_();
+  var start = sh.getLastRow() + 1;
+  sh.getRange(start, 1, out.length, AUDIT_HEADERS.length).setValues(out);
+  sh.getRange(start, 1, out.length, 1).setNumberFormat('dd.MM.yyyy HH:mm:ss');
+  sh.getRange(start, 7, out.length, 1).setNumberFormat('dd.MM.yyyy');
+}
+
+var NOTIFY_PROP = 'EXPENSE_DELETE_NOTIFY_EMAIL';
+function enableExpenseDeleteNotify() {
+  var email = Session.getEffectiveUser().getEmail();
+  PropertiesService.getScriptProperties().setProperty(NOTIFY_PROP, email);
+  MailApp.sendEmail(email, 'SEVMOD: уведомления об удалении расходов включены',
+    'Теперь при каждом удалении расходов из приложения на этот адрес придёт письмо: кто, когда, что и почему удалил.');
+  SpreadsheetApp.getActiveSpreadsheet().toast('Уведомления будут приходить на ' + email, 'SEVMOD', 5);
+}
+function notifyExpenseDelete_(auth, reason, entries, lay) {
+  var email = PropertiesService.getScriptProperties().getProperty(NOTIFY_PROP);
+  if (!email || !entries.length) return;
+  try {
+    var who = findEmployeeByPhone_(auth.phone);
+    var cols = lay.cols, tz = Session.getScriptTimeZone();
+    var total = 0;
+    var lines = entries.map(function (e) {
+      var v = e.values, d = cols.date ? v[cols.date - 1] : '';
+      var amt = Number(cols.total ? v[cols.total - 1] : 0) || Number(cols.rate ? v[cols.rate - 1] : 0) || 0;
+      total += amt;
+      return '• ' + (d instanceof Date ? Utilities.formatDate(d, tz, 'dd.MM.yyyy') : d) + ' — ' + (cols.worker ? v[cols.worker - 1] : '') +
+        ', ' + (cols.object ? v[cols.object - 1] : '') + ', ' + amt + ' ₽, ' + (cols.status ? v[cols.status - 1] : '');
+    });
+    MailApp.sendEmail(email, 'SEVMOD: удалено ' + entries.length + ' зап. расходов на ' + total + ' ₽',
+      'Кто: ' + (who ? who.name + ' (' + auth.phone + ')' : auth.phone) + '\n' +
+      'Когда: ' + Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy HH:mm') + '\n' +
+      'Причина: ' + (reason || '—') + '\n\n' + lines.join('\n') +
+      '\n\nВсе удалённые строки сохранены на листе «' + AUDIT_SHEET_NAME + '», их можно восстановить.');
+  } catch (e) { /* письмо — не критично */ }
+}
+
+// Восстановление: выделите строки журнала с действием «Удаление» и выберите
+// пункт меню. Строки возвращаются в лист расходов (со своими формулами),
+// лист сортируется по дате, в журнале ставится отметка «Восстановлено».
+function restoreExpenseFromAudit() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getActiveSheet();
+  if (sh.getName() !== AUDIT_SHEET_NAME) { ui.alert('Откройте лист «' + AUDIT_SHEET_NAME + '» и выделите строки удалений.'); return; }
+  var range = sh.getActiveRange();
+  var r0 = Math.max(2, range.getRow()), r1 = range.getLastRow();
+  if (r1 < r0) { ui.alert('Выделите строки журнала (ниже заголовка).'); return; }
+  var rows = sh.getRange(r0, 1, r1 - r0 + 1, AUDIT_HEADERS.length).getValues();
+  var lay = expenseLayout_();
+  if (lay.error) { ui.alert(lay.error); return; }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  var restored = 0;
+  try {
+    var exp = lay.sheet;
+    rows.forEach(function (row, i) {
+      if (String(row[AUDIT_COL.ACTION - 1]) !== 'Удаление' || row[AUDIT_COL.RESTORED - 1]) return;
+      var packed;
+      try { packed = JSON.parse(row[AUDIT_COL.DATA - 1]); } catch (e) { return; }
+      var vals = (packed.v || []).map(function (x) {
+        return typeof x === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(x) ? new Date(x) : x;
+      });
+      if (!vals.length) return;
+      var target = expenseLastDataRow_(exp, lay) + 1;
+      if (target > exp.getMaxRows()) exp.insertRowsAfter(exp.getMaxRows(), 1);
+      var width = Math.min(vals.length, exp.getMaxColumns());
+      exp.getRange(target, 1, 1, width).setValues([vals.slice(0, width)]);
+      (packed.f || []).slice(0, width).forEach(function (f, c) { if (f) exp.getRange(target, c + 1).setFormulaR1C1(f); });
+      sh.getRange(r0 + i, AUDIT_COL.RESTORED).setValue(new Date()).setNumberFormat('dd.MM.yyyy HH:mm');
+      restored++;
+    });
+    if (restored) { SpreadsheetApp.flush(); try { sortExpensesByDate_(exp, lay); } catch (e) {} }
+  } finally { lock.releaseLock(); }
+  ss.toast(restored ? 'Восстановлено строк: ' + restored : 'Нечего восстанавливать (нужны строки «Удаление» без отметки «Восстановлено»)', 'SEVMOD', 6);
+}
+
+// Удаление выбранных строк расходов (с проверкой отпечатка). reason —
+// обязательная причина, пишется в журнал.
+function adminDeleteExpenseRows(phone, items, reason) {
   var auth = adminAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   if (!items || !items.length) return { status: 'error', message: 'Не выбрано ни одной записи' };
+  reason = String(reason || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+  if (reason.length < 3) return { status: 'error', message: 'Укажите причину удаления' };
   if (items.length > 2000) return { status: 'error', message: 'Слишком много записей за раз' };
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -3434,7 +3563,9 @@ function adminDeleteExpenseRows(phone, items) {
     var tz = Session.getScriptTimeZone();
     var first = lay.headerRow + 1, last = sheet.getLastRow();
     if (last < first) return { status: 'ok', deleted: 0, conflicts: items.length };
-    var data = sheet.getRange(first, 1, last - first + 1, sheet.getLastColumn()).getValues();
+    var fullRange = sheet.getRange(first, 1, last - first + 1, sheet.getLastColumn());
+    var data = fullRange.getValues();
+    var fml = fullRange.getFormulasR1C1();
     var del = {}, conflicts = 0;
     items.forEach(function (it) {
       var r = Number(it && it.row);
@@ -3448,6 +3579,11 @@ function adminDeleteExpenseRows(phone, items) {
       del[r] = true;
     });
     var rowsDesc = Object.keys(del).map(Number).sort(function (a, b) { return b - a; });
+    // Сначала — в журнал (все поля и формулы строки), потом удаляем.
+    var logged = rowsDesc.slice().reverse().map(function (r) {
+      return { row: r, values: data[r - first], formulas: fml[r - first] };
+    });
+    logExpenseChanges_(auth, 'Удаление', reason, logged, lay);
     // подряд идущие строки — одним deleteRows
     var i = 0;
     while (i < rowsDesc.length) {
@@ -3457,6 +3593,7 @@ function adminDeleteExpenseRows(phone, items) {
       i += n;
     }
     SpreadsheetApp.flush();
+    notifyExpenseDelete_(auth, reason, logged, lay);
     return { status: 'ok', deleted: rowsDesc.length, conflicts: conflicts };
   } finally {
     lock.releaseLock();
@@ -3516,6 +3653,8 @@ function adminSetExpenseStatus(phone, items, status, payDate) {
       if (numberFormat) rng.setNumberFormat(numberFormat);
     }
     if (updated) {
+      logExpenseChanges_(auth, 'Смена статуса', '', Object.keys(rowsToSet).map(Number).sort(function (a, b) { return a - b; })
+        .map(function (r) { return { row: r, values: data[r - first], newStatus: picked }; }), lay);
       writeCol_(cols.status, picked);
       if (pay !== null && cols.payDate) writeCol_(cols.payDate, pay, pay === '' ? null : 'dd.MM.yyyy');
     }

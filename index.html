@@ -1865,6 +1865,11 @@
     <div class="modalBox">
       <h2 id="cfTitle" style="margin-top:0; color: var(--text);">Удалить?</h2>
       <div id="cfText" class="modalText" style="font-size:14px;"></div>
+      <div id="cfReasonWrap" hidden>
+        <label for="cfReason" style="margin-top:10px;">Причина удаления *</label>
+        <input id="cfReason" type="text" maxlength="500" autocomplete="off" placeholder="Например: дубль, ошибка в ставке">
+        <div class="ctHint" style="margin-top:-8px;">Удаление, причина и все данные записи сохраняются в журнале изменений.</div>
+      </div>
       <div id="cfStatus"></div>
       <div class="calBtns">
         <button id="cfCancel" type="button" class="calCancel">Отмена</button>
@@ -4596,7 +4601,10 @@
   document.getElementById('expSearch').addEventListener('input', function () { if (expOverview) renderExpView(); });
   // ----- Удаление расходов из «Посмотреть расходы» -----
   var cfModal = document.getElementById('confirmModal'), cfAction = null;
-  function askConfirm(title, html, okLabel, action) {
+  function askConfirm(title, html, okLabel, action, needReason) {
+    document.getElementById('cfReasonWrap').hidden = !needReason;
+    document.getElementById('cfReason').value = '';
+    if (needReason) setTimeout(function () { document.getElementById('cfReason').focus(); }, 50);
     document.getElementById('cfTitle').textContent = title;
     document.getElementById('cfText').innerHTML = html;
     document.getElementById('cfOk').textContent = okLabel;
@@ -4607,18 +4615,28 @@
   }
   function closeConfirm() { cfModal.classList.remove('open'); cfAction = null; }
   document.getElementById('cfCancel').addEventListener('click', closeConfirm);
+  document.getElementById('cfReason').addEventListener('input', function () {
+    var st = document.getElementById('cfStatus');
+    if (st.className === 'error') { st.textContent = ''; st.className = ''; }
+  });
   cfModal.addEventListener('click', function (e) { if (e.target === cfModal) closeConfirm(); });
   document.getElementById('cfOk').addEventListener('click', function () { if (cfAction) cfAction(); });
 
   function deleteExpenseRows_(rows, doneText) {
     var okBtn = document.getElementById('cfOk'), st = document.getElementById('cfStatus');
+    var reason = document.getElementById('cfReason').value.trim();
+    if (reason.length < 3) {
+      st.textContent = 'Укажите причину удаления'; st.className = 'error';
+      document.getElementById('cfReason').focus();
+      return;
+    }
     okBtn.disabled = true; st.textContent = 'Удаляю…'; st.className = '';
-    apiPost({ action: 'adminDeleteExpenseRows', phone: currentUser && currentUser.phone,
+    apiPost({ action: 'adminDeleteExpenseRows', phone: currentUser && currentUser.phone, reason: reason,
       items: rows.map(function (r) { return { row: r.row, key: payKey_(r) }; }) })
       .then(function (res) {
         if (!res || res.status !== 'ok') {
           okBtn.disabled = false;
-          st.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v52';
+          st.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v53';
           st.className = 'error'; return;
         }
         closeConfirm();
@@ -4652,7 +4670,7 @@
       askConfirm('Удалить запись?',
         '<b>' + escapeHtml(r.worker) + '</b>, ' + escapeHtml(r.date ? fmtIsoRu_(r.date) : '—') + ', ' + escapeHtml(r.object || '—') +
         ' — <b>' + money_(r.total) + '</b> (' + escapeHtml(r.status || 'без статуса') + ').<br>Строка будет удалена из таблицы.',
-        'Удалить', function () { deleteExpenseRows_([r], r.worker); });
+        'Удалить', function () { deleteExpenseRows_([r], r.worker); }, true);
       return;
     }
     var dp = e.target.closest('.expDelPerson');
@@ -4664,7 +4682,7 @@
       askConfirm('Удалить все записи?',
         '<b>' + escapeHtml(dp.dataset.name) + '</b>: ' + rows.length + ' зап. на <b>' + money_(sum) + '</b>.<br>' +
         'Удаляются только записи, которые сейчас видны с выбранными фильтрами (статус, объект, бригада). Строки будут удалены из таблицы.',
-        'Удалить ' + rows.length + ' зап.', function () { deleteExpenseRows_(rows, dp.dataset.name); });
+        'Удалить ' + rows.length + ' зап.', function () { deleteExpenseRows_(rows, dp.dataset.name); }, true);
       return;
     }
     var ob = e.target.closest('.expOpenBrig');
