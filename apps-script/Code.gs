@@ -1,3 +1,7 @@
+// v56: комментарий к оплате. adminSetExpenseStatus принимает в items поле
+//      comment — дописывается в «Комментарий» строки (через « · », если там
+//      уже что-то есть). Справочник: колонка D «Банки», E «Кто платит»
+//      (пустые — значения по умолчанию). adminAddExpenseBank(phone, name).
 // v55: цвета статусов — условное форматирование колонки «Статус» по цветам
 //      сводки в шапке (applyExpenseStatusColors_). Ставится один раз само
 //      при открытии расходов в приложении, после каждого пересоздания
@@ -446,6 +450,9 @@ function doPost(e) {
     }
     if (data.action === 'adminDeleteExpenseRows') {
       return jsonOutput(adminDeleteExpenseRows(data.phone, data.items, data.reason));
+    }
+    if (data.action === 'adminAddExpenseBank') {
+      return jsonOutput(adminAddExpenseBank(data.phone, data.name));
     }
     if (data.action === 'adminSetExpenseStatus') {
       return jsonOutput(adminSetExpenseStatus(data.phone, data.items, data.status, data.payDate, data.reason));
@@ -2935,6 +2942,41 @@ function expenseRefColumn_(sheet, col) {
   return out;
 }
 
+// Комментарий к оплате: кто платил и через какой банк (колонки E и D справочника).
+var EXPENSE_DEFAULT_PAYERS = ['Дмитрий', 'Кирилл', 'Влад'];
+var EXPENSE_DEFAULT_BANKS = ['Сбер', 'Т-Банк', 'Альфа-Банк', 'ВТБ', 'Озон Банк', 'Райффайзен'];
+function adminAddExpenseBank(phone, name) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  var bank = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (!bank) return { status: 'error', message: 'Укажите банк' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var ref = getExpenseRefSheet_();
+    var banks = expenseRefColumn_(ref, 4);
+    if (String(ref.getRange(1, 4).getValue()).trim() === '') ref.getRange(1, 4).setValue('Банки').setFontWeight('bold');
+    // Первый раз — сначала переносим в колонку список по умолчанию.
+    var add = banks.length ? [] : EXPENSE_DEFAULT_BANKS.slice();
+    var all = banks.length ? banks : add;
+    var existing = pickFromList_(all, bank);
+    if (!existing) add.push(bank);
+    if (add.length) {
+      var lr = ref.getLastRow();
+      var vals = lr >= 2 ? ref.getRange(2, 4, lr - 1, 1).getValues() : [];
+      var row = 2;
+      for (var i = vals.length - 1; i >= 0; i--) if (String(vals[i][0]).trim()) { row = i + 3; break; }
+      var need = row + add.length - 1;
+      if (need > ref.getMaxRows()) ref.insertRowsAfter(ref.getMaxRows(), need - ref.getMaxRows());
+      ref.getRange(row, 4, add.length, 1).setValues(add.map(function (b) { return [b]; }));
+      SpreadsheetApp.flush();
+    }
+    return { status: 'ok', name: existing || bank, banks: expenseRefColumn_(ref, 4) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // Новый работник в справочник расходов. Возвращает { status, name, existed }.
 function adminAddExpenseWorker(phone, firstName, lastName, workerPhone, asBrigadier) {
   var auth = adminAuth_(phone);
@@ -3746,7 +3788,7 @@ function adminSetExpenseStatus(phone, items, status, payDate, reason) {
     var n = last - first + 1;
     // Всё читаем одним блоком; проверяем отпечатки.
     var data = sheet.getRange(first, 1, n, sheet.getLastColumn()).getValues();
-    var updated = 0, conflicts = 0, rowsToSet = {}, minR = Infinity, maxR = -Infinity;
+    var updated = 0, conflicts = 0, rowsToSet = {}, rowComments = {}, minR = Infinity, maxR = -Infinity;
     items.forEach(function (it) {
       var r = Number(it && it.row);
       if (!(r >= first && r <= last)) { conflicts++; return; }
@@ -3757,6 +3799,8 @@ function adminSetExpenseStatus(phone, items, status, payDate, reason) {
         cols.rate ? v[cols.rate - 1] : '', v[cols.status - 1]);
       if (key !== String(it.key || '') || rowsToSet[r]) { conflicts++; return; }
       rowsToSet[r] = true; updated++;
+      var cm = String(it.comment || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (cm) rowComments[r] = cm;
       if (r < minR) minR = r; if (r > maxR) maxR = r;
     });
     // Запись одним диапазоном на колонку (minR..maxR). Непомеченные строки
@@ -3783,6 +3827,16 @@ function adminSetExpenseStatus(phone, items, status, payDate, reason) {
         .map(function (r) { return { row: r, values: data[r - first], newStatus: picked }; }), lay);
       writeCol_(cols.status, picked);
       if (pay !== null && cols.payDate) writeCol_(cols.payDate, pay, pay === '' ? null : 'dd.MM.yyyy');
+      if (cols.comment && Object.keys(rowComments).length) {
+        var cr = sheet.getRange(minR, cols.comment, maxR - minR + 1, 1);
+        var cv = cr.getValues(), cf = cr.getFormulas();
+        cr.setValues(cv.map(function (row, i) {
+          var r = minR + i, add = rowComments[r];
+          if (!add) return [cf[i][0] || row[0]];
+          var old = String(row[0] || '').trim();
+          return [old ? old + ' · ' + add : add];
+        }));
+      }
     }
     SpreadsheetApp.flush();
     return { status: 'ok', updated: updated, conflicts: conflicts, newStatus: picked };
@@ -3880,6 +3934,8 @@ function adminExpenseLookups(phone) {
     statuses: statuses,
     statusColors: statusColors,
     defaultStatus: pickFromList_(statuses, EXPENSE_DEFAULT_STATUS) || EXPENSE_DEFAULT_STATUS,
+    payers: expenseRefColumn_(lists.ref, 5).length ? expenseRefColumn_(lists.ref, 5) : EXPENSE_DEFAULT_PAYERS,
+    banks: expenseRefColumn_(lists.ref, 4).length ? expenseRefColumn_(lists.ref, 4) : EXPENSE_DEFAULT_BANKS,
     refSheet: EXPENSE_REF_SHEET_NAME
   };
 }

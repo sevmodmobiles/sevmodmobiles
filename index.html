@@ -1057,6 +1057,31 @@
   #expSelStatus { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
   #expSelDel { background: none; color: var(--red); border: 1px solid var(--red); }
   .stOpts { display: grid; gap: 6px; margin: 10px 0; }
+  /* Комментарий к оплате */
+  #pcModal .modalBox { max-height: calc(100dvh - 32px); overflow-y: auto; }
+  .pcBlock { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin: 10px 0; background: var(--bg); }
+  .pcBlock h3 { margin: 0 0 8px; font-size: 14px; color: var(--text); }
+  .pcRow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .pcRow .lbl { width: 100%; font-size: 12px; color: var(--muted); }
+  .pcChip { width: auto; margin: 0; padding: 7px 12px; font-size: 13px; font-weight: 600; border-radius: 999px;
+    background: var(--card); color: var(--text); border: 1px solid var(--border); }
+  .pcChip.on { background: var(--text); color: var(--card); border-color: var(--text); }
+  .pcChip.add { color: var(--muted); border-style: dashed; }
+  .pcAddBank { display: flex; gap: 6px; width: 100%; }
+  .pcAddBank input { flex: 1; min-width: 0; margin: 0; padding: 8px 10px; font-size: 14px; }
+  .pcAddBank button { width: auto; margin: 0; padding: 8px 12px; font-size: 13px; }
+  .pcNote { margin: 0; padding: 9px 10px; font-size: 14px; }
+  .pcPeople { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .pcPerson { border-bottom: 1px solid var(--border); padding: 9px 12px; }
+  .pcPerson:last-child { border-bottom: none; }
+  .pcPTop { display: flex; align-items: baseline; gap: 8px; }
+  .pcPName { font-weight: 700; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+  .pcPSum { margin-left: auto; font-weight: 700; font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pcPText { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .pcPText.bad { color: var(--red); }
+  .pcOwnBtn { width: auto; margin: 6px 0 0; padding: 5px 10px; font-size: 12px; font-weight: 600; background: none;
+    color: var(--blue); border: 1px solid var(--border); border-radius: 999px; }
+  .pcPerson .pcBlock { margin: 8px 0 0; background: var(--card); }
   .stOpt { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0; padding: 11px 12px; text-align: left;
     background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font-weight: 600; font-size: 14px; }
   .stOpt .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
@@ -2010,6 +2035,24 @@
       <div class="calBtns">
         <button id="stCancel" type="button" class="calCancel">Отмена</button>
         <button id="stOk" type="button" disabled>Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Комментарий к оплате: кто, как (нал / карта + банк), уточнение -->
+  <div id="pcModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="pcTitle">
+    <div class="modalBox">
+      <h2 id="pcTitle" style="margin-top:0; color: var(--text);">Комментарий к оплате</h2>
+      <div id="pcSummary" class="modalText" style="font-size:14px;"></div>
+      <div id="pcCommon"></div>
+      <div id="pcPeopleWrap">
+        <div class="ctHint" style="margin:6px 0;">Если кому-то платили иначе — нажмите «Своё» у этого человека.</div>
+        <div id="pcPeople" class="pcPeople"></div>
+      </div>
+      <div id="pcStatus"></div>
+      <div class="calBtns">
+        <button id="pcCancel" type="button" class="calCancel">Отмена</button>
+        <button id="pcOk" type="button">ОПЛАЧЕНО</button>
       </div>
     </div>
   </div>
@@ -3992,7 +4035,8 @@
             workers: res.workers || [], brigadiers: res.brigadiers || [], objects: res.objects || [],
             brigades: res.brigades || {}, lastRates: res.lastRates || {}, loaded: true,
             statuses: res.statuses || [], defaultStatus: res.defaultStatus || 'НЕ ОПЛАЧЕНО',
-            statusColors: res.statusColors || {}
+            statusColors: res.statusColors || {},
+            payers: res.payers || null, banks: res.banks || null
           };
           renderPayStatusOptions();
           if (!expLookups.workers.length) {
@@ -4888,9 +4932,16 @@
     }
     // ОПЛАЧЕНО → дата погашения сегодня; любой другой статус → дата погашения очищается.
     var payDate = isPaid_(stPick) ? isoToday_() : '';
+    if (isPaid_(stPick)) {
+      stModal.classList.remove('open');
+      askPayComments_(rows, function (cm) { stModal.classList.add('open'); sendSt_(cm); }, function () { stModal.classList.add('open'); });
+      return;
+    }
+    sendSt_({});
+    function sendSt_(cm) {
     okBtn.disabled = true; st.textContent = 'Сохраняю…'; st.className = '';
     apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: stPick, payDate: payDate, reason: reason,
-      items: rows.map(function (r) { return { row: r.row, key: payKey_(r) }; }) })
+      items: rows.map(function (r) { return { row: r.row, key: payKey_(r), comment: cm[r.row] || '' }; }) })
       .then(function (res) {
         if (!res || res.status !== 'ok') {
           okBtn.disabled = false;
@@ -4913,6 +4964,162 @@
         });
       })
       .catch(function (err) { okBtn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+    }
+  });
+
+  // ----- Комментарий к оплате (при смене статуса на «ОПЛАЧЕНО») -----
+  // Один набор «для всех» + при необходимости своё у отдельного человека.
+  // Последний выбор запоминается, чтобы в следующий раз хватило одного нажатия.
+  var pcModal = document.getElementById('pcModal'), pcRows = [], pcGroups = [], pcCommon = null, pcOwn = {}, pcOpenOwn = {}, pcDone = null, pcCancelCb = null;
+  var PC_LAST_KEY = 'sevmod_pay_comment_last';
+  function pcPayers_() { return (expLookups.payers && expLookups.payers.length) ? expLookups.payers : ['Дмитрий', 'Кирилл', 'Влад']; }
+  function pcBanks_() { return (expLookups.banks && expLookups.banks.length) ? expLookups.banks : ['Сбер', 'Т-Банк', 'Альфа-Банк', 'ВТБ', 'Озон Банк', 'Райффайзен']; }
+  function pcText_(c) {
+    if (!c || !c.payer || !c.method || (c.method === 'card' && !c.bank)) return '';
+    return 'Оплатил ' + c.payer + ', ' + (c.method === 'cash' ? 'выдал наличными' : 'перевёл на карту ' + c.bank) +
+      (c.note ? '. ' + c.note.charAt(0).toUpperCase() + c.note.slice(1) : '');
+  }
+  function pcMissing_(c) {
+    if (!c.payer) return 'кто оплатил';
+    if (!c.method) return 'как оплатил';
+    if (c.method === 'card' && !c.bank) return 'банк';
+    return '';
+  }
+  function pcEditor_(c, scope) {
+    function chips(list, field, val) {
+      return list.map(function (x) {
+        return '<button type="button" class="pcChip' + (val === x ? ' on' : '') + '" data-scope="' + escapeHtml(scope) + '" data-f="' + field +
+          '" data-v="' + escapeHtml(x) + '">' + escapeHtml(x) + '</button>';
+      }).join('');
+    }
+    var html = '<div class="pcRow"><span class="lbl">Кто оплатил</span>' + chips(pcPayers_(), 'payer', c.payer) + '</div>' +
+      '<div class="pcRow"><span class="lbl">Как</span>' +
+      '<button type="button" class="pcChip' + (c.method === 'cash' ? ' on' : '') + '" data-scope="' + escapeHtml(scope) + '" data-f="method" data-v="cash">Наличными</button>' +
+      '<button type="button" class="pcChip' + (c.method === 'card' ? ' on' : '') + '" data-scope="' + escapeHtml(scope) + '" data-f="method" data-v="card">На карту</button></div>';
+    if (c.method === 'card') {
+      html += '<div class="pcRow"><span class="lbl">Банк</span>' + chips(pcBanks_(), 'bank', c.bank) +
+        (c.addingBank
+          ? '<div class="pcAddBank"><input type="text" class="pcBankInput" data-scope="' + escapeHtml(scope) + '" maxlength="40" placeholder="Название банка">' +
+            '<button type="button" class="pcBankSave" data-scope="' + escapeHtml(scope) + '">Добавить</button></div>'
+          : '<button type="button" class="pcChip add" data-scope="' + escapeHtml(scope) + '" data-f="addBank">+ Банк</button>') + '</div>';
+    }
+    html += '<input type="text" class="pcNote" data-scope="' + escapeHtml(scope) + '" maxlength="300" placeholder="Уточнение (необязательно)" value="' + escapeHtml(c.note || '') + '">';
+    return html;
+  }
+  function pcGet_(scope) { return scope === '*' ? pcCommon : pcOwn[scope]; }
+  function pcEffective_(name) { return pcOwn[name] || pcCommon; }
+  function renderPayComments_() {
+    document.getElementById('pcCommon').innerHTML = '<div class="pcBlock"><h3>' + (pcGroups.length > 1 ? 'Для всех' : escapeHtml(pcGroups[0].name)) + '</h3>' +
+      pcEditor_(pcCommon, '*') + '</div>';
+    document.getElementById('pcPeopleWrap').hidden = pcGroups.length < 2;
+    if (pcGroups.length < 2) return;
+    document.getElementById('pcPeople').innerHTML = pcGroups.map(function (g) {
+      var own = pcOwn[g.name], c = pcEffective_(g.name), t = pcText_(c);
+      return '<div class="pcPerson"><div class="pcPTop"><span class="pcPName">' + escapeHtml(g.name) + '</span>' +
+        '<span class="pcPSum">' + g.rows.length + ' зап. · ' + money_(g.sum) + '</span></div>' +
+        '<div class="pcPText' + (t ? '' : ' bad') + '">' + (t ? escapeHtml(t) : 'Не указано: ' + pcMissing_(c)) + (own ? ' · своё' : '') + '</div>' +
+        (own ? '<div class="pcBlock">' + pcEditor_(own, g.name) + '</div>' : '') +
+        '<button type="button" class="pcOwnBtn" data-name="' + escapeHtml(g.name) + '">' + (own ? 'Как у всех' : 'Своё') + '</button></div>';
+    }).join('');
+  }
+  function askPayComments_(rows, onDone, onCancel) {
+    if (!expLookups.loaded) loadExpLookups();
+    pcRows = rows; pcDone = onDone; pcCancelCb = onCancel || null; pcOwn = {};
+    var last = {};
+    try { last = JSON.parse(localStorage.getItem(PC_LAST_KEY) || '{}') || {}; } catch (e) { last = {}; }
+    pcCommon = { payer: last.payer || '', method: last.method || '', bank: last.bank || '', note: '' };
+    var by = {}; pcGroups = [];
+    rows.forEach(function (r) {
+      var n = r.worker || '(без имени)';
+      if (!by[n]) { by[n] = { name: n, rows: [], sum: 0 }; pcGroups.push(by[n]); }
+      by[n].rows.push(r); by[n].sum += Number(r.total) || 0;
+    });
+    document.getElementById('pcSummary').innerHTML = rows.length + ' зап. на <b>' +
+      money_(rows.reduce(function (a, r) { return a + (Number(r.total) || 0); }, 0)) + '</b>' + (pcGroups.length > 1 ? ', ' + pcGroups.length + ' чел.' : '');
+    document.getElementById('pcStatus').textContent = ''; document.getElementById('pcStatus').className = '';
+    document.getElementById('pcOk').disabled = false;
+    renderPayComments_();
+    pcModal.classList.add('open');
+  }
+  function closePayComments_(cancelled) {
+    pcModal.classList.remove('open');
+    if (cancelled && pcCancelCb) pcCancelCb();
+  }
+  pcModal.addEventListener('click', function (e) {
+    if (e.target === pcModal) { closePayComments_(true); return; }
+    var own = e.target.closest('.pcOwnBtn');
+    if (own) {
+      var n = own.dataset.name;
+      if (pcOwn[n]) delete pcOwn[n];
+      else pcOwn[n] = { payer: pcCommon.payer, method: pcCommon.method, bank: pcCommon.bank, note: pcCommon.note };
+      renderPayComments_(); return;
+    }
+    var save = e.target.closest('.pcBankSave');
+    if (save) {
+      var sc = save.dataset.scope, c0 = pcGet_(sc);
+      var inp = save.parentNode.querySelector('.pcBankInput'), name = inp.value.replace(/\s+/g, ' ').trim();
+      if (!name) { inp.focus(); return; }
+      save.disabled = true; save.textContent = '…';
+      apiPost({ action: 'adminAddExpenseBank', phone: currentUser && currentUser.phone, name: name })
+        .then(function (res) {
+          if (!res || res.status !== 'ok') {
+            save.disabled = false; save.textContent = 'Добавить';
+            var st = document.getElementById('pcStatus');
+            st.textContent = (res && res.message) || 'Не удалось добавить банк — проверьте, что развёрнут скрипт v56'; st.className = 'error';
+            return;
+          }
+          if (res.banks && res.banks.length) expLookups.banks = res.banks;
+          else expLookups.banks = pcBanks_().concat([res.name]);
+          c0.bank = res.name; c0.addingBank = false;
+          renderPayComments_();
+        })
+        .catch(function (err) { save.disabled = false; save.textContent = 'Добавить'; alert('Ошибка соединения: ' + err); });
+      return;
+    }
+    var b = e.target.closest('.pcChip');
+    if (!b) return;
+    var c = pcGet_(b.dataset.scope); if (!c) return;
+    var f = b.dataset.f;
+    if (f === 'addBank') {
+      c.addingBank = true; renderPayComments_();
+      var el = pcModal.querySelector('.pcBankInput[data-scope="' + CSS.escape(b.dataset.scope) + '"]'); if (el) el.focus();
+      return;
+    }
+    c[f] = c[f] === b.dataset.v && f !== 'method' ? '' : b.dataset.v;
+    if (f === 'method' && c.method === 'cash') c.bank = '';
+    // общее изменилось — у людей без своего комментария он тоже поменяется
+    renderPayComments_();
+  });
+  pcModal.addEventListener('input', function (e) {
+    var t = e.target;
+    if (t.classList.contains('pcNote')) {
+      var c = pcGet_(t.dataset.scope); if (!c) return;
+      c.note = t.value.replace(/\s+/g, ' ').trim();
+      // превью людей обновляем без пересборки поля, в котором печатают
+      if (t.dataset.scope === '*' && pcGroups.length > 1) {
+        pcModal.querySelectorAll('.pcPerson').forEach(function (el, i) {
+          var g = pcGroups[i]; if (pcOwn[g.name]) return;
+          var tx = pcText_(pcCommon), d = el.querySelector('.pcPText');
+          d.textContent = tx || 'Не указано: ' + pcMissing_(pcCommon); d.classList.toggle('bad', !tx);
+        });
+      }
+    }
+  });
+  document.getElementById('pcCancel').addEventListener('click', function () { closePayComments_(true); });
+  document.getElementById('pcOk').addEventListener('click', function () {
+    var st = document.getElementById('pcStatus');
+    for (var i = 0; i < pcGroups.length; i++) {
+      var c = pcEffective_(pcGroups[i].name), miss = pcMissing_(c);
+      if (miss) {
+        st.textContent = 'Укажите ' + miss + (pcGroups.length > 1 ? ' (' + pcGroups[i].name + ')' : ''); st.className = 'error';
+        return;
+      }
+    }
+    try { localStorage.setItem(PC_LAST_KEY, JSON.stringify({ payer: pcCommon.payer, method: pcCommon.method, bank: pcCommon.bank })); } catch (e) {}
+    var byRow = {};
+    pcGroups.forEach(function (g) { var t = pcText_(pcEffective_(g.name)); g.rows.forEach(function (r) { byRow[r.row] = t; }); });
+    closePayComments_(false);
+    if (pcDone) pcDone(byRow);
   });
 
   function viewRowsOf_(predicate) {
@@ -5496,10 +5703,14 @@
         }, true, 'Причина снятия «ОПЛАЧЕНО» *', 'Смена статуса и причина сохраняются в журнале изменений.');
       return;
     }
+    // «ОПЛАЧЕНО» — сначала комментарий к оплате (кто, как, банк).
+    if (isPaid_(status)) { askPayComments_(selRows, function (cm) { sendPay_('', cm); }); return; }
     sendPay_('');
-    function sendPay_(reason) {
+    function sendPay_(reason, cm) {
+    cm = cm || {};
     btn.disabled = true; msg.textContent = 'Меняю статус…'; msg.className = '';
-    apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, items: items, status: status,
+    apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: status,
+      items: items.map(function (it) { return { row: it.row, key: it.key, comment: cm[it.row] || '' }; }),
       payDate: payDate ? payDate : null, reason: reason })
       .then(function (res) {
         if (!res || res.status !== 'ok') {
