@@ -1,3 +1,8 @@
+// v51: платежи по договорам наступают сами — строки контракта ("Работы" =
+//      "Договор") со статусом "По Графику"/"По Акту", дата которых попадает на
+//      текущую неделю (пн–вс) или раньше, получают статус "НЕ ОПЛАЧЕНО".
+//      Делается при каждом открытии обзора расходов в приложении и раз в день
+//      по триггеру (меню: "Включить ежедневный перевод платежей по договорам").
 // v50: оплаты — adminExpenseOverview отдаёт номер строки (row) у каждой
 //      записи; adminSetExpenseStatus(phone, items [{row, key}], status, payDate)
 //      меняет статус выбранных строк (и ставит/очищает "Дату погашения").
@@ -451,6 +456,7 @@ function onOpen() {
     .addItem('Включить автосинхронизацию объектов с финдиром (раз)', 'setupFindirSyncTrigger')
     .addItem('Отсортировать расходы по дате', 'sortExpensesByDateManual')
     .addItem('Включить строгие списки в расходах', 'applyExpenseStrictListsManual')
+    .addItem('Включить ежедневный перевод платежей по договорам (раз)', 'setupContractDueTrigger')
     .addToUi();
 }
 
@@ -3342,6 +3348,64 @@ function expenseStatusList_(sheet, lay) {
   return out;
 }
 
+// Воскресенье (23:59:59) текущей недели (пн–вс) в часовом поясе скрипта.
+function endOfCurrentWeek_() {
+  var now = new Date();
+  var dow = Number(Utilities.formatDate(now, Session.getScriptTimeZone(), 'u')); // 1=пн … 7=вс
+  var end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (7 - dow));
+  end.setHours(23, 59, 59, 999);
+  return end;
+}
+
+// Платёж по договору, чья неделя наступила (или прошла), — "НЕ ОПЛАЧЕНО".
+// Только строки контрактов ("Работы" = "Договор") со статусом
+// "По Графику"/"По Акту". Возвращает число переведённых строк.
+function promoteDueContractPayments_(sheet, lay) {
+  var cols = lay.cols;
+  if (!cols.status || !cols.date || !cols.works) return 0;
+  var first = lay.headerRow + 1, last = expenseLastDataRow_(sheet, lay);
+  if (last < first) return 0;
+  var n = last - first + 1;
+  var dates = sheet.getRange(first, cols.date, n, 1).getValues();
+  var works = sheet.getRange(first, cols.works, n, 1).getValues();
+  var stRange = sheet.getRange(first, cols.status, n, 1);
+  var sts = stRange.getValues();
+  var end = endOfCurrentWeek_();
+  var planned = {};
+  planned[CONTRACT_STATUS_ADVANCE.toLowerCase()] = true;
+  planned[CONTRACT_STATUS_ACT.toLowerCase()] = true;
+  var hit = [];
+  for (var i = 0; i < n; i++) {
+    var d = dates[i][0];
+    if (!(d instanceof Date) || d > end) continue;
+    if (String(works[i][0]).trim().toLowerCase() !== 'договор') continue;
+    if (!planned[String(sts[i][0]).trim().toLowerCase()]) continue;
+    hit.push(i);
+  }
+  if (!hit.length) return 0;
+  var unpaid = pickFromList_(expenseStatusList_(sheet, lay), EXPENSE_DEFAULT_STATUS) || EXPENSE_DEFAULT_STATUS;
+  // Пишем по одной ячейке только в изменённые строки (их немного).
+  hit.forEach(function (i) { sheet.getRange(first + i, cols.status).setValue(unpaid); });
+  return hit.length;
+}
+
+function promoteDueContractPaymentsJob() {
+  var lay = expenseLayout_();
+  if (lay.error) return;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try { promoteDueContractPayments_(lay.sheet, lay); } finally { lock.releaseLock(); }
+}
+
+function setupContractDueTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'promoteDueContractPaymentsJob') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('promoteDueContractPaymentsJob').timeBased().everyDays(1).atHour(6).create();
+  promoteDueContractPaymentsJob();
+  SpreadsheetApp.getActiveSpreadsheet().toast('Платежи по договорам будут переводиться в «НЕ ОПЛАЧЕНО» каждый день в 6:00', 'SEVMOD', 5);
+}
+
 // Отпечаток строки расходов — тот же считает приложение по данным обзора.
 function expenseRowKey_(dateIso, worker, object, rate, status) {
   return [dateIso, String(worker || '').trim(), String(object || '').trim(), Number(rate) || 0,
@@ -3423,6 +3487,9 @@ function adminExpenseOverview(phone) {
   var tz = Session.getScriptTimeZone();
 
   try { ensureExpenseStatuses_(sheet, lay); } catch (e) { /* обзор важнее */ }
+  var promoted = 0;
+  try { promoted = promoteDueContractPayments_(sheet, lay); } catch (e) { /* обзор важнее */ }
+  if (promoted) SpreadsheetApp.flush();
   var summary = expenseSummary_(sheet, lay);
 
   // Строки расходов.
@@ -3461,6 +3528,7 @@ function adminExpenseOverview(phone) {
     summary: summary,
     fields: ['date', 'worker', 'brigadier', 'object', 'rate', 'total', 'status', 'payDate', 'comment', 'row'],
     rows: rows,
+    promoted: promoted,
     updatedAt: Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy HH:mm')
   };
 }

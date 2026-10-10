@@ -833,6 +833,21 @@
   #expDateModal .modalBox { max-width: 400px; }
   #expPeriodNote { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
   .pickError { font-size: 13px; color: var(--red); margin: -8px 0 12px; }
+  .payDue { padding-top: 14px; padding-bottom: 12px; }
+  .payDueTitle { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .payDueRow {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%; margin: 0;
+    padding: 8px 10px; background: none; color: var(--text); border-radius: 8px; font-weight: 500; text-align: left;
+  }
+  .payDueRow .lbl { font-size: 15px; min-width: 0; }
+  .payDueRow .sub { color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
+  .payDueRow .val { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .payDueRow.total { border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; margin-top: 4px; padding-top: 10px; }
+  .payDueRow.total .val { font-size: 24px; color: var(--red); }
+  .payDueRow.on { background: rgba(66,133,244,0.16); outline: 1px solid var(--blue); }
+  .payDueHint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .payPeriodNote { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--blue); font-weight: 600; margin-bottom: 8px; }
+  .payPeriodNote button { width: auto; margin: 0; padding: 4px 10px; font-size: 13px; background: none; color: var(--blue); border: 1px solid var(--blue); border-radius: 999px; }
   .payFilters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
   .payFilters select { margin: 0; min-width: 0; padding: 10px; font-size: 14px; }
   .payFilters select.active { border-color: var(--blue); color: var(--blue); font-weight: 600; }
@@ -1559,7 +1574,24 @@
       <h1 style="margin-top:0;">Оплаты</h1>
       <div class="switchUser"><a id="payBackLink">← Расходы</a></div>
     </div>
+    <div class="card payDue" id="payDue">
+      <div class="payDueTitle">К оплате</div>
+      <button type="button" class="payDueRow" data-period="week">
+        <span class="lbl">На этой неделе <span id="payWeekRange" class="sub"></span></span>
+        <span id="payDueWeek" class="val">—</span>
+      </button>
+      <button type="button" class="payDueRow" data-period="overdue">
+        <span class="lbl">Долг прошлых недель</span>
+        <span id="payDueOld" class="val">—</span>
+      </button>
+      <button type="button" class="payDueRow total" data-period="due">
+        <span class="lbl">Итого к оплате</span>
+        <span id="payDueTotal" class="val">—</span>
+      </button>
+      <div class="payDueHint">Неоплаченное и запланированное (По графику, По акту). Нажмите на строку, чтобы отобрать эти записи.</div>
+    </div>
     <div class="card">
+      <div id="payPeriodNote" class="payPeriodNote" hidden></div>
       <div id="payChips" class="expChips" role="tablist" aria-label="Статус"></div>
       <div class="payFilters">
         <select id="payBrigFilter" aria-label="Бригадир"></select>
@@ -4721,6 +4753,42 @@
   var payBrig = '', payWorker = '', payObj = '';
   var paySel = {};                 // { номер строки: true }
   var payOpen = {};                // раскрытые люди { имя: true }
+  var payPeriod = '';              // '' | 'week' | 'overdue' | 'due' — отбор из блока «К оплате»
+  var PAY_DUE_STATUSES = { 'не оплачено': true, 'по графику': true, 'по акту': true };
+  // Текущая неделя (пн–вс) в ISO-датах.
+  function payWeek_() {
+    var d = new Date(), dow = (d.getDay() + 6) % 7;     // 0 = понедельник
+    var mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dow);
+    var sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
+    function iso(x) { return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
+    return { mon: iso(mon), sun: iso(sun) };
+  }
+  function payPeriodOf_(r) {
+    if (!PAY_DUE_STATUSES[expKey_(r.status)] || !r.date) return '';
+    var w = payWeek_();
+    if (r.date > w.sun) return '';
+    return r.date >= w.mon ? 'week' : 'overdue';
+  }
+  function renderPayDue() {
+    var w = payWeek_(), week = 0, old = 0;
+    expRows_().forEach(function (r) {
+      var p = payPeriodOf_(r);
+      if (p === 'week') week += Number(r.total) || 0;
+      else if (p === 'overdue') old += Number(r.total) || 0;
+    });
+    function sh(iso) { var p = iso.split('-'); return p[2] + '.' + p[1]; }
+    document.getElementById('payWeekRange').textContent = sh(w.mon) + '–' + sh(w.sun);
+    document.getElementById('payDueWeek').textContent = money_(week);
+    document.getElementById('payDueOld').textContent = money_(old);
+    document.getElementById('payDueTotal').textContent = money_(week + old);
+    document.querySelectorAll('.payDueRow').forEach(function (b) { b.classList.toggle('on', b.dataset.period === payPeriod); });
+    var note = document.getElementById('payPeriodNote');
+    note.hidden = !payPeriod;
+    if (payPeriod) {
+      note.innerHTML = '<span>Отбор: ' + ({ week: 'на этой неделе', overdue: 'долг прошлых недель', due: 'всё к оплате' })[payPeriod] +
+        '</span><button type="button" id="payPeriodClear">× Сбросить</button>';
+    }
+  }
   var PAY_SHOW_MAX = 400;
   function payKey_(r) {
     return [r.date, String(r.worker || '').trim(), String(r.object || '').trim(), Number(r.rate) || 0,
@@ -4777,7 +4845,10 @@
     var rows = expRows_();
     var q = expKey_(document.getElementById('paySearch').value);
     return rows.filter(function (r) {
-      if (payStatus !== '*' && expKey_(r.status) !== payStatus) return false;
+      if (payPeriod) {
+        var pp = payPeriodOf_(r);
+        if (!pp || (payPeriod !== 'due' && pp !== payPeriod)) return false;
+      } else if (payStatus !== '*' && expKey_(r.status) !== payStatus) return false;
       if (payBrig && (r.brigadier || NO_BRIG) !== payBrig) return false;
       if (payWorker && r.worker !== payWorker) return false;
       if (payObj && r.object !== payObj) return false;
@@ -4797,12 +4868,16 @@
     if (payStatus === null) payStatus = present['не оплачено'] ? 'не оплачено' : '*';
     document.getElementById('payChips').innerHTML = ['*'].concat(order).map(function (k) {
       var name = k === '*' ? 'Все' : names[k];
-      return '<button type="button" class="expChip' + (k === payStatus ? ' on' : '') + '" data-k="' + escapeHtml(k) + '">' +
+      return '<button type="button" class="expChip' + (k === payStatus && !payPeriod ? ' on' : '') + '" data-k="' + escapeHtml(k) + '">' +
         (k === '*' ? '' : '<span class="dot" style="background:' + escapeHtml(expStatusColor_(name)) + '"></span>') + escapeHtml(name) + '</button>';
     }).join('');
 
     // Выпадающие фильтры — значения из записей под выбранным статусом.
-    var byStatus = rows.filter(function (r) { return payStatus === '*' || expKey_(r.status) === payStatus; });
+    var byStatus = rows.filter(function (r) {
+      if (payPeriod) { var pp = payPeriodOf_(r); return pp && (payPeriod === 'due' || pp === payPeriod); }
+      return payStatus === '*' || expKey_(r.status) === payStatus;
+    });
+    renderPayDue();
     function fill_(id, values, current, allLabel) {
       var uniq = {}; values.forEach(function (x) { if (x) uniq[x] = true; }); if (current) uniq[current] = true;
       var sel = document.getElementById(id);
@@ -4938,7 +5013,7 @@
   });
   document.getElementById('payChips').addEventListener('click', function (e) {
     var c = e.target.closest('.expChip'); if (!c) return;
-    payStatus = c.dataset.k; paySel = {}; payOpen = {}; renderPay();
+    payStatus = c.dataset.k; payPeriod = ''; paySel = {}; payOpen = {}; renderPay();
   });
   [['payBrigFilter', function (v) { payBrig = v; payWorker = ''; }], ['payWorkerFilter', function (v) { payWorker = v; }],
    ['payObjFilter', function (v) { payObj = v; }]].forEach(function (f) {
@@ -4971,6 +5046,16 @@
         loadExpOverview(function (err) { if (!err) renderPay(); else updatePaySel([]); });
       })
       .catch(function (err) { btn.disabled = false; msg.textContent = 'Ошибка соединения: ' + err; msg.className = 'error'; });
+  });
+  document.getElementById('payDue').addEventListener('click', function (e) {
+    var b = e.target.closest('.payDueRow'); if (!b || !expOverview) return;
+    payPeriod = payPeriod === b.dataset.period ? '' : b.dataset.period;
+    paySel = {}; payOpen = {};
+    renderPay();
+  });
+  document.getElementById('payPeriodNote').addEventListener('click', function (e) {
+    if (e.target.id !== 'payPeriodClear') return;
+    payPeriod = ''; paySel = {}; payOpen = {}; renderPay();
   });
   document.getElementById('payBackLink').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('expGoPayBtn').addEventListener('click', function () { showExpPayScreen(); });
