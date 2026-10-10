@@ -984,8 +984,10 @@
   .expDays td.del { width: 42px; padding: 4px 8px 4px 0; text-align: right; }
   .expDays tr:has(td.del) td:not(.del) { padding-left: 8px; padding-right: 6px; }
   .expDelRow { width: 32px; height: 32px; margin: 0; padding: 0; background: none; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text); }
-  .expDelPerson { display: block; width: calc(100% - 20px); margin: 8px 10px 10px; padding: 10px; font-size: 14px; font-weight: 600;
-    background: none; color: var(--red); border: 1px solid var(--red); border-radius: 10px; }
+  .expPersonHeadRow { display: flex; align-items: flex-start; }
+  .expPersonHeadRow .expPersonHead { flex: 1; min-width: 0; }
+  .expDelPerson { flex: none; width: 36px; height: 36px; margin: 10px 10px 0 -4px; padding: 0; font-size: 15px;
+    background: none; color: var(--red); border: 1px solid var(--red); border-radius: 8px; }
   .brigadeList { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; }
   .brigadeRow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .brigadeRow:last-child { border-bottom: none; }
@@ -4556,15 +4558,18 @@
               '<td class="num">' + money_(r.total) + '</td>' +
               (r.row ? '<td class="del"><button type="button" class="expDelRow" data-row="' + r.row + '" aria-label="Удалить запись ' +
                 escapeHtml(fmtIsoRu_(r.date || '')) + '">🗑</button></td>' : '') + '</tr>';
-          }).join('') + '</table>' +
-          (g.rows.some(function (r) { return r.row; }) ? '<button type="button" class="expDelPerson" data-name="' + escapeHtml(g.name) + '">' +
-            'Удалить все записи «' + escapeHtml(g.name) + '» (' + g.rows.length + ') — ' + money_(g.sum) + '</button>' : '') + '</div>';
+          }).join('') + '</table></div>';
         }
       }
-      return '<div class="expPerson"><button type="button" class="expPersonHead" data-name="' + escapeHtml(g.name) + '" aria-expanded="' + open + '">' +
+      // Корзина «удалить все записи человека» — только у раскрытой карточки.
+      var canDelAll = open && !groupByBrig && g.rows.some(function (r) { return r.row; });
+      return '<div class="expPerson"><div class="expPersonHeadRow">' +
+        '<button type="button" class="expPersonHead" data-name="' + escapeHtml(g.name) + '" aria-expanded="' + open + '">' +
         '<div class="expPersonTop"><span class="expPersonName">' + (groupByBrig && g.name !== NO_BRIG ? 'Бригада: ' : '') + escapeHtml(g.name) + '</span>' +
         '<span class="expPersonSum">' + money_(g.sum) + '</span></div>' +
-        '<div class="expPersonMeta">' + meta + '</div>' + pills_(g) + '</button>' + details + '</div>';
+        '<div class="expPersonMeta">' + meta + '</div>' + pills_(g) + '</button>' +
+        (canDelAll ? '<button type="button" class="expDelPerson" data-name="' + escapeHtml(g.name) + '" aria-label="Удалить все записи: ' +
+          escapeHtml(g.name) + '">🗑</button>' : '') + '</div>' + details + '</div>';
     }).join('');
   }
   function setExpMode_(mode) {
