@@ -1973,7 +1973,13 @@
   // администрирования объектов/ставок доступны по-прежнему только через
   // переходы внутри приложения — в самой навигации у них нет отдельного
   // значка, чтобы не перегружать её.
-  function showBottomNav() { bottomNav.classList.add('visible'); }
+  function showBottomNav() {
+    bottomNav.classList.add('visible');
+    // Значок «Расходы» — по сохранённому статусу администратора, на любом
+    // экране (а не только после захода на «Приход», где статус обновляется).
+    var navExp = document.getElementById('navExpBtn');
+    if (navExp && currentUser && currentUser.phone) navExp.classList.toggle('isAdmin', !!loadAdminStatusCache(currentUser.phone));
+  }
   function hideBottomNav() { bottomNav.classList.remove('visible'); }
 
   var NAV_ACTIVE_MAP = {
@@ -4686,6 +4692,8 @@
       });
   });
   if (currentUser && currentUser.name && currentUser.phone) {
+    // Статус администратора проверяем при любом стартовом экране.
+    refreshAdminStatus();
     // После обновления страницы — тот же экран, что был открыт.
     var restoreState = (history.state && history.state.screen) ? history.state
       : (location.hash.length > 1 ? { screen: decodeURIComponent(location.hash.slice(1)) } : null);
