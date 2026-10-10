@@ -1,3 +1,7 @@
+// v55: смена статуса из «Расходы по людям» (карандаш у записи/человека).
+//      adminSetExpenseStatus(phone, items, status, payDate, reason): если
+//      хоть одна запись была «ОПЛАЧЕНО», а новый статус другой — причина
+//      обязательна (пишется в журнал изменений).
 // v54: частичная оплата смены — adminSplitExpenseRow(phone, items [{row, key,
 //      pay}]): строка делится на две с той же датой: в исходной остаётся
 //      оплачиваемая часть (Ставка = pay, комментарий «Частичная оплата,
@@ -440,7 +444,7 @@ function doPost(e) {
       return jsonOutput(adminDeleteExpenseRows(data.phone, data.items, data.reason));
     }
     if (data.action === 'adminSetExpenseStatus') {
-      return jsonOutput(adminSetExpenseStatus(data.phone, data.items, data.status, data.payDate));
+      return jsonOutput(adminSetExpenseStatus(data.phone, data.items, data.status, data.payDate, data.reason));
     }
     if (data.action === 'adminExpenseOverview') {
       return jsonOutput(adminExpenseOverview(data.phone));
@@ -3668,7 +3672,7 @@ function adminDeleteExpenseRows(phone, items, reason) {
 
 // Смена статуса у выбранных строк. payDate: 'yyyy-MM-dd' — поставить дату
 // погашения, '' — очистить, null/undefined — не трогать.
-function adminSetExpenseStatus(phone, items, status, payDate) {
+function adminSetExpenseStatus(phone, items, status, payDate, reason) {
   var auth = adminAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   if (!items || !items.length) return { status: 'error', message: 'Не выбрано ни одной записи' };
@@ -3718,8 +3722,15 @@ function adminSetExpenseStatus(phone, items, status, payDate) {
       rng.setValues(out);
       if (numberFormat) rng.setNumberFormat(numberFormat);
     }
+    reason = String(reason || '').trim().slice(0, 500);
+    var unpaying = String(picked).toLowerCase() !== 'оплачено' && Object.keys(rowsToSet).some(function (r) {
+      return String(data[r - first][cols.status - 1] || '').trim().toLowerCase() === 'оплачено';
+    });
+    if (unpaying && reason.length < 3) {
+      return { status: 'error', message: 'Укажите причину: снимается статус «ОПЛАЧЕНО»', needReason: true };
+    }
     if (updated) {
-      logExpenseChanges_(auth, 'Смена статуса', '', Object.keys(rowsToSet).map(Number).sort(function (a, b) { return a - b; })
+      logExpenseChanges_(auth, 'Смена статуса', reason, Object.keys(rowsToSet).map(Number).sort(function (a, b) { return a - b; })
         .map(function (r) { return { row: r, values: data[r - first], newStatus: picked }; }), lay);
       writeCol_(cols.status, picked);
       if (pay !== null && cols.payDate) writeCol_(cols.payDate, pay, pay === '' ? null : 'dd.MM.yyyy');
