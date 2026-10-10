@@ -850,6 +850,10 @@
   .payDueRow.total .val { font-size: 15px; font-weight: 600; color: var(--muted); }
   .payDueRow.on { background: rgba(66,133,244,0.16); outline: 1px solid var(--blue); }
   .payDueHint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .payForecast { padding: 0 10px 8px; }
+  .payForecast .fcRow { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; color: var(--muted); }
+  .payForecast .fcRow b { color: var(--text); font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .payForecast .fcBasis { font-size: 11px; color: var(--muted); margin-top: 1px; }
   .payPeriodNote { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--blue); font-weight: 600; margin-bottom: 8px; }
   .payPeriodNote button { width: auto; margin: 0; padding: 4px 10px; font-size: 13px; background: none; color: var(--blue); border: 1px solid var(--blue); border-radius: 999px; }
   .payFilters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
@@ -1584,6 +1588,7 @@
         <span class="lbl">На этой неделе <span id="payWeekRange" class="sub"></span></span>
         <span id="payDueWeek" class="val">—</span>
       </button>
+      <div class="payForecast" id="payForecast"></div>
       <button type="button" class="payDueRow" data-period="overdue">
         <span class="lbl">Долг прошлых недель</span>
         <span id="payDueOld" class="val">—</span>
@@ -4773,6 +4778,41 @@
     if (r.date > w.sun) return '';
     return r.date >= w.mon ? 'week' : 'overdue';
   }
+  // Прогноз на следующую неделю = средние расходы за 4 последние полные
+  // недели (без платежей по договорам — они разовые) + платежи по договорам,
+  // уже стоящие на следующую неделю. Недели до первой записи не считаются.
+  function renderPayForecast(w) {
+    function isoAdd(iso, days) {
+      var p = iso.split('-'), d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + days);
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function sh(iso) { var p = iso.split('-'); return p[2] + '.' + p[1]; }
+    var rows = expRows_();
+    function isContract(r) { return /^Договор\s/.test(String(r.comment || '')); }
+    var firstDate = rows.reduce(function (m, r) { return r.date && (!m || r.date < m) ? r.date : m; }, '');
+    var weeks = [];
+    for (var k = 1; k <= 4; k++) {
+      var mon = isoAdd(w.mon, -7 * k), sun = isoAdd(mon, 6);
+      if (firstDate && sun < firstDate) break;
+      weeks.push({ mon: mon, sun: sun, sum: 0 });
+    }
+    rows.forEach(function (r) {
+      if (!r.date || isContract(r)) return;
+      weeks.forEach(function (wk) { if (r.date >= wk.mon && r.date <= wk.sun) wk.sum += Number(r.total) || 0; });
+    });
+    var avg = weeks.length ? weeks.reduce(function (a, wk) { return a + wk.sum; }, 0) / weeks.length : 0;
+    var nMon = isoAdd(w.mon, 7), nSun = isoAdd(w.mon, 13);
+    var contracts = rows.reduce(function (a, r) {
+      return a + (isContract(r) && r.date >= nMon && r.date <= nSun && expKey_(r.status) !== 'оплачено' ? (Number(r.total) || 0) : 0);
+    }, 0);
+    var el = document.getElementById('payForecast');
+    if (!weeks.length && !contracts) { el.textContent = ''; return; }
+    el.innerHTML = '<div class="fcRow"><span>Прогноз на след. неделю ' + sh(nMon) + '–' + sh(nSun) + '</span>' +
+      '<b>≈ ' + money_(Math.round((avg + contracts) / 100) * 100) + '</b></div>' +
+      '<div class="fcBasis">' + (weeks.length ? 'в среднем ' + money_(Math.round(avg)) + ' в неделю за ' + weeks.length + ' ' +
+        (weeks.length === 1 ? 'неделю' : 'недели') : 'истории расходов пока нет') +
+      (contracts ? ' + по договорам ' + money_(contracts) : '') + '</div>';
+  }
   function renderPayDue() {
     var w = payWeek_(), week = 0, old = 0;
     expRows_().forEach(function (r) {
@@ -4785,6 +4825,7 @@
     document.getElementById('payDueWeek').textContent = money_(week);
     document.getElementById('payDueOld').textContent = money_(old);
     document.getElementById('payDueTotal').textContent = money_(week + old);
+    renderPayForecast(w);
     document.querySelectorAll('.payDueRow').forEach(function (b) { b.classList.toggle('on', b.dataset.period === payPeriod); });
     var note = document.getElementById('payPeriodNote');
     note.hidden = !payPeriod;
