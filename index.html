@@ -1034,24 +1034,9 @@
   .expDelRow, .expDelPerson { display: inline-flex; align-items: center; justify-content: center; }
   .expDelRow { width: 32px; height: 32px; margin: 0; padding: 0; background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
   .expDelRow:hover, .expDelPerson:hover { color: var(--red); border-color: var(--red); }
-  .expEditRow, .expEditPerson { display: inline-flex; align-items: center; justify-content: center; margin: 6px 0 0; padding: 0;
-    background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
-  .expEditRow { width: 32px; height: 32px; }
-  .expEditRow:hover, .expEditPerson:hover { color: var(--blue); border-color: var(--blue); }
-  .expActs { display: flex; flex-direction: column; align-items: flex-end; }
-  .expDays td.num .expActs { margin-top: 8px; }
-  .expPersonHeadRow .expActs { flex: none; margin: 10px 10px 0 -4px; }
-  .expPersonHeadRow .expActs .expDelPerson { margin: 0; }
-  .expEditPerson { width: 36px; height: 36px; }
+  .expDays td.num .expDelRow { margin-top: 8px; }
   .expDays tr.pick { cursor: pointer; }
   .expDays tr.sel td { background: var(--bg); }
-  .stOpts { display: grid; gap: 6px; margin: 10px 0; }
-  .stOpt { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0; padding: 11px 12px; text-align: left;
-    background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font-weight: 600; font-size: 14px; }
-  .stOpt .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .stOpt.on { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
-  .stOpt.cur { opacity: .55; }
-  .stOpt .cur { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); }
   .expPersonHeadRow { display: flex; align-items: flex-start; }
   .expPersonHeadRow .expPersonHead { flex: 1; min-width: 0; }
   .expDelPerson { flex: none; width: 36px; height: 36px; margin: 10px 10px 0 -4px; padding: 0;
@@ -1968,33 +1953,14 @@
       <h2 id="cfTitle" style="margin-top:0; color: var(--text);">Удалить?</h2>
       <div id="cfText" class="modalText" style="font-size:14px;"></div>
       <div id="cfReasonWrap" hidden>
-        <label id="cfReasonLabel" for="cfReason" style="margin-top:10px;">Причина удаления *</label>
+        <label for="cfReason" style="margin-top:10px;">Причина удаления *</label>
         <input id="cfReason" type="text" maxlength="500" autocomplete="off" placeholder="Например: дубль, ошибка в ставке">
-        <div id="cfReasonHint" class="ctHint" style="margin-top:-8px;">Удаление, причина и все данные записи сохраняются в журнале изменений.</div>
+        <div class="ctHint" style="margin-top:-8px;">Удаление, причина и все данные записи сохраняются в журнале изменений.</div>
       </div>
       <div id="cfStatus"></div>
       <div class="calBtns">
         <button id="cfCancel" type="button" class="calCancel">Отмена</button>
         <button id="cfOk" type="button" style="background: var(--red);">Удалить</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Смена статуса записи / всех записей человека -->
-  <div id="statusModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="stTitle">
-    <div class="modalBox">
-      <h2 id="stTitle" style="margin-top:0; color: var(--text);">Сменить статус</h2>
-      <div id="stText" class="modalText" style="font-size:14px;"></div>
-      <div id="stOpts" class="stOpts" role="radiogroup" aria-label="Новый статус"></div>
-      <div id="stReasonWrap" hidden>
-        <label for="stReason">Причина снятия «ОПЛАЧЕНО» *</label>
-        <input id="stReason" type="text" maxlength="500" autocomplete="off" placeholder="Например: оплату вернули, ошибка">
-        <div class="ctHint" style="margin-top:-8px;">Смена статуса и причина сохраняются в журнале изменений.</div>
-      </div>
-      <div id="stStatus"></div>
-      <div class="calBtns">
-        <button id="stCancel" type="button" class="calCancel">Отмена</button>
-        <button id="stOk" type="button" disabled>Сохранить</button>
       </div>
     </div>
   </div>
@@ -4443,7 +4409,7 @@
   var expOverview = null;          // ответ adminExpenseOverview
   var expViewStatus = null;        // выбранный статус ('' — без статуса, '*' — все)
   var expOpenPeople = {};          // раскрытые карточки
-  var expPickRow = '';             // запись, у которой показаны корзина и карандаш
+  var expPickRow = '';             // запись, у которой показана корзина
   function expKey_(t) { return String(t || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
   function money_(n) { return Math.round(Number(n) || 0).toLocaleString('ru-RU') + ' ₽'; }
   function hideAllForExp_() {
@@ -4691,24 +4657,20 @@
                 escapeHtml(expStatusColor_(r.status)) + '"></span> ' + escapeHtml(r.status || 'Без статуса') + '</div>' : '') +
               (r.payDate ? '<div class="sub">погашено ' + fmtIsoRu_(r.payDate) + '</div>' : '') + '</td>' +
               '<td class="num">' + money_(r.total) +
-              (picked ? '<div class="expActs"><button type="button" class="expDelRow" data-row="' + r.row + '" aria-label="Удалить запись ' +
-                escapeHtml(fmtIsoRu_(r.date || '')) + '">' + ICON_TRASH + '</button>' +
-                '<button type="button" class="expEditRow" data-row="' + r.row + '" aria-label="Сменить статус записи ' +
-                escapeHtml(fmtIsoRu_(r.date || '')) + '">' + ICON_PEN + '</button></div>' : '') + '</td></tr>';
+              (picked ? '<br><button type="button" class="expDelRow" data-row="' + r.row + '" aria-label="Удалить запись ' +
+                escapeHtml(fmtIsoRu_(r.date || '')) + '">' + ICON_TRASH + '</button>' : '') + '</td></tr>';
           }).join('') + '</table></div>';
         }
       }
-      // Корзина и карандаш для всех записей человека — только у раскрытой карточки.
+      // Корзина «удалить все записи человека» — только у раскрытой карточки.
       var canDelAll = open && !g.isBrig && g.rows.some(function (r) { return r.row; });
       return '<div class="expPerson"><div class="expPersonHeadRow">' +
         '<button type="button" class="expPersonHead" data-name="' + escapeHtml(g.name) + '" data-key="' + escapeHtml(g.key) + '" aria-expanded="' + open + '">' +
         '<div class="expPersonTop"><span class="expPersonName">' + (g.isBrig ? 'Бригада: ' : '') + escapeHtml(g.name) + '</span>' +
         '<span class="expPersonSum">' + money_(g.sum) + '</span></div>' +
         '<div class="expPersonMeta">' + meta + '</div>' + pills_(g) + '</button>' +
-        (canDelAll ? '<div class="expActs"><button type="button" class="expDelPerson" data-name="' + escapeHtml(g.name) + '" aria-label="Удалить все записи: ' +
-          escapeHtml(g.name) + '">' + ICON_TRASH + '</button>' +
-          '<button type="button" class="expEditPerson" data-name="' + escapeHtml(g.name) + '" aria-label="Сменить статус всех записей: ' +
-          escapeHtml(g.name) + '">' + ICON_PEN + '</button></div>' : '') + '</div>' + details + '</div>';
+        (canDelAll ? '<button type="button" class="expDelPerson" data-name="' + escapeHtml(g.name) + '" aria-label="Удалить все записи: ' +
+          escapeHtml(g.name) + '">' + ICON_TRASH + '</button>' : '') + '</div>' + details + '</div>';
     }).join('');
   }
   function setExpMode_(mode) {
@@ -4738,11 +4700,7 @@
   var cfModal = document.getElementById('confirmModal'), cfAction = null;
   // Линейные иконки в стиле нижней панели (без эмодзи).
   var ICON_TRASH = '<svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l.8 12.2a1.8 1.8 0 0 0 1.8 1.8h5.8a1.8 1.8 0 0 0 1.8-1.8L17.5 7"/><path d="M10 11v6M14 11v6"/></svg>';
-  var ICON_PEN = '<svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
-  function askConfirm(title, html, okLabel, action, needReason, reasonLabel, reasonHint) {
-    document.getElementById('cfReasonLabel').textContent = reasonLabel || 'Причина удаления *';
-    document.getElementById('cfReasonHint').textContent = reasonHint || 'Удаление, причина и все данные записи сохраняются в журнале изменений.';
-    document.getElementById('cfOk').style.background = reasonLabel ? '' : 'var(--red)';
+  function askConfirm(title, html, okLabel, action, needReason) {
     document.getElementById('cfReasonWrap').hidden = !needReason;
     document.getElementById('cfReason').value = '';
     if (needReason) setTimeout(function () { document.getElementById('cfReason').focus(); }, 50);
@@ -4798,90 +4756,6 @@
       })
       .catch(function (err) { okBtn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
   }
-  function personRowIds_(btn) {
-    return Array.prototype.map.call(btn.closest('.expPerson').querySelectorAll('tr.pick'), function (t) { return t.dataset.row; });
-  }
-  function personRows_(btn) {
-    var ids = personRowIds_(btn);
-    return viewRowsOf_(function (x) { return ids.indexOf(String(x.row)) >= 0; });
-  }
-
-  // ----- Смена статуса из «Расходы по людям» -----
-  var stModal = document.getElementById('statusModal'), stRows = [], stPick = '';
-  function isPaid_(st) { return expKey_(st || '') === 'оплачено'; }
-  function openStatusModal_(rows, html) {
-    stRows = rows; stPick = '';
-    document.getElementById('stText').innerHTML = html;
-    document.getElementById('stReason').value = '';
-    document.getElementById('stStatus').textContent = ''; document.getElementById('stStatus').className = '';
-    var curs = {}; rows.forEach(function (r) { curs[r.status || ''] = true; });
-    var only = Object.keys(curs).length === 1 ? Object.keys(curs)[0] : null;
-    document.getElementById('stOpts').innerHTML = payStatusOptions_().map(function (st) {
-      var isCur = only !== null && st === only;
-      return '<button type="button" class="stOpt' + (isCur ? ' cur' : '') + '" role="radio" aria-checked="false" data-st="' + escapeHtml(st) + '"' +
-        (isCur ? ' disabled' : '') + '><span class="dot" style="background:' + escapeHtml(expStatusColor_(st)) + '"></span>' +
-        escapeHtml(st) + (isCur ? '<span class="cur">сейчас</span>' : '') + '</button>';
-    }).join('');
-    updateStatusModal_();
-    stModal.classList.add('open');
-  }
-  function stNeedsReason_() {
-    return !!stPick && !isPaid_(stPick) && stRows.some(function (r) { return isPaid_(r.status) && r.status !== stPick; });
-  }
-  function updateStatusModal_() {
-    document.querySelectorAll('#stOpts .stOpt').forEach(function (b) {
-      var on = b.dataset.st === stPick; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on));
-    });
-    var need = stNeedsReason_();
-    document.getElementById('stReasonWrap').hidden = !need;
-    document.getElementById('stOk').disabled = !stPick;
-  }
-  function closeStatusModal_() { stModal.classList.remove('open'); stRows = []; }
-  document.getElementById('stOpts').addEventListener('click', function (e) {
-    var b = e.target.closest('.stOpt'); if (!b || b.disabled) return;
-    stPick = b.dataset.st; updateStatusModal_();
-    if (stNeedsReason_()) setTimeout(function () { document.getElementById('stReason').focus(); }, 50);
-  });
-  document.getElementById('stCancel').addEventListener('click', closeStatusModal_);
-  stModal.addEventListener('click', function (e) { if (e.target === stModal) closeStatusModal_(); });
-  document.getElementById('stOk').addEventListener('click', function () {
-    var okBtn = this, st = document.getElementById('stStatus');
-    var rows = stRows.filter(function (r) { return r.status !== stPick; });
-    if (!rows.length) { st.textContent = 'У выбранных записей уже этот статус'; st.className = 'error'; return; }
-    var reason = document.getElementById('stReason').value.trim();
-    if (stNeedsReason_() && reason.length < 3) {
-      st.textContent = 'Укажите причину снятия «ОПЛАЧЕНО»'; st.className = 'error';
-      document.getElementById('stReason').focus(); return;
-    }
-    // ОПЛАЧЕНО → дата погашения сегодня; любой другой статус → дата погашения очищается.
-    var payDate = isPaid_(stPick) ? isoToday_() : '';
-    okBtn.disabled = true; st.textContent = 'Сохраняю…'; st.className = '';
-    apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: stPick, payDate: payDate, reason: reason,
-      items: rows.map(function (r) { return { row: r.row, key: payKey_(r) }; }) })
-      .then(function (res) {
-        if (!res || res.status !== 'ok') {
-          okBtn.disabled = false;
-          st.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v55';
-          st.className = 'error'; return;
-        }
-        closeStatusModal_();
-        var tot = document.getElementById('expTotals');
-        expOverview = null; expPickRow = '';
-        loadExpOverview(function (err) {
-          if (err) { document.getElementById('expPeople').innerHTML = '<div class="statsEmpty">' + escapeHtml(err) + '</div>'; return; }
-          renderExpView();
-          var note = document.createElement('div');
-          note.className = res.conflicts ? 'error' : 'success';
-          note.style.margin = '0 0 8px';
-          note.textContent = '✓ Статус «' + res.newStatus + '»: ' + res.updated + ' зап.' +
-            (res.conflicts ? '. ' + res.conflicts + ' зап. изменились в таблице и не тронуты — проверьте список' : '');
-          tot.parentNode.insertBefore(note, tot);
-          setTimeout(function () { if (note.parentNode) note.parentNode.removeChild(note); }, 6000);
-        });
-      })
-      .catch(function (err) { okBtn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
-  });
-
   function viewRowsOf_(predicate) {
     // те же фильтры, что сейчас на экране, — берём строки из текущего обзора
     return expRows_().filter(predicate);
@@ -4898,27 +4772,9 @@
         'Удалить', function () { deleteExpenseRows_([r], r.worker); }, true);
       return;
     }
-    var er = e.target.closest('.expEditRow');
-    if (er) {
-      var r1 = viewRowsOf_(function (x) { return String(x.row) === er.dataset.row; })[0];
-      if (r1) openStatusModal_([r1], '<b>' + escapeHtml(r1.worker) + '</b>, ' + escapeHtml(r1.date ? fmtIsoRu_(r1.date) : '—') + ', ' +
-        escapeHtml(r1.object || '—') + ' — <b>' + money_(r1.total) + '</b>');
-      return;
-    }
-    var ep = e.target.closest('.expEditPerson');
-    if (ep) {
-      var rowsE = personRows_(ep);
-      if (!rowsE.length) return;
-      openStatusModal_(rowsE, '<b>' + escapeHtml(ep.dataset.name) + '</b>: ' + rowsE.length + ' зап. на <b>' +
-        money_(rowsE.reduce(function (a, x) { return a + (Number(x.total) || 0); }, 0)) + '</b>.<br>' +
-        'Меняются только записи, которые сейчас видны с выбранными фильтрами.');
-      return;
-    }
-    var pr = e.target.closest('tr.pick');
-    if (pr) { expPickRow = expPickRow === pr.dataset.row ? '' : pr.dataset.row; renderExpView(); return; }
     var dp = e.target.closest('.expDelPerson');
     if (dp) {
-      var rowsSel = personRowIds_(dp);
+      var rowsSel = Array.prototype.map.call(dp.closest('.expPerson').querySelectorAll('tr.pick'), function (t) { return t.dataset.row; });
       var rows = viewRowsOf_(function (x) { return rowsSel.indexOf(String(x.row)) >= 0; });
       if (!rows.length) return;
       var sum = rows.reduce(function (a, x) { return a + (Number(x.total) || 0); }, 0);
@@ -4928,6 +4784,8 @@
         'Удалить ' + rows.length + ' зап.', function () { deleteExpenseRows_(rows, dp.dataset.name); }, true);
       return;
     }
+    var pr = e.target.closest('tr.pick');
+    if (pr) { expPickRow = expPickRow === pr.dataset.row ? '' : pr.dataset.row; renderExpView(); return; }
     var ob = e.target.closest('.expOpenBrig');
     if (ob) { expBrigFilter = ob.dataset.brig; expOpenPeople = {}; renderExpView(); return; }
     var h = e.target.closest('.expPersonHead');
@@ -5455,31 +5313,13 @@
 
   document.getElementById('payApply').addEventListener('click', function () {
     var btn = this, msg = document.getElementById('payMsg');
-    var selRows = payFiltered_().filter(function (r) { return paySel[r.row]; });
-    var items = selRows.map(function (r) { return { row: r.row, key: payKey_(r) }; });
+    var items = payFiltered_().filter(function (r) { return paySel[r.row]; }).map(function (r) { return { row: r.row, key: payKey_(r) }; });
     if (!items.length) return;
     var status = document.getElementById('payNewStatus').value;
     var payDate = document.getElementById('payDate').value;
-    // Снятие «ОПЛАЧЕНО» — только с причиной (пишется в журнал).
-    var unpaid = !isPaid_(status) ? selRows.filter(function (r) { return isPaid_(r.status); }) : [];
-    if (unpaid.length) {
-      askConfirm('Снять «ОПЛАЧЕНО»?', unpaid.length + ' зап. со статусом «ОПЛАЧЕНО» станут «' + escapeHtml(status) + '».',
-        'Сменить статус', function () {
-          var reason = document.getElementById('cfReason').value.trim();
-          if (reason.length < 3) {
-            var st = document.getElementById('cfStatus');
-            st.textContent = 'Укажите причину'; st.className = 'error'; document.getElementById('cfReason').focus(); return;
-          }
-          closeConfirm();
-          sendPay_(reason);
-        }, true, 'Причина снятия «ОПЛАЧЕНО» *', 'Смена статуса и причина сохраняются в журнале изменений.');
-      return;
-    }
-    sendPay_('');
-    function sendPay_(reason) {
     btn.disabled = true; msg.textContent = 'Меняю статус…'; msg.className = '';
     apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, items: items, status: status,
-      payDate: payDate ? payDate : null, reason: reason })
+      payDate: payDate ? payDate : null })
       .then(function (res) {
         if (!res || res.status !== 'ok') {
           btn.disabled = false;
@@ -5495,7 +5335,6 @@
         loadExpOverview(function (err) { if (!err) renderPay(); else updatePaySel([]); });
       })
       .catch(function (err) { btn.disabled = false; msg.textContent = 'Ошибка соединения: ' + err; msg.className = 'error'; });
-    }
   });
   document.getElementById('pdInfoBtn').addEventListener('click', function () {
     var info = document.getElementById('pdInfo');
