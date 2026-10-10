@@ -4763,12 +4763,18 @@
     // Все строки сводки — равноправные статусы. Если в шапке таблицы у статуса
     // нет суммы (как у «Под отчет»), считаем её по строкам с этим статусом.
     var rows = expRows_();
-    box.innerHTML = '<div class="expSumList">' + items.map(function (x) {
+    // Нулевые статусы не показываем — экономим место.
+    var shown = items.map(function (x) {
       var value = x.value;
       if (value === null || value === undefined) {
         var k = expKey_(x.label);
         value = rows.reduce(function (a, r) { return a + (expKey_(r.status) === k ? (Number(r.total) || 0) : 0); }, 0);
       }
+      return { label: x.label, color: x.color, value: value };
+    }).filter(function (x) { return Math.round(Number(x.value) || 0) !== 0; });
+    if (!shown.length) { box.innerHTML = '<div class="statsEmpty">Все статусы по нулям</div>'; }
+    else box.innerHTML = '<div class="expSumList">' + shown.map(function (x) {
+      var value = x.value;
       var color = x.color && !/^#?(fff|ffffff)$/i.test(x.color) ? x.color : 'var(--border)';
       return '<button type="button" class="expSumTile" data-status="' + escapeHtml(x.label) + '">' +
         '<span class="swatch" style="background:' + escapeHtml(color) + '"></span>' +
