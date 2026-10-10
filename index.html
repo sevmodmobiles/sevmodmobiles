@@ -857,6 +857,31 @@
   .pdInfo { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
   .payPeriodNote { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--blue); font-weight: 600; margin-bottom: 8px; }
   .payPeriodNote button { width: auto; margin: 0; padding: 4px 10px; font-size: 13px; background: none; color: var(--blue); border: 1px solid var(--blue); border-radius: 999px; }
+  .allocOpenBtn { width: 100%; margin: -4px 0 12px; padding: 10px; font-size: 14px; font-weight: 600; background: none;
+    color: var(--blue); border: 1px dashed var(--blue); border-radius: 10px; }
+  .allocBox { max-height: 88vh; }
+  .allocPool { font-size: 13px; color: var(--muted); margin-bottom: 10px; line-height: 1.4; }
+  .allocGroups { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
+  .allocG { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .allocG:last-child { border-bottom: none; }
+  .allocG.off .allocName, .allocG.off .allocDebt { color: var(--muted); text-decoration: line-through; }
+  .allocG input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--green); }
+  .allocNo { width: 18px; font-size: 12px; color: var(--muted); text-align: center; flex: none; font-variant-numeric: tabular-nums; }
+  .allocName { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .allocDebt { font-size: 13px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .allocMove { width: 30px; height: 30px; margin: 0; padding: 0; flex: none; display: inline-flex; align-items: center; justify-content: center;
+    background: none; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; }
+  .allocMove:disabled { opacity: 0.3; }
+  .allocMove .lineIcon { width: 16px; height: 16px; }
+  .allocResult { font-size: 13px; margin-bottom: 4px; }
+  .allocSum { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .allocSum b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .allocSum span { color: var(--muted); font-size: 12px; text-align: right; }
+  .allocRG { margin-bottom: 8px; }
+  .allocRG .h { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 13px; }
+  .allocRG .h span { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 500; }
+  .allocRG .p { display: flex; justify-content: space-between; gap: 8px; padding-left: 10px; color: var(--muted); }
+  .allocRG .p b { color: var(--text); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .payFilters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
   .payFilters select { margin: 0; min-width: 0; padding: 10px; font-size: 14px; }
   .payFilters select.active { border-color: var(--blue); color: var(--blue); font-weight: 600; }
@@ -1632,6 +1657,7 @@
         </select>
       </div>
       <input id="paySearch" type="search" placeholder="Поиск: имя, бригадир, объект, комментарий" autocomplete="off">
+      <button id="allocOpenBtn" type="button" class="allocOpenBtn">Не хватает денег — распределить сумму</button>
       <div class="payBar">
         <label><input id="payAll" type="checkbox"> Выбрать все</label>
         <span id="paySelInfo" class="paySel"></span>
@@ -1861,6 +1887,27 @@
       <div class="calBtns">
         <button id="awCancel" type="button" class="calCancel">Отмена</button>
         <button id="awSave" type="button">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Распределение суммы, которой не хватает на всё: целыми сменами, по приоритету -->
+  <div id="allocModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="allocTitle">
+    <div class="modalBox allocBox">
+      <h2 id="allocTitle" style="margin-top:0; color: var(--text);">Распределить сумму</h2>
+      <div id="allocPoolInfo" class="allocPool"></div>
+      <label for="allocBudget">Есть денег, ₽</label>
+      <input id="allocBudget" type="number" inputmode="decimal" min="0" step="any" placeholder="Например: 100000">
+      <div class="expSeg" role="tablist" aria-label="Приоритет по">
+        <button type="button" id="allocByBrig" class="on">По бригадам</button>
+        <button type="button" id="allocByPerson">По людям</button>
+      </div>
+      <label>Приоритет — сверху важнее. Снимите галочку, чтобы не платить в этот раз.</label>
+      <div id="allocGroups" class="allocGroups"></div>
+      <div id="allocResult" class="allocResult"></div>
+      <div class="calBtns">
+        <button id="allocCancel" type="button" class="calCancel">Отмена</button>
+        <button id="allocApply" type="button" disabled>Выбрать эти записи</button>
       </div>
     </div>
   </div>
@@ -5256,6 +5303,138 @@
     if (e.target.id !== 'payPeriodClear') return;
     payPeriod = ''; paySel = {}; payOpen = {}; renderPay();
   });
+  // ===== Распределение суммы: денег меньше, чем долг =====
+  // Платим только целыми записями (сменами). Деньги идут по приоритету групп
+  // сверху вниз; внутри группы — по кругу, по одной самой старой смене
+  // каждому человеку; не влезла следующая смена человека — он пропускается.
+  var allocBy = 'brig', allocOrder = { brig: [], person: [] }, allocOff = {}, allocPicked = [];
+  var ICON_UP = '<svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
+  var ICON_DOWN = '<svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  var allocModal = document.getElementById('allocModal');
+  function allocPool_() {
+    var list = payFiltered_();
+    var sel = list.filter(function (r) { return paySel[r.row]; });
+    return { rows: sel.length ? sel : list, fromSelection: sel.length > 0 };
+  }
+  function allocKey_(r) { return allocBy === 'brig' ? (r.brigadier || NO_BRIG) : (r.worker || '(без имени)'); }
+  function allocGroups_(rows) {
+    var g = {};
+    rows.forEach(function (r) { var k = allocKey_(r); (g[k] = g[k] || { key: k, rows: [], sum: 0 }); g[k].rows.push(r); g[k].sum += Number(r.total) || 0; });
+    // порядок: сохранённый, новые — по убыванию долга в конец
+    var order = allocOrder[allocBy].filter(function (k) { return g[k]; });
+    Object.keys(g).sort(function (a, b) { return g[b].sum - g[a].sum; }).forEach(function (k) { if (order.indexOf(k) < 0) order.push(k); });
+    allocOrder[allocBy] = order;
+    return order.map(function (k) { return g[k]; });
+  }
+  function allocCompute_(groups, budget) {
+    var left = budget, picked = [];
+    groups.forEach(function (g) {
+      if (allocOff[allocBy + ':' + g.key]) return;
+      var queues = {}, people = [];
+      g.rows.slice().sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); }).forEach(function (r) {
+        var w = r.worker || '(без имени)';
+        if (!queues[w]) { queues[w] = []; people.push(w); }
+        queues[w].push(r);
+      });
+      var active = people.slice();
+      while (active.length) {
+        var next = [];
+        active.forEach(function (w) {
+          var r = queues[w][0];
+          var amt = Number(r.total) || 0;
+          if (amt <= left) { left -= amt; picked.push(r); queues[w].shift(); if (queues[w].length) next.push(w); }
+          // не влезла самая старая смена — человек пропускается (без частичных оплат)
+        });
+        active = next;
+      }
+    });
+    return { picked: picked, used: budget - left, left: left };
+  }
+  function renderAlloc() {
+    var pool = allocPool_();
+    var debt = pool.rows.reduce(function (a, r) { return a + (Number(r.total) || 0); }, 0);
+    document.getElementById('allocPoolInfo').innerHTML = (pool.fromSelection ? 'Из отмеченных записей' : 'Из записей по текущим фильтрам') +
+      ': долг <b>' + money_(debt) + '</b> (' + pool.rows.length + ' зап.).';
+    document.getElementById('allocByBrig').classList.toggle('on', allocBy === 'brig');
+    document.getElementById('allocByPerson').classList.toggle('on', allocBy === 'person');
+    var groups = allocGroups_(pool.rows);
+    document.getElementById('allocGroups').innerHTML = groups.map(function (g, i) {
+      var off = !!allocOff[allocBy + ':' + g.key];
+      return '<div class="allocG' + (off ? ' off' : '') + '" data-k="' + escapeHtml(g.key) + '">' +
+        '<input type="checkbox"' + (off ? '' : ' checked') + ' aria-label="Платить: ' + escapeHtml(g.key) + '">' +
+        '<span class="allocNo">' + (i + 1) + '</span>' +
+        '<span class="allocName">' + escapeHtml(g.key) + '</span><span class="allocDebt">' + money_(g.sum) + '</span>' +
+        '<button type="button" class="allocMove" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="Выше">' + ICON_UP + '</button>' +
+        '<button type="button" class="allocMove" data-dir="1"' + (i === groups.length - 1 ? ' disabled' : '') + ' aria-label="Ниже">' + ICON_DOWN + '</button></div>';
+    }).join('') || '<div class="statsEmpty">Нет записей — измените фильтры</div>';
+
+    var budget = Number(String(document.getElementById('allocBudget').value).replace(',', '.')) || 0;
+    var res = document.getElementById('allocResult'), applyBtn = document.getElementById('allocApply');
+    if (!(budget > 0) || !groups.length) { res.innerHTML = ''; allocPicked = []; applyBtn.disabled = true; return; }
+    var a = allocCompute_(groups, budget);
+    allocPicked = a.picked;
+    var pickedSet = {}; a.picked.forEach(function (r) { pickedSet[r.row] = true; });
+    var html = '<div class="allocSum"><b>' + money_(a.used) + '</b><span>предлагаем из ' + money_(budget) +
+      (a.left > 0 ? '<br>останется ' + money_(a.left) : '') + '</span></div>';
+    if (budget >= debt) html += '<div class="allocPool">Денег хватает на весь долг.</div>';
+    groups.forEach(function (g) {
+      if (allocOff[allocBy + ':' + g.key]) return;
+      var paid = g.rows.filter(function (r) { return pickedSet[r.row]; });
+      var paidSum = paid.reduce(function (s2, r) { return s2 + (Number(r.total) || 0); }, 0);
+      html += '<div class="allocRG"><div class="h">' + escapeHtml(g.key) + '<span>' + money_(paidSum) + ' из ' + money_(g.sum) + '</span></div>';
+      var per = {};
+      paid.forEach(function (r) { var w = r.worker || '(без имени)'; (per[w] = per[w] || { n: 0, sum: 0, dates: [] }); per[w].n++; per[w].sum += Number(r.total) || 0; per[w].dates.push(r.date); });
+      var names = Object.keys(per);
+      if (!names.length) html += '<div class="p">ничего не влезло</div>';
+      names.forEach(function (w) {
+        var d = per[w].dates.sort().map(function (x) { var q = String(x).split('-'); return q.length === 3 ? q[2] + '.' + q[1] : '—'; });
+        html += '<div class="p"><span>' + (allocBy === 'brig' ? escapeHtml(w) + ' · ' : '') + per[w].n + ' ' +
+          (per[w].n % 10 === 1 && per[w].n % 100 !== 11 ? 'смена' : (per[w].n % 10 >= 2 && per[w].n % 10 <= 4 && (per[w].n % 100 < 12 || per[w].n % 100 > 14) ? 'смены' : 'смен')) +
+          ' (' + d.slice(0, 4).join(', ') + (d.length > 4 ? '…' : '') + ')</span><b>' + money_(per[w].sum) + '</b></div>';
+      });
+      html += '</div>';
+    });
+    res.innerHTML = html;
+    applyBtn.disabled = !a.picked.length;
+    applyBtn.textContent = a.picked.length ? 'Выбрать эти ' + a.picked.length + ' зап.' : 'Выбрать эти записи';
+  }
+  document.getElementById('allocOpenBtn').addEventListener('click', function () {
+    if (!expOverview) return;
+    renderAlloc();
+    allocModal.classList.add('open');
+    setTimeout(function () { document.getElementById('allocBudget').focus(); }, 50);
+  });
+  document.getElementById('allocCancel').addEventListener('click', function () { allocModal.classList.remove('open'); });
+  allocModal.addEventListener('click', function (e) { if (e.target === allocModal) allocModal.classList.remove('open'); });
+  document.getElementById('allocBudget').addEventListener('input', renderAlloc);
+  document.getElementById('allocByBrig').addEventListener('click', function () { allocBy = 'brig'; renderAlloc(); });
+  document.getElementById('allocByPerson').addEventListener('click', function () { allocBy = 'person'; renderAlloc(); });
+  document.getElementById('allocGroups').addEventListener('click', function (e) {
+    var row = e.target.closest('.allocG'); if (!row) return;
+    var k = row.dataset.k;
+    if (e.target.type === 'checkbox') {
+      if (e.target.checked) delete allocOff[allocBy + ':' + k]; else allocOff[allocBy + ':' + k] = true;
+      renderAlloc(); return;
+    }
+    var mv = e.target.closest('.allocMove');
+    if (mv) {
+      var order = allocOrder[allocBy], i = order.indexOf(k), j = i + Number(mv.dataset.dir);
+      if (i >= 0 && j >= 0 && j < order.length) { order.splice(i, 1); order.splice(j, 0, k); }
+      renderAlloc();
+    }
+  });
+  document.getElementById('allocApply').addEventListener('click', function () {
+    if (!allocPicked.length) return;
+    paySel = {};
+    allocPicked.forEach(function (r) { paySel[r.row] = true; });
+    var sum = allocPicked.reduce(function (a, r) { return a + (Number(r.total) || 0); }, 0);
+    allocModal.classList.remove('open');
+    renderPay();
+    var msg = document.getElementById('payMsg');
+    msg.textContent = 'Отмечено ' + allocPicked.length + ' зап. на ' + money_(sum) + ' по распределению — проверьте и нажмите статус.';
+    msg.className = 'success';
+  });
+
   document.getElementById('payBackLink').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('expGoPayBtn').addEventListener('click', function () { showExpPayScreen(); });
 
