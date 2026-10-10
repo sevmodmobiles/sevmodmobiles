@@ -477,6 +477,7 @@
     border-bottom: 1px solid var(--border);
   }
   .autocompleteItem:last-child { border-bottom: none; }
+  .autocompleteItem.autocompleteAdd { color: var(--blue); font-weight: 600; }
   .autocompleteItem:hover, .autocompleteItem:active { background: var(--bg); }
 
   /* ===== Панель администратора ===== */
@@ -1682,6 +1683,24 @@
     <button id="camCloseBtn" type="button" aria-label="Отмена">✕</button>
     <div class="camHint">Совместите силуэт с лицом и плечами и нажмите кнопку внизу</div>
     <button id="captureBtn" type="button" aria-label="Сделать фото"></button>
+  </div>
+
+  <!-- Новый работник для справочника расходов: имя обязательно -->
+  <div id="addWorkerModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="awTitle">
+    <div class="modalBox">
+      <h2 id="awTitle" style="margin-top:0; color: var(--text);">Новый работник</h2>
+      <label for="awFirst">Имя *</label>
+      <input id="awFirst" type="text" autocomplete="off" maxlength="60">
+      <label for="awLast">Фамилия</label>
+      <input id="awLast" type="text" autocomplete="off" maxlength="60" placeholder="Необязательно">
+      <label for="awPhone">Телефон</label>
+      <input id="awPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="Необязательно">
+      <div id="awStatus"></div>
+      <div class="calBtns">
+        <button id="awCancel" type="button" class="calCancel">Отмена</button>
+        <button id="awSave" type="button">Добавить</button>
+      </div>
+    </div>
   </div>
 
   <div id="policyModal" class="modalOverlay">
@@ -3336,7 +3355,9 @@
   //     из свежих данных, а не замораживался на момент инициализации)
   // Безопасно вызывать повторно на одном и том же элементе (например, при
   // каждом рендере списка объектов) — повторная обёртка не создаётся.
-  function initAutocomplete(inputEl, getItemsFn) {
+  // opts.onAddNew(query) — если задан и по введённому ничего не найдено,
+  // в списке появляется пункт «+ Добавить …» (текст — opts.addLabel).
+  function initAutocomplete(inputEl, getItemsFn, opts) {
     if (!inputEl || inputEl._autocompleteInited) return;
     inputEl._autocompleteInited = true;
 
@@ -3356,6 +3377,12 @@
         ? items.filter(function (label) { return label.toLowerCase().indexOf(query) !== -1; })
         : items;
       matches = matches.slice(0, 300);
+      if (!matches.length && query && opts && opts.onAddNew) {
+        list.innerHTML = '<div class="autocompleteItem autocompleteAdd">+ ' + escapeHtml(opts.addLabel || 'Добавить') +
+          ' «' + escapeHtml(inputEl.value.trim()) + '»</div>';
+        list.style.display = 'block';
+        return;
+      }
       if (!matches.length) {
         list.style.display = 'none';
         list.innerHTML = '';
@@ -3376,6 +3403,11 @@
       var item = e.target.closest('.autocompleteItem');
       if (!item) return;
       e.preventDefault();
+      if (item.classList.contains('autocompleteAdd')) {
+        list.style.display = 'none';
+        opts.onAddNew(inputEl.value.trim());
+        return;
+      }
       inputEl.value = item.textContent;
       list.style.display = 'none';
       inputEl.dispatchEvent(new Event('change', { bubbles: true }));
@@ -3643,7 +3675,8 @@
       .catch(function () { /* подсказки необязательны — вводить можно вручную */ });
   }
 
-  initAutocomplete(document.getElementById('expWorker'), function () { return expLookups.workers; });
+  initAutocomplete(document.getElementById('expWorker'), function () { return expLookups.workers; },
+    { addLabel: 'Добавить работника', onAddNew: function (q) { openAddWorker(q, 'expWorker'); } });
   initAutocomplete(document.getElementById('expBrigadier'), function () {
     return expLookups.brigadiers.length ? expLookups.brigadiers : expLookups.workers;
   });
@@ -3686,6 +3719,56 @@
     // после blur автодополнение ещё 150 мс принимает нажатие на пункт списка
     input.addEventListener('blur', function () { setTimeout(function () { enforcePick(f); }, 200); });
     input.addEventListener('change', function () { showPickError(f.id, ''); });
+  });
+
+  // ----- Новый работник прямо из списка: имя (обязательно), фамилия, телефон -----
+  var awTargetId = null;
+  var awModal = document.getElementById('addWorkerModal');
+  function openAddWorker(query, targetId) {
+    awTargetId = targetId;
+    // поле очищаем сразу, иначе строгая проверка при уходе с поля сотрёт его с ошибкой
+    var target = document.getElementById(targetId);
+    target.value = '';
+    showPickError(targetId, '');
+    var parts = String(query || '').trim().split(/\s+/);
+    document.getElementById('awFirst').value = parts.shift() || '';
+    document.getElementById('awLast').value = parts.join(' ');
+    document.getElementById('awPhone').value = '';
+    document.getElementById('awStatus').textContent = '';
+    awModal.classList.add('open');
+    setTimeout(function () { document.getElementById('awFirst').focus(); }, 50);
+  }
+  function closeAddWorker() { awModal.classList.remove('open'); }
+  document.getElementById('awCancel').addEventListener('click', closeAddWorker);
+  awModal.addEventListener('click', function (e) { if (e.target === awModal) closeAddWorker(); });
+  document.getElementById('awSave').addEventListener('click', function () {
+    var btn = this, st = document.getElementById('awStatus');
+    var first = document.getElementById('awFirst').value.trim();
+    if (!first) { st.textContent = 'Укажите имя'; st.className = 'error'; document.getElementById('awFirst').focus(); return; }
+    btn.disabled = true; st.textContent = 'Сохраняю…'; st.className = '';
+    apiPost({
+      action: 'adminAddExpenseWorker', phone: currentUser && currentUser.phone,
+      firstName: first, lastName: document.getElementById('awLast').value.trim(),
+      workerPhone: document.getElementById('awPhone').value.trim()
+    }).then(function (res) {
+      btn.disabled = false;
+      if (!res || res.status !== 'ok' || !res.name) {
+        st.textContent = (res && res.message) || 'Не удалось добавить — проверьте, что в таблице развёрнут скрипт v48';
+        st.className = 'error';
+        return;
+      }
+      var name = res.name;
+      if (expLookups.workers.indexOf(name) < 0) {
+        expLookups.workers.push(name);
+        expLookups.workers.sort(function (a, b) { return a.localeCompare(b, 'ru'); });
+      }
+      closeAddWorker();
+      var target = document.getElementById(awTargetId);
+      target.value = name;
+      if (awTargetId === 'expAddWorker') addWorkerToBrigade();
+      else target.dispatchEvent(new Event('change', { bubbles: true }));
+      loadExpLookups();  // обновить списки (бригадиры могут совпадать с работниками)
+    }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
   });
 
   // ----- Бригада: выбран бригадир — список работников с галочками и ставками -----
@@ -3751,7 +3834,7 @@
     return expLookups.workers.filter(function (w) {
       return !expBrigade.some(function (m) { return m.worker === w; });
     });
-  });
+  }, { addLabel: 'Добавить работника', onAddNew: function (q) { openAddWorker(q, 'expAddWorker'); } });
   function addWorkerToBrigade() {
     var input = document.getElementById('expAddWorker');
     if (!input.value.trim() || !enforcePick(addWorkerField)) return;

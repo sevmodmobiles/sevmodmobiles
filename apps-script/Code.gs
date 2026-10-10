@@ -1,3 +1,7 @@
+// v48: добавление работника из приложения — adminAddExpenseWorker: имя
+//      (обязательно), фамилия, телефон. Дописывается в "Справочник расходов":
+//      "Имя Фамилия" в колонку A "Работники", телефон — в колонку C "Телефон"
+//      (заголовок ставится сам). Повтор имени не добавляется.
 // v47: контракты — adminAddContract: объект, бригадир, сумма договора,
 //      авансы (сумма + дата, статус "По Графику") и оплата по акту (дата
 //      окончания работ, статус "По Акту"). Каждый платёж — строка листа
@@ -391,6 +395,9 @@ function doPost(e) {
     if (data.action === 'adminAddExpense') {
       return jsonOutput(adminAddExpense(data.phone, data.date, data.worker, data.brigadier,
         data.objectName, data.rate, data.comment, data.dateTo, data.entries, data.status));
+    }
+    if (data.action === 'adminAddExpenseWorker') {
+      return jsonOutput(adminAddExpenseWorker(data.phone, data.firstName, data.lastName, data.workerPhone));
     }
     if (data.action === 'adminAddContract') {
       return jsonOutput(adminAddContract(data.phone, data.objectName, data.brigadier, data.total, data.payments, data.comment));
@@ -2874,6 +2881,42 @@ function expenseRefColumn_(sheet, col) {
     if (v && !seen[v]) { seen[v] = true; out.push(v); }
   });
   return out;
+}
+
+// Новый работник в справочник расходов. Возвращает { status, name, existed }.
+function adminAddExpenseWorker(phone, firstName, lastName, workerPhone) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  function clean_(v) { return String(v || '').replace(/\s+/g, ' ').trim().slice(0, 60); }
+  var first = clean_(firstName), surname = clean_(lastName);
+  if (!first) return { status: 'error', message: 'Укажите имя' };
+  var name = surname ? first + ' ' + surname : first;
+  var tel = String(workerPhone || '').replace(/[^\d+]/g, '').slice(0, 20);
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var ref = getExpenseRefSheet_();
+    var existing = pickFromList_(expenseRefColumn_(ref, 1), name);
+    if (existing) return { status: 'ok', name: existing, existed: true };
+    if (String(ref.getRange(1, 3).getValue()).trim() === '') {
+      ref.getRange(1, 3).setValue('Телефон').setFontWeight('bold');
+    }
+    // Первая пустая строка колонки A (колонка B "Бригадиры" может быть длиннее).
+    var lastRow = ref.getLastRow();
+    var colA = lastRow >= 2 ? ref.getRange(2, 1, lastRow - 1, 1).getValues() : [];
+    var row = 2;
+    for (var i = colA.length - 1; i >= 0; i--) {
+      if (String(colA[i][0]).trim()) { row = i + 3; break; }
+    }
+    if (row > ref.getMaxRows()) ref.insertRowsAfter(ref.getMaxRows(), row - ref.getMaxRows());
+    ref.getRange(row, 1).setValue(name);
+    if (tel) ref.getRange(row, 3).setNumberFormat('@').setValue(tel);
+    SpreadsheetApp.flush();
+    return { status: 'ok', name: name, existed: false };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // { workers, brigadiers, objects, brigadierCol } — списки для жёсткого выбора.
