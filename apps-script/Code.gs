@@ -1,3 +1,9 @@
+// v54: частичная оплата смены — adminSplitExpenseRow(phone, items [{row, key,
+//      pay}]): строка делится на две с той же датой: в исходной остаётся
+//      оплачиваемая часть (Ставка = pay, комментарий «Частичная оплата,
+//      осталось оплатить: N ₽»), ниже вставляется копия с остатком (статус
+//      прежний, комментарий «Остаток смены …»). Формулы и проверки строки
+//      копируются. Запись в журнал — «Частичная оплата (разделение)».
 // v53: журнал изменений расходов — каждое удаление и каждая смена статуса из
 //      приложения пишутся в лист "Журнал изменений расходов" (когда, кто,
 //      действие, причина, все поля строки до изменения). Причина удаления
@@ -426,6 +432,9 @@ function doPost(e) {
     }
     if (data.action === 'adminAddContract') {
       return jsonOutput(adminAddContract(data.phone, data.objectName, data.brigadier, data.total, data.payments, data.comment));
+    }
+    if (data.action === 'adminSplitExpenseRow') {
+      return jsonOutput(adminSplitExpenseRow(data.phone, data.items));
     }
     if (data.action === 'adminDeleteExpenseRows') {
       return jsonOutput(adminDeleteExpenseRows(data.phone, data.items, data.reason));
@@ -3543,6 +3552,63 @@ function restoreExpenseFromAudit() {
     if (restored) { SpreadsheetApp.flush(); try { sortExpensesByDate_(exp, lay); } catch (e) {} }
   } finally { lock.releaseLock(); }
   ss.toast(restored ? 'Восстановлено строк: ' + restored : 'Нечего восстанавливать (нужны строки «Удаление» без отметки «Восстановлено»)', 'SEVMOD', 6);
+}
+
+// Деление строк для частичной оплаты (снизу вверх, чтобы номера выше не сдвигались).
+function adminSplitExpenseRow(phone, items) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  if (!items || !items.length) return { status: 'error', message: 'Нет записей для деления' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var lay = expenseLayout_();
+    if (lay.error) return { status: 'error', message: lay.error };
+    var sheet = lay.sheet, cols = lay.cols;
+    if (!cols.rate) return { status: 'error', message: 'В листе нет колонки «Ставка»' };
+    var tz = Session.getScriptTimeZone();
+    var first = lay.headerRow + 1, last = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+    function fmt_(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+    var sorted = items.slice().sort(function (a, b) { return Number(b.row) - Number(a.row); });
+    var done = 0, conflicts = 0, logged = [];
+    for (var i = 0; i < sorted.length; i++) {
+      var it = sorted[i], r = Number(it.row);
+      if (!(r >= first && r <= last)) { conflicts++; continue; }
+      var rng = sheet.getRange(r, 1, 1, lastCol);
+      var v = rng.getValues()[0], f = rng.getFormulasR1C1()[0];
+      var d = cols.date ? v[cols.date - 1] : '';
+      var key = expenseRowKey_(d instanceof Date ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : '',
+        cols.worker ? v[cols.worker - 1] : '', cols.object ? v[cols.object - 1] : '',
+        v[cols.rate - 1], cols.status ? v[cols.status - 1] : '');
+      var rate = Number(v[cols.rate - 1]) || 0;
+      var pay = Math.round(Number(it.pay) || 0);
+      if (key !== String(it.key || '') || !(pay > 0 && pay < rate)) { conflicts++; continue; }
+      var rest = rate - pay;
+      var oldComment = cols.comment ? String(v[cols.comment - 1] || '').trim() : '';
+      var dTxt = d instanceof Date ? Utilities.formatDate(d, tz, 'dd.MM.yyyy') : '';
+      // копия строки ниже — с формулами, форматами и проверками
+      sheet.insertRowAfter(r);
+      rng.copyTo(sheet.getRange(r + 1, 1, 1, lastCol));
+      sheet.getRange(r, cols.rate).setValue(pay);
+      sheet.getRange(r + 1, cols.rate).setValue(rest);
+      if (cols.total && !f[cols.total - 1]) {
+        sheet.getRange(r, cols.total).setValue(pay);
+        sheet.getRange(r + 1, cols.total).setValue(rest);
+      }
+      if (cols.comment) {
+        sheet.getRange(r, cols.comment).setValue('Частичная оплата, осталось оплатить: ' + fmt_(rest) + ' ₽' + (oldComment ? '. ' + oldComment : ''));
+        sheet.getRange(r + 1, cols.comment).setValue('Остаток смены' + (dTxt ? ' от ' + dTxt : '') + ' после частичной оплаты ' +
+          fmt_(pay) + ' из ' + fmt_(rate) + ' ₽' + (oldComment ? '. ' + oldComment : ''));
+      }
+      logged.push({ row: r, values: v, formulas: f, newStatus: 'оплачивается ' + fmt_(pay) + ', остаток ' + fmt_(rest) });
+      done++;
+    }
+    SpreadsheetApp.flush();
+    if (logged.length) logExpenseChanges_(auth, 'Частичная оплата (разделение)', '', logged.reverse(), lay);
+    return { status: 'ok', split: done, conflicts: conflicts };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Удаление выбранных строк расходов (с проверкой отпечатка). reason —

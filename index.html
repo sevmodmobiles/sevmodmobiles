@@ -881,6 +881,9 @@
   .allocPayWrap.manual .allocPay { color: var(--blue); }
   .allocCaret { font-size: 11px; color: var(--muted); }
   .allocPaySel { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+  .allocCustomWrap { flex: none; display: inline-flex; gap: 4px; align-items: center; }
+  .allocCustom { width: 110px; margin: 0; padding: 7px 8px; font-size: 15px; text-align: right; }
+  .allocCustomOk { width: auto; margin: 0; padding: 7px 10px; font-size: 13px; }
   .allocG.off .allocName, .allocG.off .allocDebt { color: var(--muted); }
   @media (prefers-reduced-motion: reduce) { .allocBadge { transition: none; } }
   .allocResult { font-size: 13px; margin-bottom: 4px; }
@@ -5318,7 +5321,9 @@
   // сверху вниз; внутри группы — по кругу, по одной самой старой смене
   // каждому человеку; не влезла следующая смена человека — он пропускается.
   var allocBy = 'brig', allocOrder = { brig: [], person: [] }, allocOff = {}, allocPicked = [];
-  var allocManual = {};            // { 'brig:ключ': число записей } — ручная сумма группы
+  var allocManual = {};            // { 'brig:ключ': { n } — целыми записями | { amt } — любая сумма }
+  var allocPartial = [];           // [{ r, pay }] — смены, которые оплачиваются частично
+  var allocEditing = '';           // строка, где сейчас вводится «другая сумма»
   // Цвет номера приоритета: 1 — зелёный, 2 — синий, 3 — оранжевый, …
   var ALLOC_COLORS = ['#2e9d4f', '#3b7ddd', '#e07b22', '#8e5bd8', '#1a9aa0', '#c2477a', '#7a7f2a', '#6b6f78'];
   var allocModal = document.getElementById('allocModal');
@@ -5377,10 +5382,22 @@
   // человека — он выбывает (частичных оплат нет).
   function allocCompute_(groups, budget) {
     var left = budget, picked = [], order = [], queues = {};
+    var partial = [];
     groups.forEach(function (g) {
-      var mk = allocBy + ':' + g.key;
-      if (allocOff[mk] || allocManual[mk] === undefined) return;
-      allocSeq_(g).slice(0, allocManual[mk]).forEach(function (r) { picked.push(r); left -= Number(r.total) || 0; });
+      var mk = allocBy + ':' + g.key, m = allocManual[mk];
+      if (allocOff[mk] || m === undefined) return;
+      var seq = allocSeq_(g);
+      if (m.n !== undefined) {
+        seq.slice(0, m.n).forEach(function (r) { picked.push(r); left -= Number(r.total) || 0; });
+        return;
+      }
+      // «Другая сумма»: целые смены по очереди, пока влезают; остаток — часть следующей смены
+      var rest = m.amt;
+      for (var i = 0; i < seq.length && rest > 0; i++) {
+        var amt = Number(seq[i].total) || 0;
+        if (amt <= rest) { picked.push(seq[i]); rest -= amt; left -= amt; }
+        else { partial.push({ r: seq[i], pay: Math.round(rest) }); left -= Math.round(rest); rest = 0; }
+      }
     });
     groups.forEach(function (g) {
       var mk = allocBy + ':' + g.key;
@@ -5406,20 +5423,44 @@
       });
       active = next;
     }
-    return { picked: picked, used: budget - left, left: left };
+    return { picked: picked, partial: partial, used: budget - left, left: left };
   }
   // Сумма в строке — это выпадающий список: «Авто» и все суммы, которые
   // складываются из целых записей очереди группы, от большей к меньшей.
-  function allocPaySelect_(g, pay) {
-    var mk = allocBy + ':' + g.key, manual = allocManual[mk] !== undefined;
+  function allocPaySelect_(g, pay, partPay) {
+    var mk = allocBy + ':' + g.key, m = allocManual[mk];
+    if (allocEditing === mk) {
+      return '<span class="allocCustomWrap"><input type="number" inputmode="decimal" min="0" step="any" class="allocCustom" value="' +
+        (m && m.amt !== undefined ? m.amt : (pay + partPay)) + '" aria-label="Сумма для ' + escapeHtml(g.label) + '">' +
+        '<button type="button" class="allocCustomOk">OK</button></span>';
+    }
     var seq = allocSeq_(g), sums = [0];
     seq.forEach(function (r, i) { sums.push(sums[i] + (Number(r.total) || 0)); });
-    var opts = '<option value="auto"' + (manual ? '' : ' selected') + '>Авто — ' + money_(manual ? 0 : pay).replace(/^0 ₽$/, 'по расчёту') + '</option>';
-    for (var n = seq.length; n >= 0; n--) {
-      opts += '<option value="' + n + '"' + (manual && allocManual[mk] === n ? ' selected' : '') + '>' + money_(sums[n]) +
-        (n ? ' — ' + n + ' зап.' : ' — ничего') + '</option>';
+    var shown = pay + partPay, opts = '';
+    if (m !== undefined) opts += '<option value="auto">Авто</option>';
+    // Варианты — только после полных кругов (каждому поровну смен) + текущая
+    // сумма; если их всё равно много — самая большая, текущая, по две соседние и 0.
+    var people = {}; seq.forEach(function (r) { people[r.worker || '?'] = true; });
+    var per = Object.keys(people).length || 1;
+    var cand = {};
+    for (var n0 = seq.length; n0 >= 0; n0--) {
+      if (n0 === seq.length || n0 % per === 0 || sums[n0] === shown || (m && m.n === n0)) cand[n0] = true;
     }
-    return '<span class="allocPayWrap' + (manual ? ' manual' : '') + '"><span class="allocPay' + (pay ? '' : ' zero') + '">' + money_(pay) +
+    var ns = Object.keys(cand).map(Number).sort(function (a, b) { return b - a; });
+    if (ns.length > 7) {
+      var cur = ns.indexOf(m && m.n !== undefined ? m.n : ns.filter(function (x) { return sums[x] === shown; })[0]);
+      if (cur < 0) cur = 0;
+      ns = ns.filter(function (x, i) { return i === 0 || i === ns.length - 1 || Math.abs(i - cur) <= 2; });
+    }
+    var seen = {};
+    ns.forEach(function (n) {
+      if (seen[sums[n]]) return;
+      seen[sums[n]] = true;
+      opts += '<option value="' + n + '"' + (m && m.n === n ? ' selected' : (m === undefined && sums[n] === shown ? ' selected' : '')) + '>' + money_(sums[n]) + '</option>';
+    });
+    if (m && m.amt !== undefined) opts += '<option value="amt" selected>' + money_(m.amt) + '</option>';
+    opts += '<option value="custom">Другая сумма…</option>';
+    return '<span class="allocPayWrap' + (m !== undefined ? ' manual' : '') + '"><span class="allocPay' + (shown ? '' : ' zero') + '">' + money_(shown) +
       '</span><span class="allocCaret" aria-hidden="true">▾</span>' +
       '<select class="allocPaySel" aria-label="Сумма для ' + escapeHtml(g.label) + '">' + opts + '</select></span>';
   }
@@ -5434,6 +5475,7 @@
     var budget = Number(String(document.getElementById('allocBudget').value).replace(',', '.')) || 0;
     var a = budget > 0 && groups.length ? allocCompute_(groups, budget) : { picked: [], used: 0, left: budget };
     var pickedSet = {}; a.picked.forEach(function (r) { pickedSet[r.row] = true; });
+    var partSet = {}; (a.partial || []).forEach(function (p2) { partSet[p2.r.row] = p2.pay; });
     // Включённые — по приоритету, исключённые — внизу.
     var enabled = groups.filter(function (g) { return !allocOff[allocBy + ':' + g.key]; });
     var disabled = groups.filter(function (g) { return allocOff[allocBy + ':' + g.key]; });
@@ -5441,18 +5483,20 @@
       var off = !!allocOff[allocBy + ':' + g.key];
       var n = enabled.indexOf(g) + 1;
       var pay = g.rows.reduce(function (s2, r) { return s2 + (pickedSet[r.row] ? (Number(r.total) || 0) : 0); }, 0);
+      var partPay = g.rows.reduce(function (s2, r) { return s2 + (partSet[r.row] || 0); }, 0);
       return '<div class="allocG' + (off ? ' off' : '') + '" data-k="' + escapeHtml(g.key) + '">' +
         '<button type="button" class="allocBadge" style="--badge:' + ALLOC_COLORS[(n - 1) % ALLOC_COLORS.length] + '" aria-label="' +
           (off ? 'Исключён. Нажмите, чтобы вернуть первым' : 'Приоритет ' + n + '. Нажмите, чтобы опустить ниже') + ': ' + escapeHtml(g.label) + '">' +
           (off ? '—' : n) + '</button>' +
         '<span class="allocInfo"><span class="allocName">' + escapeHtml(g.label) + '</span>' +
           '<span class="allocDebt">долг ' + money_(g.sum) + '</span></span>' +
-        (off || !(budget > 0) ? '<span class="allocPay zero">' + (off ? 'не платим' : '—') + '</span>' : allocPaySelect_(g, pay)) + '</div>';
+        (off || !(budget > 0) ? '<span class="allocPay zero">' + (off ? 'не платим' : '—') + '</span>' : allocPaySelect_(g, pay, partPay)) + '</div>';
     }).join('') || '<div class="statsEmpty">Нет записей — измените фильтры</div>';
 
     var res = document.getElementById('allocResult'), applyBtn = document.getElementById('allocApply');
-    if (!(budget > 0) || !groups.length) { res.innerHTML = ''; allocPicked = []; applyBtn.disabled = true; return; }
+    if (!(budget > 0) || !groups.length) { res.innerHTML = ''; allocPicked = []; allocPartial = []; applyBtn.disabled = true; return; }
     allocPicked = a.picked;
+    allocPartial = a.partial || [];
     var html = '<div class="allocSum"><b' + (a.left < 0 ? ' style="color:var(--red)"' : '') + '>' + money_(a.used) + '</b><span>предлагаем из ' + money_(budget) +
       (a.left > 0 ? '<br>останется ' + money_(a.left) : '') +
       (a.left < 0 ? '<br><span style="color:var(--red)">больше, чем есть, на ' + money_(-a.left) + '</span>' : '') + '</span></div>';
@@ -5461,11 +5505,18 @@
       if (allocOff[allocBy + ':' + g.key]) return;
       var paid = g.rows.filter(function (r) { return pickedSet[r.row]; });
       var paidSum = paid.reduce(function (s2, r) { return s2 + (Number(r.total) || 0); }, 0);
+      var parts = (a.partial || []).filter(function (p2) { return g.rows.indexOf(p2.r) >= 0; });
+      parts.forEach(function (p2) { paidSum += p2.pay; });
       html += '<div class="allocRG"><div class="h">' + escapeHtml(g.label) + '<span>' + money_(paidSum) + '</span></div>';
       var per = {};
       paid.forEach(function (r) { var w = r.worker || '(без имени)'; (per[w] = per[w] || { n: 0, sum: 0, dates: [] }); per[w].n++; per[w].sum += Number(r.total) || 0; per[w].dates.push(r.date); });
       var names = Object.keys(per);
-      if (!names.length) html += '<div class="p">ничего не влезло</div>';
+      if (!names.length && !parts.length) html += '<div class="p">ничего не влезло</div>';
+      parts.forEach(function (p2) {
+        var q = String(p2.r.date || '').split('-');
+        html += '<div class="p"><span>' + (g.key.charAt(0) === 'b' ? escapeHtml(p2.r.worker) + ' · ' : '') + 'часть смены ' +
+          (q.length === 3 ? q[2] + '.' + q[1] : '') + ' (' + money_(p2.pay) + ' из ' + money_(p2.r.total) + ')</span><b>' + money_(p2.pay) + '</b></div>';
+      });
       names.forEach(function (w) {
         var d = per[w].dates.sort().map(function (x) { var q = String(x).split('-'); return q.length === 3 ? q[2] + '.' + q[1] : '—'; });
         html += '<div class="p"><span>' + (g.key.charAt(0) === 'b' ? escapeHtml(w) + ' · ' : '') + per[w].n + ' ' +
@@ -5475,8 +5526,9 @@
       html += '</div>';
     });
     res.innerHTML = html;
-    applyBtn.disabled = !a.picked.length;
-    applyBtn.textContent = a.picked.length ? 'Выбрать эти ' + a.picked.length + ' зап.' : 'Выбрать эти записи';
+    var nSel = a.picked.length + (a.partial || []).length;
+    applyBtn.disabled = !nSel;
+    applyBtn.textContent = nSel ? 'Выбрать эти ' + nSel + ' зап.' : 'Выбрать эти записи';
   }
   document.getElementById('allocOpenBtn').addEventListener('click', function () {
     if (!expOverview) return;
@@ -5492,10 +5544,25 @@
   document.getElementById('allocGroups').addEventListener('change', function (e) {
     if (!e.target.classList.contains('allocPaySel')) return;
     var mk = allocBy + ':' + e.target.closest('.allocG').dataset.k;
-    if (e.target.value === 'auto') delete allocManual[mk]; else allocManual[mk] = Number(e.target.value);
+    var v = e.target.value;
+    if (v === 'auto') delete allocManual[mk];
+    else if (v === 'custom') { allocEditing = mk; renderAlloc(); var inp = document.querySelector('.allocCustom'); if (inp) { inp.focus(); inp.select(); } return; }
+    else if (v !== 'amt') allocManual[mk] = { n: Number(v) };
     renderAlloc();
   });
+  function allocCommitCustom_() {
+    var inp = document.querySelector('.allocCustom');
+    if (!inp || !allocEditing) return;
+    var mk = allocEditing, val = Math.round(Number(String(inp.value).replace(',', '.')) || 0);
+    allocEditing = '';
+    if (val > 0) allocManual[mk] = { amt: val }; else allocManual[mk] = { n: 0 };
+    renderAlloc();
+  }
+  document.getElementById('allocGroups').addEventListener('keydown', function (e) {
+    if (e.target.classList.contains('allocCustom') && e.key === 'Enter') { e.preventDefault(); allocCommitCustom_(); }
+  });
   document.getElementById('allocGroups').addEventListener('click', function (e) {
+    if (e.target.classList.contains('allocCustomOk')) { allocCommitCustom_(); return; }
     var badge = e.target.closest('.allocBadge'); if (!badge) return;
     var k = badge.closest('.allocG').dataset.k;
     var offKey = allocBy + ':' + k;
@@ -5519,15 +5586,51 @@
     renderAlloc();
   });
   document.getElementById('allocApply').addEventListener('click', function () {
-    if (!allocPicked.length) return;
-    paySel = {};
-    allocPicked.forEach(function (r) { paySel[r.row] = true; });
-    var sum = allocPicked.reduce(function (a, r) { return a + (Number(r.total) || 0); }, 0);
-    allocModal.classList.remove('open');
-    renderPay();
-    var msg = document.getElementById('payMsg');
-    msg.textContent = 'Отмечено ' + allocPicked.length + ' зап. на ' + money_(sum) + ' по распределению — проверьте и нажмите статус.';
-    msg.className = 'success';
+    if (!allocPicked.length && !allocPartial.length) return;
+    var btn = this;
+    var sum = allocPicked.reduce(function (a, r) { return a + (Number(r.total) || 0); }, 0) +
+      allocPartial.reduce(function (a, p2) { return a + p2.pay; }, 0);
+    var n = allocPicked.length + allocPartial.length;
+    function done(note) {
+      allocModal.classList.remove('open');
+      renderPay();
+      var msg = document.getElementById('payMsg');
+      msg.textContent = 'Отмечено ' + n + ' зап. на ' + money_(sum) + ' по распределению' + (note || '') + ' — проверьте и нажмите статус.';
+      msg.className = 'success';
+    }
+    if (!allocPartial.length) {
+      paySel = {};
+      allocPicked.forEach(function (r) { paySel[r.row] = true; });
+      done('');
+      return;
+    }
+    // Частичная оплата: сначала делим смены в таблице, потом перечитываем и
+    // отмечаем записи по отпечаткам (номера строк после вставки сдвигаются).
+    var want = {};
+    function addKey(k) { want[k] = (want[k] || 0) + 1; }
+    allocPicked.forEach(function (r) { addKey(payKey_(r)); });
+    allocPartial.forEach(function (p2) { addKey(payKey_({ date: p2.r.date, worker: p2.r.worker, object: p2.r.object, rate: p2.pay, status: p2.r.status })); });
+    btn.disabled = true; btn.textContent = 'Делю смену…';
+    apiPost({ action: 'adminSplitExpenseRow', phone: currentUser && currentUser.phone,
+      items: allocPartial.map(function (p2) { return { row: p2.r.row, key: payKey_(p2.r), pay: p2.pay }; }) })
+      .then(function (res) {
+        if (!res || res.status !== 'ok') {
+          btn.disabled = false; btn.textContent = 'Выбрать эти записи';
+          document.getElementById('allocResult').insertAdjacentHTML('beforeend', '<div class="error">' +
+            escapeHtml((res && res.message) || 'Не удалось разделить смену — проверьте, что в таблице развёрнут скрипт v54') + '</div>');
+          return;
+        }
+        expOverview = null;
+        loadExpOverview(function (err) {
+          btn.disabled = false;
+          if (err) { done('. Список не обновился: ' + err); return; }
+          paySel = {};
+          expRows_().forEach(function (r) { var k = payKey_(r); if (want[k]) { paySel[r.row] = true; want[k]--; } });
+          allocManual = {};
+          done(res.conflicts ? '. ' + res.conflicts + ' смен не разделились — проверьте' : ', смена разделена на оплачиваемую и неоплаченную части');
+        });
+      })
+      .catch(function (err) { btn.disabled = false; btn.textContent = 'Выбрать эти записи'; alert('Ошибка соединения: ' + err); });
   });
 
   document.getElementById('payBackLink').addEventListener('click', function () { showExpHubScreen(); });
