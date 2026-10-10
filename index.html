@@ -4801,17 +4801,31 @@
       weeks.forEach(function (wk) { if (r.date >= wk.mon && r.date <= wk.sun) wk.sum += Number(r.total) || 0; });
     });
     var avg = weeks.length ? weeks.reduce(function (a, wk) { return a + wk.sum; }, 0) / weeks.length : 0;
-    var nMon = isoAdd(w.mon, 7), nSun = isoAdd(w.mon, 13);
-    var contracts = rows.reduce(function (a, r) {
-      return a + (isContract(r) && r.date >= nMon && r.date <= nSun && expKey_(r.status) !== 'оплачено' ? (Number(r.total) || 0) : 0);
+    function contractsIn(mon, sun) {
+      return rows.reduce(function (a, r) {
+        return a + (isContract(r) && r.date >= mon && r.date <= sun && expKey_(r.status) !== 'оплачено' ? (Number(r.total) || 0) : 0);
+      }, 0);
+    }
+    function round100(x) { return Math.round(x / 100) * 100; }
+    // Эта неделя: уже записанное (все статусы, без договоров) или среднее —
+    // что больше, + платежи по договорам этой недели.
+    var recorded = rows.reduce(function (a, r) {
+      return a + (r.date && !isContract(r) && r.date >= w.mon && r.date <= w.sun ? (Number(r.total) || 0) : 0);
     }, 0);
+    var curContracts = contractsIn(w.mon, w.sun);
+    var nMon = isoAdd(w.mon, 7), nSun = isoAdd(w.mon, 13);
+    var contracts = contractsIn(nMon, nSun);
     var el = document.getElementById('payForecast');
-    if (!weeks.length && !contracts) { el.textContent = ''; return; }
-    el.innerHTML = '<div class="fcRow"><span>Прогноз на след. неделю ' + sh(nMon) + '–' + sh(nSun) + '</span>' +
-      '<b>≈ ' + money_(Math.round((avg + contracts) / 100) * 100) + '</b></div>' +
-      '<div class="fcBasis">' + (weeks.length ? 'в среднем ' + money_(Math.round(avg)) + ' в неделю за ' + weeks.length + ' ' +
-        (weeks.length === 1 ? 'неделю' : 'недели') : 'истории расходов пока нет') +
-      (contracts ? ' + по договорам ' + money_(contracts) : '') + '</div>';
+    if (!weeks.length && !contracts && !curContracts && !recorded) { el.textContent = ''; return; }
+    var avgText = weeks.length ? 'в среднем ' + money_(Math.round(avg)) + ' в неделю за ' + weeks.length + ' ' +
+      (weeks.length === 1 ? 'неделю' : 'недели') : 'истории расходов пока нет';
+    el.innerHTML =
+      '<div class="fcRow"><span>Прогноз на эту неделю</span><b>≈ ' + money_(round100(Math.max(recorded, avg) + curContracts)) + '</b></div>' +
+      '<div class="fcBasis">уже записано ' + money_(recorded) + (weeks.length ? ' из обычных ~' + money_(round100(avg)) : '') +
+        (curContracts ? ' + по договорам ' + money_(curContracts) : '') + '</div>' +
+      '<div class="fcRow" style="margin-top:6px;"><span>Прогноз на след. неделю ' + sh(nMon) + '–' + sh(nSun) + '</span>' +
+      '<b>≈ ' + money_(round100(avg + contracts)) + '</b></div>' +
+      '<div class="fcBasis">' + avgText + (contracts ? ' + по договорам ' + money_(contracts) : '') + '</div>';
   }
   function renderPayDue() {
     var w = payWeek_(), week = 0, old = 0;
