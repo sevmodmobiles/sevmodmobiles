@@ -833,27 +833,27 @@
   #expDateModal .modalBox { max-width: 400px; }
   #expPeriodNote { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
   .pickError { font-size: 13px; color: var(--red); margin: -8px 0 12px; }
-  .payDue { padding-top: 14px; padding-bottom: 12px; }
-  .payDueTitle { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
-  .payDueRow {
-    display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%; margin: 0;
-    padding: 8px 10px; background: none; color: var(--text); border-radius: 8px; font-weight: 500; text-align: left;
-  }
-  .payDueRow .lbl { font-size: 14px; min-width: 0; }
-  .payDueRow .sub { color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
-  /* Важность: эта неделя > долг прошлых недель > итого. */
-  .payDueRow .val { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .payDueRow.main .lbl { font-size: 16px; font-weight: 700; }
-  .payDueRow.main .val { font-size: 30px; color: var(--red); }
-  .payDueRow.total { border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; margin-top: 4px; padding-top: 8px; }
-  .payDueRow.total .lbl { font-size: 13px; color: var(--muted); }
-  .payDueRow.total .val { font-size: 15px; font-weight: 600; color: var(--muted); }
+  .payDue { padding-top: 14px; padding-bottom: 14px; }
+  .pdHead { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .pdTitle { flex: 1; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .pdHead button { width: auto; margin: 0; background: none; color: var(--muted); font-weight: 500; }
+  .pdTotal { padding: 2px 8px; font-size: 13px; border-radius: 999px; }
+  .pdTotal b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .pdInfoBtn { width: 24px !important; height: 24px; padding: 0; border: 1px solid var(--border) !important; border-radius: 50%; font-size: 13px; }
+  .pdWeek { display: block; width: 100%; margin: 0; padding: 8px 10px 10px; background: none; color: var(--text); text-align: left; border-radius: 10px; font-weight: 500; }
+  .pdWeekLbl { display: block; font-size: 13px; color: var(--muted); }
+  .pdWeekLine { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .pdWeekVal { font-size: 32px; font-weight: 800; color: var(--red); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pdFc { font-size: 13px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pdBar { display: block; height: 4px; border-radius: 2px; background: var(--border); margin-top: 6px; overflow: hidden; }
+  .pdBar span { display: block; height: 100%; width: 0; background: var(--red); border-radius: 2px; }
+  .pdTiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+  .pdTile { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 8px 10px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px; text-align: left; font-weight: 500; min-width: 0; }
+  .pdTile .lbl { font-size: 12px; color: var(--muted); }
+  .pdTile .lbl span { white-space: nowrap; }
+  .pdTile .val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .payDueRow.on { background: rgba(66,133,244,0.16); outline: 1px solid var(--blue); }
-  .payDueHint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-  .payForecast { padding: 0 10px 8px; }
-  .payForecast .fcRow { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; color: var(--muted); }
-  .payForecast .fcRow b { color: var(--text); font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .payForecast .fcBasis { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .pdInfo { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
   .payPeriodNote { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--blue); font-weight: 600; margin-bottom: 8px; }
   .payPeriodNote button { width: auto; margin: 0; padding: 4px 10px; font-size: 13px; background: none; color: var(--blue); border: 1px solid var(--blue); border-radius: 999px; }
   .payFilters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
@@ -1583,21 +1583,25 @@
       <div class="switchUser"><a id="payBackLink">← Расходы</a></div>
     </div>
     <div class="card payDue" id="payDue">
-      <div class="payDueTitle">К оплате</div>
-      <button type="button" class="payDueRow main" data-period="week">
-        <span class="lbl">На этой неделе <span id="payWeekRange" class="sub"></span></span>
-        <span id="payDueWeek" class="val">—</span>
+      <div class="pdHead">
+        <span class="pdTitle">К оплате</span>
+        <button type="button" class="pdTotal payDueRow" data-period="due">всего <b id="payDueTotal">—</b></button>
+        <button type="button" class="pdInfoBtn" id="pdInfoBtn" aria-expanded="false" aria-label="Как считается">?</button>
+      </div>
+      <button type="button" class="pdWeek payDueRow" data-period="week">
+        <span class="pdWeekLbl">Эта неделя <span id="payWeekRange"></span></span>
+        <span class="pdWeekLine"><span id="payDueWeek" class="pdWeekVal">—</span><span id="pdWeekFc" class="pdFc"></span></span>
+        <span class="pdBar"><span id="pdBarFill"></span></span>
       </button>
-      <div class="payForecast" id="payForecast"></div>
-      <button type="button" class="payDueRow" data-period="overdue">
-        <span class="lbl">Долг прошлых недель</span>
-        <span id="payDueOld" class="val">—</span>
-      </button>
-      <button type="button" class="payDueRow total" data-period="due">
-        <span class="lbl">Итого к оплате</span>
-        <span id="payDueTotal" class="val">—</span>
-      </button>
-      <div class="payDueHint">Неоплаченное и запланированное (По графику, По акту). Нажмите на строку, чтобы отобрать эти записи.</div>
+      <div class="pdTiles">
+        <button type="button" class="pdTile payDueRow" data-period="overdue">
+          <span class="lbl">Долг прошлых недель</span><span id="payDueOld" class="val">—</span>
+        </button>
+        <div class="pdTile">
+          <span class="lbl">След. неделя <span id="pdNextRange"></span></span><span id="pdNextFc" class="val">—</span>
+        </div>
+      </div>
+      <div id="pdInfo" class="pdInfo" hidden></div>
     </div>
     <div class="card">
       <div id="payPeriodNote" class="payPeriodNote" hidden></div>
@@ -4781,6 +4785,7 @@
   // Прогноз на следующую неделю = средние расходы за 4 последние полные
   // недели (без платежей по договорам — они разовые) + платежи по договорам,
   // уже стоящие на следующую неделю. Недели до первой записи не считаются.
+  var payDueWeekSum_ = 0;
   function renderPayForecast(w) {
     function isoAdd(iso, days) {
       var p = iso.split('-'), d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + days);
@@ -4815,17 +4820,22 @@
     var curContracts = contractsIn(w.mon, w.sun);
     var nMon = isoAdd(w.mon, 7), nSun = isoAdd(w.mon, 13);
     var contracts = contractsIn(nMon, nSun);
-    var el = document.getElementById('payForecast');
-    if (!weeks.length && !contracts && !curContracts && !recorded) { el.textContent = ''; return; }
-    var avgText = weeks.length ? 'в среднем ' + money_(Math.round(avg)) + ' в неделю за ' + weeks.length + ' ' +
-      (weeks.length === 1 ? 'неделю' : 'недели') : 'истории расходов пока нет';
-    el.innerHTML =
-      '<div class="fcRow"><span>Прогноз на эту неделю</span><b>≈ ' + money_(round100(Math.max(recorded, avg) + curContracts)) + '</b></div>' +
-      '<div class="fcBasis">уже записано ' + money_(recorded) + (weeks.length ? ' из обычных ~' + money_(round100(avg)) : '') +
-        (curContracts ? ' + по договорам ' + money_(curContracts) : '') + '</div>' +
-      '<div class="fcRow" style="margin-top:6px;"><span>Прогноз на след. неделю ' + sh(nMon) + '–' + sh(nSun) + '</span>' +
-      '<b>≈ ' + money_(round100(avg + contracts)) + '</b></div>' +
-      '<div class="fcBasis">' + avgText + (contracts ? ' + по договорам ' + money_(contracts) : '') + '</div>';
+    var fcWeek = round100(Math.max(recorded, avg) + curContracts);
+    var fcNext = round100(avg + contracts);
+    var hasHistory = weeks.length > 0;
+    document.getElementById('pdWeekFc').textContent = hasHistory || curContracts ? 'прогноз ≈ ' + money_(fcWeek) : '';
+    document.getElementById('pdNextRange').textContent = sh(nMon) + '–' + sh(nSun);
+    document.getElementById('pdNextFc').textContent = hasHistory || contracts ? '≈ ' + money_(fcNext) : '—';
+    // полоска: сколько из ожидаемой суммы недели уже набежало к оплате
+    var dueWeek = payDueWeekSum_;
+    document.getElementById('pdBarFill').style.width = fcWeek > 0 ? Math.min(100, Math.round(dueWeek / fcWeek * 100)) + '%' : '0';
+    document.getElementById('pdInfo').innerHTML =
+      '<b>Эта неделя</b> — неоплаченное и запланированное (По графику, По акту) с датой с понедельника по воскресенье; полоска — какая часть прогноза уже к оплате.<br>' +
+      '<b>Прогноз недели</b> — больше из «уже записано» (' + money_(recorded) + ') и обычной недели (' +
+        (hasHistory ? money_(Math.round(avg)) + ', среднее за ' + weeks.length + ' ' + (weeks.length === 1 ? 'неделю' : 'недели') : 'истории пока нет') + ')' +
+        (curContracts ? ' + договоры ' + money_(curContracts) : '') + '.<br>' +
+      '<b>След. неделя</b> — обычная неделя' + (contracts ? ' + договоры ' + money_(contracts) : '') + '.<br>' +
+      '<b>Долг прошлых недель</b> — то же, но с датой раньше этой недели. Нажмите на сумму, чтобы отобрать эти записи.';
   }
   function renderPayDue() {
     var w = payWeek_(), week = 0, old = 0;
@@ -4835,10 +4845,11 @@
       else if (p === 'overdue') old += Number(r.total) || 0;
     });
     function sh(iso) { var p = iso.split('-'); return p[2] + '.' + p[1]; }
-    document.getElementById('payWeekRange').textContent = sh(w.mon) + '–' + sh(w.sun);
+    document.getElementById('payWeekRange').textContent = '· ' + sh(w.mon) + '–' + sh(w.sun);
     document.getElementById('payDueWeek').textContent = money_(week);
     document.getElementById('payDueOld').textContent = money_(old);
     document.getElementById('payDueTotal').textContent = money_(week + old);
+    payDueWeekSum_ = week;
     renderPayForecast(w);
     document.querySelectorAll('.payDueRow').forEach(function (b) { b.classList.toggle('on', b.dataset.period === payPeriod); });
     var note = document.getElementById('payPeriodNote');
@@ -5105,6 +5116,11 @@
         loadExpOverview(function (err) { if (!err) renderPay(); else updatePaySel([]); });
       })
       .catch(function (err) { btn.disabled = false; msg.textContent = 'Ошибка соединения: ' + err; msg.className = 'error'; });
+  });
+  document.getElementById('pdInfoBtn').addEventListener('click', function () {
+    var info = document.getElementById('pdInfo');
+    info.hidden = !info.hidden;
+    this.setAttribute('aria-expanded', String(!info.hidden));
   });
   document.getElementById('payDue').addEventListener('click', function (e) {
     var b = e.target.closest('.payDueRow'); if (!b || !expOverview) return;
