@@ -5174,9 +5174,14 @@
         .map(function (x) { return '<option value="' + escapeHtml(x) + '"' + (x === current ? ' selected' : '') + '>' + escapeHtml(x) + '</option>'; }).join('');
       sel.classList.toggle('active', !!current);
     }
-    fill_('payBrigFilter', byStatus.map(function (r) { return r.brigadier || NO_BRIG; }), payBrig, 'Все бригадиры');
-    fill_('payWorkerFilter', byStatus.filter(function (r) { return !payBrig || (r.brigadier || NO_BRIG) === payBrig; }).map(function (r) { return r.worker; }), payWorker, 'Все люди');
-    fill_('payObjFilter', byStatus.map(function (r) { return r.object; }), payObj, 'Все объекты');
+    // Каждый список — только значения, которые сочетаются с двумя другими
+    // выбранными фильтрами (бригада → её люди и объекты, и наоборот).
+    function okBrig_(r) { return !payBrig || (r.brigadier || NO_BRIG) === payBrig; }
+    function okWorker_(r) { return !payWorker || r.worker === payWorker; }
+    function okObj_(r) { return !payObj || r.object === payObj; }
+    fill_('payBrigFilter', byStatus.filter(function (r) { return okWorker_(r) && okObj_(r); }).map(function (r) { return r.brigadier || NO_BRIG; }), payBrig, 'Все бригадиры');
+    fill_('payWorkerFilter', byStatus.filter(function (r) { return okBrig_(r) && okObj_(r); }).map(function (r) { return r.worker; }), payWorker, 'Все люди');
+    fill_('payObjFilter', byStatus.filter(function (r) { return okBrig_(r) && okWorker_(r); }).map(function (r) { return r.object; }), payObj, 'Все объекты');
 
     var list = payFiltered_();
     var sortBy = document.getElementById('paySort').value;
