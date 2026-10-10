@@ -4536,8 +4536,12 @@
     var groupByBrig = brigMode && !expBrigFilter;
     var groups = {};
     list.forEach(function (r) {
-      var key = groupByBrig ? brigOf_(r) : (r.worker || '(без имени)');
-      var g = groups[key] || (groups[key] = { name: key, sum: 0, rows: [], objects: {}, statuses: {}, people: {}, min: '', max: '' });
+      // В режиме «По бригадам» человек без бригадира — самостоятельная карточка
+      // наравне с бригадами (не общая группа «Без бригадира»).
+      var isBrigRow = groupByBrig && !!r.brigadier;
+      var key = isBrigRow ? 'b\u0001' + r.brigadier : 'p\u0001' + (r.worker || '(без имени)');
+      var g = groups[key] || (groups[key] = { key: key, name: isBrigRow ? r.brigadier : (r.worker || '(без имени)'), isBrig: isBrigRow,
+        sum: 0, rows: [], objects: {}, statuses: {}, people: {}, min: '', max: '' });
       var t = Number(r.total) || 0;
       g.sum += t;
       g.rows.push(r);
@@ -4552,18 +4556,14 @@
       if (r.date && (!g.max || r.date > g.max)) g.max = r.date;
     });
     var arr = Object.keys(groups).map(function (k) { return groups[k]; })
-      .sort(function (a, b) {
-        // «Без бригадира» — всегда в конце списка бригад.
-        if (groupByBrig && (a.name === NO_BRIG) !== (b.name === NO_BRIG)) return a.name === NO_BRIG ? 1 : -1;
-        return b.sum - a.sum;
-      });
+      .sort(function (a, b) { return b.sum - a.sum; });
     var total = arr.reduce(function (a, g) { return a + g.sum; }, 0);
     var peopleCount = {}; list.forEach(function (r) { peopleCount[r.worker || '(без имени)'] = true; });
     var nPeople = Object.keys(peopleCount).length;
 
     document.getElementById('expTotals').innerHTML = arr.length
       ? '<span class="big">' + money_(total) + '</span><span class="meta">' +
-        (groupByBrig ? arr.length + ' бриг. · ' : '') + nPeople + ' чел. · ' + list.length + ' зап.</span>'
+        (groupByBrig ? arr.filter(function (g) { return g.isBrig; }).length + ' бриг. · ' : '') + nPeople + ' чел. · ' + list.length + ' зап.</span>'
       : '';
     var box = document.getElementById('expPeople');
     if (!arr.length) {
@@ -4585,9 +4585,9 @@
     }
 
     box.innerHTML = arr.map(function (g) {
-      var open = !!expOpenPeople[g.name];
+      var open = !!expOpenPeople[g.key];
       var meta, details = '';
-      if (groupByBrig) {
+      if (g.isBrig) {
         var ppl = Object.keys(g.people).map(function (k) { return g.people[k]; }).sort(function (a, b) { return b.sum - a.sum; });
         meta = ppl.length + ' чел.' + dateSpan_(g) + objText_(g);
         if (open) {
@@ -4596,8 +4596,8 @@
             return '<tr><td>' + escapeHtml(pp.name) + '<div class="sub">' + nd + ' ' + daysWord_(nd) + '</div></td>' +
               '<td class="num">' + money_(pp.sum) + '</td></tr>';
           }).join('') + '</table>' +
-          (g.name !== NO_BRIG ? '<button type="button" class="expChip expOpenBrig" data-brig="' + escapeHtml(g.name) +
-            '" style="margin:8px 10px 10px;">Все расходы бригады по дням ›</button>' : '') + '</div>';
+          '<button type="button" class="expChip expOpenBrig" data-brig="' + escapeHtml(g.name) +
+            '" style="margin:8px 10px 10px;">Все расходы бригады по дням ›</button></div>';
         }
       } else {
         var days = {}; g.rows.forEach(function (r) { if (r.date) days[r.date] = true; });
@@ -4619,10 +4619,10 @@
         }
       }
       // Корзина «удалить все записи человека» — только у раскрытой карточки.
-      var canDelAll = open && !groupByBrig && g.rows.some(function (r) { return r.row; });
+      var canDelAll = open && !g.isBrig && g.rows.some(function (r) { return r.row; });
       return '<div class="expPerson"><div class="expPersonHeadRow">' +
-        '<button type="button" class="expPersonHead" data-name="' + escapeHtml(g.name) + '" aria-expanded="' + open + '">' +
-        '<div class="expPersonTop"><span class="expPersonName">' + (groupByBrig && g.name !== NO_BRIG ? 'Бригада: ' : '') + escapeHtml(g.name) + '</span>' +
+        '<button type="button" class="expPersonHead" data-name="' + escapeHtml(g.name) + '" data-key="' + escapeHtml(g.key) + '" aria-expanded="' + open + '">' +
+        '<div class="expPersonTop"><span class="expPersonName">' + (g.isBrig ? 'Бригада: ' : '') + escapeHtml(g.name) + '</span>' +
         '<span class="expPersonSum">' + money_(g.sum) + '</span></div>' +
         '<div class="expPersonMeta">' + meta + '</div>' + pills_(g) + '</button>' +
         (canDelAll ? '<button type="button" class="expDelPerson" data-name="' + escapeHtml(g.name) + '" aria-label="Удалить все записи: ' +
@@ -4743,7 +4743,7 @@
     if (ob) { expBrigFilter = ob.dataset.brig; expOpenPeople = {}; renderExpView(); return; }
     var h = e.target.closest('.expPersonHead');
     if (!h) return;
-    expOpenPeople[h.dataset.name] = !expOpenPeople[h.dataset.name];
+    expOpenPeople[h.dataset.key] = !expOpenPeople[h.dataset.key];
     renderExpView();
   });
   document.getElementById('expHubBackLink').addEventListener('click', function () { showAdminScreen(); });
@@ -5316,10 +5316,22 @@
     var sel = list.filter(function (r) { return paySel[r.row]; });
     return { rows: sel.length ? sel : list, fromSelection: sel.length > 0 };
   }
-  function allocKey_(r) { return allocBy === 'brig' ? (r.brigadier || NO_BRIG) : (r.worker || '(без имени)'); }
+  // Бригада — если у записи есть бригадир; человек без бригадира — сам по себе
+  // (отдельная единица наравне с бригадами), а не общая группа.
+  function allocKey_(r) {
+    return allocBy === 'brig' && r.brigadier ? 'b\u0001' + r.brigadier : 'p\u0001' + (r.worker || '(без имени)');
+  }
+  function allocLabel_(k) {
+    var p = k.split('\u0001');
+    return p[0] === 'b' ? 'Бригада ' + p[1] : p[1];
+  }
   function allocGroups_(rows) {
     var g = {};
-    rows.forEach(function (r) { var k = allocKey_(r); (g[k] = g[k] || { key: k, rows: [], sum: 0 }); g[k].rows.push(r); g[k].sum += Number(r.total) || 0; });
+    rows.forEach(function (r) {
+      var k = allocKey_(r);
+      (g[k] = g[k] || { key: k, label: allocLabel_(k), rows: [], sum: 0 });
+      g[k].rows.push(r); g[k].sum += Number(r.total) || 0;
+    });
     // порядок: сохранённый, новые — по убыванию долга в конец
     var order = allocOrder[allocBy].filter(function (k) { return g[k]; });
     Object.keys(g).sort(function (a, b) { return g[b].sum - g[a].sum; }).forEach(function (k) { if (order.indexOf(k) < 0) order.push(k); });
@@ -5369,9 +5381,9 @@
     document.getElementById('allocGroups').innerHTML = groups.map(function (g, i) {
       var off = !!allocOff[allocBy + ':' + g.key];
       return '<div class="allocG' + (off ? ' off' : '') + '" data-k="' + escapeHtml(g.key) + '">' +
-        '<input type="checkbox"' + (off ? '' : ' checked') + ' aria-label="Платить: ' + escapeHtml(g.key) + '">' +
+        '<input type="checkbox"' + (off ? '' : ' checked') + ' aria-label="Платить: ' + escapeHtml(g.label) + '">' +
         '<span class="allocNo">' + (i + 1) + '</span>' +
-        '<span class="allocName">' + escapeHtml(g.key) + '</span><span class="allocDebt">' + money_(g.sum) + '</span>' +
+        '<span class="allocName">' + escapeHtml(g.label) + '</span><span class="allocDebt">' + money_(g.sum) + '</span>' +
         '<button type="button" class="allocMove" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="Выше">' + ICON_UP + '</button>' +
         '<button type="button" class="allocMove" data-dir="1"' + (i === groups.length - 1 ? ' disabled' : '') + ' aria-label="Ниже">' + ICON_DOWN + '</button></div>';
     }).join('') || '<div class="statsEmpty">Нет записей — измените фильтры</div>';
@@ -5389,14 +5401,14 @@
       if (allocOff[allocBy + ':' + g.key]) return;
       var paid = g.rows.filter(function (r) { return pickedSet[r.row]; });
       var paidSum = paid.reduce(function (s2, r) { return s2 + (Number(r.total) || 0); }, 0);
-      html += '<div class="allocRG"><div class="h">' + escapeHtml(g.key) + '<span>' + money_(paidSum) + ' из ' + money_(g.sum) + '</span></div>';
+      html += '<div class="allocRG"><div class="h">' + escapeHtml(g.label) + '<span>' + money_(paidSum) + ' из ' + money_(g.sum) + '</span></div>';
       var per = {};
       paid.forEach(function (r) { var w = r.worker || '(без имени)'; (per[w] = per[w] || { n: 0, sum: 0, dates: [] }); per[w].n++; per[w].sum += Number(r.total) || 0; per[w].dates.push(r.date); });
       var names = Object.keys(per);
       if (!names.length) html += '<div class="p">ничего не влезло</div>';
       names.forEach(function (w) {
         var d = per[w].dates.sort().map(function (x) { var q = String(x).split('-'); return q.length === 3 ? q[2] + '.' + q[1] : '—'; });
-        html += '<div class="p"><span>' + (allocBy === 'brig' ? escapeHtml(w) + ' · ' : '') + per[w].n + ' ' +
+        html += '<div class="p"><span>' + (g.key.charAt(0) === 'b' ? escapeHtml(w) + ' · ' : '') + per[w].n + ' ' +
           (per[w].n % 10 === 1 && per[w].n % 100 !== 11 ? 'смена' : (per[w].n % 10 >= 2 && per[w].n % 10 <= 4 && (per[w].n % 100 < 12 || per[w].n % 100 > 14) ? 'смены' : 'смен')) +
           ' (' + d.slice(0, 4).join(', ') + (d.length > 4 ? '…' : '') + ')</span><b>' + money_(per[w].sum) + '</b></div>';
       });
