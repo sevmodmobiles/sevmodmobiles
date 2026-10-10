@@ -1902,7 +1902,7 @@
         <button type="button" id="allocByBrig" class="on">По бригадам</button>
         <button type="button" id="allocByPerson">По людям</button>
       </div>
-      <label>Приоритет — сверху важнее. Снимите галочку, чтобы не платить в этот раз.</label>
+      <label>Платим послойно: каждому по одной смене за круг. Порядок решает, кто первым получит в последнем круге. Снимите галочку, чтобы не платить в этот раз.</label>
       <div id="allocGroups" class="allocGroups"></div>
       <div id="allocResult" class="allocResult"></div>
       <div class="calBtns">
@@ -5326,28 +5326,36 @@
     allocOrder[allocBy] = order;
     return order.map(function (k) { return g[k]; });
   }
+  // Послойно: за круг каждый участник (из всех отмеченных групп) получает
+  // по одной своей самой старой смене; круги идут, пока хватает денег.
+  // Порядок внутри круга — по приоритету групп (сверху вниз), внутри группы —
+  // по размеру долга; он важен только в последнем, неполном круге. Не влезла
+  // следующая смена человека — он выбывает (частичных оплат нет).
   function allocCompute_(groups, budget) {
-    var left = budget, picked = [];
+    var left = budget, picked = [], order = [], queues = {};
     groups.forEach(function (g) {
       if (allocOff[allocBy + ':' + g.key]) return;
-      var queues = {}, people = [];
-      g.rows.slice().sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); }).forEach(function (r) {
+      var per = {};
+      g.rows.forEach(function (r) {
         var w = r.worker || '(без имени)';
-        if (!queues[w]) { queues[w] = []; people.push(w); }
-        queues[w].push(r);
+        (per[w] = per[w] || { id: g.key + '\u0001' + w, rows: [], sum: 0 });
+        per[w].rows.push(r); per[w].sum += Number(r.total) || 0;
       });
-      var active = people.slice();
-      while (active.length) {
-        var next = [];
-        active.forEach(function (w) {
-          var r = queues[w][0];
-          var amt = Number(r.total) || 0;
-          if (amt <= left) { left -= amt; picked.push(r); queues[w].shift(); if (queues[w].length) next.push(w); }
-          // не влезла самая старая смена — человек пропускается (без частичных оплат)
-        });
-        active = next;
-      }
+      Object.keys(per).map(function (w) { return per[w]; }).sort(function (a, b) { return b.sum - a.sum; }).forEach(function (pp) {
+        queues[pp.id] = pp.rows.sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+        order.push(pp.id);
+      });
     });
+    var active = order.slice();
+    while (active.length) {
+      var next = [];
+      active.forEach(function (id) {
+        var r = queues[id][0];
+        var amt = Number(r.total) || 0;
+        if (amt <= left) { left -= amt; picked.push(r); queues[id].shift(); if (queues[id].length) next.push(id); }
+      });
+      active = next;
+    }
     return { picked: picked, used: budget - left, left: left };
   }
   function renderAlloc() {
