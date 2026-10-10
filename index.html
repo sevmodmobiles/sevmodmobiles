@@ -1010,8 +1010,8 @@
   .expSeg { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 3px; margin-bottom: 10px; }
   .expSeg button { flex: 1; margin: 0; padding: 9px 6px; font-size: 14px; font-weight: 600; background: none; color: var(--muted); border-radius: 8px; }
   .expSeg button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
-  .expFilters { display: flex; gap: 8px; }
-  .expFilters select { flex: 1; min-width: 0; padding: 10px; font-size: 14px; }
+  .expFilters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .expFilters select { flex: 1 1 40%; min-width: 0; margin: 0; padding: 10px; font-size: 14px; }
   .expFilters select.active { border-color: var(--blue); color: var(--blue); font-weight: 600; }
   .expDays { border-top: 1px solid var(--border); overflow-x: auto; }
   .expDays table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -1715,6 +1715,12 @@
       <div class="expFilters">
         <select id="expBrigFilter" aria-label="Бригадир" hidden></select>
         <select id="expObjFilter" aria-label="Объект"></select>
+        <select id="expSort" aria-label="Сортировка">
+          <option value="dateDesc">Сначала новые</option>
+          <option value="dateAsc">Сначала старые</option>
+          <option value="sumDesc">По сумме</option>
+          <option value="name">По имени</option>
+        </select>
       </div>
       <input id="expSearch" type="search" placeholder="Поиск: имя, бригадир или объект" autocomplete="off">
       <div id="expTotals" class="expTotals"></div>
@@ -4568,8 +4574,13 @@
       if (r.date && (!g.min || r.date < g.min)) g.min = r.date;
       if (r.date && (!g.max || r.date > g.max)) g.max = r.date;
     });
-    var arr = Object.keys(groups).map(function (k) { return groups[k]; })
-      .sort(function (a, b) { return b.sum - a.sum; });
+    var sortBy = document.getElementById('expSort').value;
+    var arr = Object.keys(groups).map(function (k) { return groups[k]; }).sort({
+      dateDesc: function (a, b) { return a.max < b.max ? 1 : (a.max > b.max ? -1 : b.sum - a.sum); },
+      dateAsc: function (a, b) { return a.min > b.min ? 1 : (a.min < b.min ? -1 : b.sum - a.sum); },
+      sumDesc: function (a, b) { return b.sum - a.sum; },
+      name: function (a, b) { return String(a.name).localeCompare(String(b.name), 'ru'); }
+    }[sortBy] || function (a, b) { return b.sum - a.sum; });
     var total = arr.reduce(function (a, g) { return a + g.sum; }, 0);
     var peopleCount = {}; list.forEach(function (r) { peopleCount[r.worker || '(без имени)'] = true; });
     var nPeople = Object.keys(peopleCount).length;
@@ -4617,7 +4628,8 @@
         var nDays = Object.keys(days).length;
         meta = nDays + ' ' + daysWord_(nDays) + dateSpan_(g) + objText_(g);
         if (open) {
-          var sortedRows = g.rows.slice().sort(function (a, b) { return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); });
+          var asc = sortBy === 'dateAsc';
+          var sortedRows = g.rows.slice().sort(function (a, b) { return (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)) * (asc ? -1 : 1); });
           details = '<div class="expDays"><table>' + sortedRows.map(function (r) {
             var sub = [r.brigadier && !useBrig ? 'бригадир ' + r.brigadier : '', r.comment].filter(Boolean).join(' · ');
             return '<tr><td class="d">' + (r.date ? fmtIsoRu_(r.date) : '—') + '</td>' +
@@ -4653,6 +4665,7 @@
   document.getElementById('expBrigFilter').addEventListener('change', function () {
     expBrigFilter = this.value; expOpenPeople = {}; renderExpView();
   });
+  document.getElementById('expSort').addEventListener('change', function () { expOpenPeople = {}; renderExpView(); });
   document.getElementById('expObjFilter').addEventListener('change', function () {
     expObjFilter = this.value; expOpenPeople = {}; renderExpView();
   });
