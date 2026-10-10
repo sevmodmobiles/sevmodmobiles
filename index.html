@@ -845,9 +845,15 @@
   .ctHint { font-size: 12px; color: var(--muted); margin: -8px 0 12px; }
   /* Отступ под полем — у обёртки, а не у select: тогда точка по центру
      обёртки = по центру самого поля при любой его высоте. */
-  .statusSelectWrap { position: relative; margin-bottom: 14px; }
-  .statusSelectWrap .dot { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; border-radius: 50%; pointer-events: none; }
-  .statusSelectWrap select { padding-left: 36px; margin-bottom: 0; }
+  /* Точка и select — в одной ячейке сетки: ячейка ровно по высоте select
+     (select блочный, без зазора под строку), точка центрируется по ней. */
+  .statusSelectWrap { display: grid; margin-bottom: 14px; }
+  .statusSelectWrap > * { grid-area: 1 / 1; }
+  .statusSelectWrap select { display: block; padding-left: 36px; margin: 0; }
+  .statusSelectWrap .dot {
+    align-self: center; justify-self: start; margin-left: 14px; position: relative; z-index: 1;
+    width: 12px; height: 12px; border-radius: 50%; pointer-events: none;
+  }
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
