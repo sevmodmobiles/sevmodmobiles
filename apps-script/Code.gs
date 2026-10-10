@@ -1,3 +1,9 @@
+// v50: оплаты — adminExpenseOverview отдаёт номер строки (row) у каждой
+//      записи; adminSetExpenseStatus(phone, items [{row, key}], status, payDate)
+//      меняет статус выбранных строк (и ставит/очищает "Дату погашения").
+//      key — отпечаток строки (дата|работник|объект|ставка|статус): если
+//      строка с тех пор изменилась или переехала (сортировка), она не
+//      трогается и считается в conflicts.
 // v49: бригадир из приложения — adminAddExpenseWorker(..., asBrigadier):
 //      бригадир тоже пишется в "Работники" (ему платят, в т.ч. по контрактам),
 //      а если колонка B "Бригадиры" ведётся (не пустая) — ещё и туда.
@@ -404,6 +410,9 @@ function doPost(e) {
     }
     if (data.action === 'adminAddContract') {
       return jsonOutput(adminAddContract(data.phone, data.objectName, data.brigadier, data.total, data.payments, data.comment));
+    }
+    if (data.action === 'adminSetExpenseStatus') {
+      return jsonOutput(adminSetExpenseStatus(data.phone, data.items, data.status, data.payDate));
     }
     if (data.action === 'adminExpenseOverview') {
       return jsonOutput(adminExpenseOverview(data.phone));
@@ -3333,6 +3342,75 @@ function expenseStatusList_(sheet, lay) {
   return out;
 }
 
+// Отпечаток строки расходов — тот же считает приложение по данным обзора.
+function expenseRowKey_(dateIso, worker, object, rate, status) {
+  return [dateIso, String(worker || '').trim(), String(object || '').trim(), Number(rate) || 0,
+    String(status || '').trim().toLowerCase()].join('|');
+}
+
+// Смена статуса у выбранных строк. payDate: 'yyyy-MM-dd' — поставить дату
+// погашения, '' — очистить, null/undefined — не трогать.
+function adminSetExpenseStatus(phone, items, status, payDate) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  if (!items || !items.length) return { status: 'error', message: 'Не выбрано ни одной записи' };
+  if (items.length > 2000) return { status: 'error', message: 'Слишком много записей за раз' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var lay = expenseLayout_();
+    if (lay.error) return { status: 'error', message: lay.error };
+    var sheet = lay.sheet, cols = lay.cols;
+    if (!cols.status) return { status: 'error', message: 'В листе нет колонки «Статус»' };
+    var picked = pickFromList_(expenseStatusList_(sheet, lay), String(status || '').trim());
+    if (!picked) return { status: 'error', message: 'Статуса «' + String(status || '').trim() + '» нет в списке колонки «Статус»' };
+    var pay = null;
+    if (payDate !== null && payDate !== undefined) {
+      pay = String(payDate) === '' ? '' : parseIsoDate_(payDate);
+      if (pay === null) return { status: 'error', message: 'Неверная дата погашения' };
+    }
+    var tz = Session.getScriptTimeZone();
+    var first = lay.headerRow + 1, last = sheet.getLastRow();
+    if (last < first) return { status: 'ok', updated: 0, conflicts: items.length, newStatus: picked };
+    var n = last - first + 1;
+    // Всё читаем одним блоком; проверяем отпечатки.
+    var data = sheet.getRange(first, 1, n, sheet.getLastColumn()).getValues();
+    var updated = 0, conflicts = 0, rowsToSet = {}, minR = Infinity, maxR = -Infinity;
+    items.forEach(function (it) {
+      var r = Number(it && it.row);
+      if (!(r >= first && r <= last)) { conflicts++; return; }
+      var v = data[r - first];
+      var d = cols.date ? v[cols.date - 1] : '';
+      var key = expenseRowKey_(d instanceof Date ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : '',
+        cols.worker ? v[cols.worker - 1] : '', cols.object ? v[cols.object - 1] : '',
+        cols.rate ? v[cols.rate - 1] : '', v[cols.status - 1]);
+      if (key !== String(it.key || '') || rowsToSet[r]) { conflicts++; return; }
+      rowsToSet[r] = true; updated++;
+      if (r < minR) minR = r; if (r > maxR) maxR = r;
+    });
+    // Запись одним диапазоном на колонку (minR..maxR). Непомеченные строки
+    // получают своё же содержимое — формулы сохраняются (строка с "=" в
+    // setValues ставит формулу).
+    function writeCol_(col, newValue, numberFormat) {
+      var rng = sheet.getRange(minR, col, maxR - minR + 1, 1);
+      var vals = rng.getValues(), fmls = rng.getFormulas();
+      var out = vals.map(function (row, i) {
+        return [rowsToSet[minR + i] ? newValue : (fmls[i][0] || row[0])];
+      });
+      rng.setValues(out);
+      if (numberFormat) rng.setNumberFormat(numberFormat);
+    }
+    if (updated) {
+      writeCol_(cols.status, picked);
+      if (pay !== null && cols.payDate) writeCol_(cols.payDate, pay, pay === '' ? null : 'dd.MM.yyyy');
+    }
+    SpreadsheetApp.flush();
+    return { status: 'ok', updated: updated, conflicts: conflicts, newStatus: picked };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // Сводка (шапка листа) + строки расходов для экранов "Расходы" и
 // "Посмотреть расходы".
 function adminExpenseOverview(phone) {
@@ -3373,14 +3451,15 @@ function adminExpenseOverview(phone) {
         total,
         String(v_(row, cols.status) || '').trim(),
         iso_(v_(row, cols.payDate)),
-        String(v_(row, cols.comment) || '').trim()
+        String(v_(row, cols.comment) || '').trim(),
+        first + i
       ]);
     }
   }
   return {
     status: 'ok',
     summary: summary,
-    fields: ['date', 'worker', 'brigadier', 'object', 'rate', 'total', 'status', 'payDate', 'comment'],
+    fields: ['date', 'worker', 'brigadier', 'object', 'rate', 'total', 'status', 'payDate', 'comment', 'row'],
     rows: rows,
     updatedAt: Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy HH:mm')
   };

@@ -760,7 +760,7 @@
   #screenScan #reader { margin-top: 8px; }
 
   /* ===== Отсутствия (отгулы / больничные) ===== */
-  #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView, #screenExpContract { display: none; }
+  #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay { display: none; }
   .absTotals { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
   .absTable { width: 100%; border-collapse: collapse; font-size: 13px; }
   .absTable th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--border); }
@@ -833,6 +833,33 @@
   #expDateModal .modalBox { max-width: 400px; }
   #expPeriodNote { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
   .pickError { font-size: 13px; color: var(--red); margin: -8px 0 12px; }
+  .payFilters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .payFilters select { margin: 0; min-width: 0; padding: 10px; font-size: 14px; }
+  .payFilters select.active { border-color: var(--blue); color: var(--blue); font-weight: 600; }
+  .payBar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 4px 0 8px; font-size: 14px; }
+  .payBar label { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: 14px; }
+  .payBar input { width: 20px; height: 20px; margin: 0; accent-color: var(--green); }
+  .payBar .paySel { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .payList { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .payRow { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .payRow:last-child { border-bottom: none; }
+  .payRow.sel { background: rgba(52,168,83,0.12); }
+  .payRow input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--green); pointer-events: none; }
+  .payMain { flex: 1; min-width: 0; }
+  .payTop { display: flex; justify-content: space-between; gap: 8px; }
+  .payName { font-weight: 600; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+  .paySum { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .payMeta { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .payMeta .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
+  .payMore { padding: 10px 12px; font-size: 13px; color: var(--muted); text-align: center; }
+  .payAction {
+    position: sticky; bottom: calc(58px + env(safe-area-inset-bottom, 0px)); z-index: 5;
+    box-shadow: 0 -4px 18px rgba(0,0,0,0.25);
+  }
+  .payAction .payActRow { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 8px; }
+  .payAction label { margin-bottom: 4px; }
+  .payAction .statusSelectWrap, .payAction input { margin-bottom: 0; }
+  .payAction button { margin-top: 10px; }
   .ctAdvRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 8px; align-items: end; margin-bottom: 8px; }
   .ctAdvRow > div { min-width: 0; }
   .ctAdvRow label { margin-bottom: 4px; }
@@ -858,7 +885,7 @@
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
-  #screenExpHub, #screenExpView, #screenExpContract { width: 100%; max-width: 440px; }
+  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay { width: 100%; max-width: 440px; }
   .expSumList { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
   .expSumTile {
     display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 8px 14px;
@@ -1440,6 +1467,7 @@
     <div class="card">
       <button id="expGoAddBtn" type="button">Добавить расходы</button>
       <button id="expGoContractBtn" type="button" style="background: #8e5bd8;">Добавить контракт</button>
+      <button id="expGoPayBtn" type="button" style="background: #e07b22;">Оплаты</button>
       <button id="expGoViewBtn" type="button" style="background: var(--blue);">Посмотреть расходы</button>
     </div>
   </div>
@@ -1496,6 +1524,53 @@
       <div id="ctNote" class="ctHint" style="margin-top:0;"></div>
       <button id="ctSubmit" type="button" style="margin-top:10px; background: #8e5bd8;">Добавить контракт</button>
       <div id="ctStatus"></div>
+    </div>
+  </div>
+
+  <!-- Экран "Оплаты": отбор записей и смена статуса (с датой погашения) -->
+  <div id="screenExpPay">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Оплаты</h1>
+      <div class="switchUser"><a id="payBackLink">← Расходы</a></div>
+    </div>
+    <div class="card">
+      <div id="payChips" class="expChips" role="tablist" aria-label="Статус"></div>
+      <div class="payFilters">
+        <select id="payBrigFilter" aria-label="Бригадир"></select>
+        <select id="payWorkerFilter" aria-label="Работник"></select>
+        <select id="payObjFilter" aria-label="Объект"></select>
+        <select id="paySort" aria-label="Сортировка">
+          <option value="dateDesc">Сначала новые</option>
+          <option value="dateAsc">Сначала старые</option>
+          <option value="sumDesc">По сумме</option>
+          <option value="worker">По людям (А–Я)</option>
+          <option value="brigadier">По бригадирам</option>
+          <option value="status">По статусам</option>
+        </select>
+      </div>
+      <input id="paySearch" type="search" placeholder="Поиск: имя, бригадир, объект, комментарий" autocomplete="off">
+      <div class="payBar">
+        <label><input id="payAll" type="checkbox"> Выбрать все</label>
+        <span id="paySelInfo" class="paySel"></span>
+      </div>
+      <div id="payList" class="payList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+    <div class="card payAction">
+      <div class="payActRow">
+        <div>
+          <label for="payNewStatus">Новый статус</label>
+          <div class="statusSelectWrap">
+            <span id="payNewStatusDot" class="dot" aria-hidden="true"></span>
+            <select id="payNewStatus"></select>
+          </div>
+        </div>
+        <div>
+          <label for="payDate">Дата погашения</label>
+          <input id="payDate" type="date">
+        </div>
+      </div>
+      <button id="payApply" type="button" style="background: #e07b22;" disabled>Выберите записи</button>
+      <div id="payMsg"></div>
     </div>
   </div>
 
@@ -1899,6 +1974,7 @@
   var screenExpHub = document.getElementById('screenExpHub');
   var screenExpView = document.getElementById('screenExpView');
   var screenExpContract = document.getElementById('screenExpContract');
+  var screenExpPay = document.getElementById('screenExpPay');
   var bottomNav = document.getElementById('bottomNav');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
@@ -1989,6 +2065,7 @@
         case 'expHub': showExpHubScreen(); break;
         case 'expView': showExpViewScreen(); break;
         case 'expContract': showExpContractScreen(); break;
+        case 'expPay': showExpPayScreen(); break;
         default: showScanScreen();
       }
   }
@@ -2042,6 +2119,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
@@ -2101,6 +2179,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenLogin.style.display = 'block';
     hideBottomNav();
     pushScreenState('login');
@@ -2123,6 +2202,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
     hideBottomNav();
@@ -2276,6 +2356,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
@@ -2302,6 +2383,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
@@ -2341,6 +2423,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenAbsence.style.display = 'block';
 
     var isPartial = absenceMode === 'partial';
@@ -2492,6 +2575,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     hideAdminPopup_();
     saveNotified_(adminPendingCount);
     loadAdminAbsences();
@@ -2583,6 +2667,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenProfile.style.display = 'block';
     document.getElementById('profileWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     refreshAdminStatus();
@@ -2699,6 +2784,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenTaskDetail.style.display = 'block';
     document.getElementById('taskDetailLoading').style.display = 'block';
     document.getElementById('taskDetailBody').style.display = 'none';
@@ -2882,6 +2968,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenAdmin.style.display = 'block';
     showBottomNav();
     setActiveNav('profile');
@@ -2907,6 +2994,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenTaskManage.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
@@ -2933,6 +3021,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
     showBottomNav();
@@ -2958,6 +3047,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenAdminObjects.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
     loadAdminObjects();
@@ -3645,6 +3735,7 @@
     screenExpHub.style.display = 'none';
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
+    screenExpPay.style.display = 'none';
     screenAdminExpense.style.display = 'block';
     if (!expRange.from) { expRange.from = isoToday_(); expRange.to = expRange.from; }
     renderExpDateField();
@@ -4136,7 +4227,7 @@
   function hideAllForExp_() {
     [screenLogin, screenReg, screenScan, screenAdmin, screenAdminRates, screenAdminObjects, screenTaskManage,
      screenStats, screenTasks, screenTaskDetail, screenProfile, screenAbsence, screenAdminAbsences,
-     screenAdminExpense, screenExpHub, screenExpView, screenExpContract].forEach(function (el) { el.style.display = 'none'; });
+     screenAdminExpense, screenExpHub, screenExpView, screenExpContract, screenExpPay].forEach(function (el) { el.style.display = 'none'; });
   }
   // Цвет статуса — из цвета ячейки сводки в таблице (белый/пустой не используем).
   function expStatusColor_(status) {
@@ -4594,6 +4685,192 @@
   });
   document.getElementById('ctBackLink').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('expGoContractBtn').addEventListener('click', function () { showExpContractScreen(); });
+
+  // ===== Оплаты: отбор записей и смена статуса =====
+  var payStatus = null;            // фильтр статуса ('*' — все), по умолчанию «не оплачено»
+  var payBrig = '', payWorker = '', payObj = '';
+  var paySel = {};                 // { номер строки: true }
+  var PAY_SHOW_MAX = 400;
+  function payKey_(r) {
+    return [r.date, String(r.worker || '').trim(), String(r.object || '').trim(), Number(r.rate) || 0,
+      String(r.status || '').trim().toLowerCase()].join('|');
+  }
+  function showExpPayScreen() {
+    hideAllForExp_();
+    screenExpPay.style.display = 'block';
+    showBottomNav();
+    setActiveNav('expenses');
+    pushScreenState('expPay');
+    document.getElementById('payMsg').textContent = '';
+    loadExpLookups();
+    if (expOverview) renderPay();
+    else document.getElementById('payList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    loadExpOverview(function (err) {
+      if (err) { document.getElementById('payList').innerHTML = '<div class="statsEmpty">' + escapeHtml(err) + '</div>'; return; }
+      renderPay();
+    });
+  }
+  function payStatusOptions_() {
+    var list = (expLookups.statuses && expLookups.statuses.length) ? expLookups.statuses.slice()
+      : (expOverview ? (expOverview.summary || []).map(function (x) { return x.label; }) : []);
+    return list;
+  }
+  function renderPayStatusSelect() {
+    var sel = document.getElementById('payNewStatus');
+    var list = payStatusOptions_();
+    var cur = sel.value || (list.filter(function (x) { return expKey_(x) === 'оплачено'; })[0]) || list[0] || '';
+    sel.innerHTML = list.map(function (st) { return '<option value="' + escapeHtml(st) + '">' + escapeHtml(st) + '</option>'; }).join('');
+    if (list.indexOf(cur) >= 0) sel.value = cur;
+    updatePayDot();
+  }
+  function updatePayDot() {
+    var st = document.getElementById('payNewStatus').value;
+    var c = (expLookups.statusColors || {})[String(st).toLowerCase()];
+    if (!c || /^#?(fff|ffffff)$/i.test(c)) c = expOverview ? expStatusColor_(st) : 'var(--muted)';
+    document.getElementById('payNewStatusDot').style.background = c;
+    // Для «Оплачено» сразу предлагаем сегодняшнюю дату погашения.
+    var d = document.getElementById('payDate');
+    if (expKey_(st) === 'оплачено' && !d.value) d.value = isoToday_();
+  }
+  document.getElementById('payNewStatus').addEventListener('change', updatePayDot);
+
+  function payFiltered_() {
+    var rows = expRows_();
+    var q = expKey_(document.getElementById('paySearch').value);
+    return rows.filter(function (r) {
+      if (payStatus !== '*' && expKey_(r.status) !== payStatus) return false;
+      if (payBrig && (r.brigadier || NO_BRIG) !== payBrig) return false;
+      if (payWorker && r.worker !== payWorker) return false;
+      if (payObj && r.object !== payObj) return false;
+      if (q && (expKey_(r.worker) + ' ' + expKey_(r.brigadier) + ' ' + expKey_(r.object) + ' ' + expKey_(r.comment)).indexOf(q) < 0) return false;
+      return true;
+    });
+  }
+  function renderPay() {
+    var rows = expRows_();
+    renderPayStatusSelect();
+    // Статусы-чипы: порядок сводки, затем остальные; по умолчанию «не оплачено».
+    var names = {}, order = [];
+    (expOverview.summary || []).forEach(function (x) { var k = expKey_(x.label); if (!names[k]) { names[k] = x.label; order.push(k); } });
+    var present = {};
+    rows.forEach(function (r) { var k = expKey_(r.status); present[k] = true; if (!names.hasOwnProperty(k)) { names[k] = r.status || 'Без статуса'; order.push(k); } });
+    order = order.filter(function (k) { return present[k]; });
+    if (payStatus === null) payStatus = present['не оплачено'] ? 'не оплачено' : '*';
+    document.getElementById('payChips').innerHTML = ['*'].concat(order).map(function (k) {
+      var name = k === '*' ? 'Все' : names[k];
+      return '<button type="button" class="expChip' + (k === payStatus ? ' on' : '') + '" data-k="' + escapeHtml(k) + '">' +
+        (k === '*' ? '' : '<span class="dot" style="background:' + escapeHtml(expStatusColor_(name)) + '"></span>') + escapeHtml(name) + '</button>';
+    }).join('');
+
+    // Выпадающие фильтры — значения из записей под выбранным статусом.
+    var byStatus = rows.filter(function (r) { return payStatus === '*' || expKey_(r.status) === payStatus; });
+    function fill_(id, values, current, allLabel) {
+      var uniq = {}; values.forEach(function (x) { if (x) uniq[x] = true; }); if (current) uniq[current] = true;
+      var sel = document.getElementById(id);
+      sel.innerHTML = '<option value="">' + allLabel + '</option>' + Object.keys(uniq).sort(function (a, b) { return a.localeCompare(b, 'ru'); })
+        .map(function (x) { return '<option value="' + escapeHtml(x) + '"' + (x === current ? ' selected' : '') + '>' + escapeHtml(x) + '</option>'; }).join('');
+      sel.classList.toggle('active', !!current);
+    }
+    fill_('payBrigFilter', byStatus.map(function (r) { return r.brigadier || NO_BRIG; }), payBrig, 'Все бригадиры');
+    fill_('payWorkerFilter', byStatus.filter(function (r) { return !payBrig || (r.brigadier || NO_BRIG) === payBrig; }).map(function (r) { return r.worker; }), payWorker, 'Все люди');
+    fill_('payObjFilter', byStatus.map(function (r) { return r.object; }), payObj, 'Все объекты');
+
+    var list = payFiltered_();
+    var sortBy = document.getElementById('paySort').value;
+    var cmp = {
+      dateDesc: function (a, b) { return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); },
+      dateAsc: function (a, b) { return a.date > b.date ? 1 : (a.date < b.date ? -1 : 0); },
+      sumDesc: function (a, b) { return (Number(b.total) || 0) - (Number(a.total) || 0); },
+      worker: function (a, b) { return String(a.worker).localeCompare(String(b.worker), 'ru') || (a.date < b.date ? 1 : -1); },
+      brigadier: function (a, b) { return String(a.brigadier || 'я').localeCompare(String(b.brigadier || 'я'), 'ru') || String(a.worker).localeCompare(String(b.worker), 'ru'); },
+      status: function (a, b) { return String(a.status).localeCompare(String(b.status), 'ru') || (a.date < b.date ? 1 : -1); }
+    }[sortBy] || function () { return 0; };
+    list.sort(cmp);
+    // выбор держим только среди видимых по фильтру записей
+    var visible = {}; list.forEach(function (r) { visible[r.row] = true; });
+    Object.keys(paySel).forEach(function (k) { if (!visible[k]) delete paySel[k]; });
+
+    var box = document.getElementById('payList');
+    if (!list.length) { box.innerHTML = '<div class="statsEmpty">Нет записей под эти фильтры</div>'; updatePaySel(list); return; }
+    var shown = list.slice(0, PAY_SHOW_MAX);
+    box.innerHTML = shown.map(function (r) {
+      var on = !!paySel[r.row];
+      var meta = [r.date ? fmtIsoRu_(r.date) : '—', r.object, r.brigadier ? 'бриг. ' + r.brigadier : ''].filter(Boolean).map(escapeHtml).join(' · ');
+      return '<div class="payRow' + (on ? ' sel' : '') + '" data-row="' + r.row + '">' +
+        '<input type="checkbox" tabindex="-1"' + (on ? ' checked' : '') + ' aria-label="Выбрать">' +
+        '<div class="payMain"><div class="payTop"><span class="payName">' + escapeHtml(r.worker || '(без имени)') + '</span>' +
+        '<span class="paySum">' + money_(r.total) + '</span></div>' +
+        '<div class="payMeta">' + meta + (payStatus === '*' || r.comment ? '<br>' : '') +
+        (payStatus === '*' ? '<span class="dot" style="background:' + escapeHtml(expStatusColor_(r.status)) + '"></span>' + escapeHtml(r.status || 'Без статуса') : '') +
+        (r.comment ? (payStatus === '*' ? ' · ' : '') + escapeHtml(r.comment) : '') + '</div></div></div>';
+    }).join('') + (list.length > shown.length ? '<div class="payMore">Показаны первые ' + shown.length + ' из ' + list.length +
+      '. «Выбрать все» отметит все ' + list.length + '; уточните фильтр, чтобы увидеть остальные.</div>' : '');
+    updatePaySel(list);
+  }
+  function updatePaySel(list) {
+    list = list || payFiltered_();
+    var n = 0, sum = 0;
+    list.forEach(function (r) { if (paySel[r.row]) { n++; sum += Number(r.total) || 0; } });
+    document.getElementById('payAll').checked = list.length > 0 && n === list.length;
+    document.getElementById('payAll').indeterminate = n > 0 && n < list.length;
+    document.getElementById('paySelInfo').textContent = n ? 'Выбрано ' + n + ' на ' + money_(sum) : list.length + ' зап. · ' +
+      money_(list.reduce(function (a, r) { return a + (Number(r.total) || 0); }, 0));
+    var btn = document.getElementById('payApply');
+    btn.disabled = !n;
+    btn.textContent = n ? 'Поставить статус — ' + n + ' зап.' : 'Выберите записи';
+  }
+  document.getElementById('payList').addEventListener('click', function (e) {
+    var rowEl = e.target.closest('.payRow'); if (!rowEl) return;
+    var r = rowEl.dataset.row;
+    if (paySel[r]) delete paySel[r]; else paySel[r] = true;
+    rowEl.classList.toggle('sel', !!paySel[r]);
+    rowEl.querySelector('input').checked = !!paySel[r];
+    updatePaySel();
+  });
+  document.getElementById('payAll').addEventListener('change', function () {
+    var list = payFiltered_();
+    var on = this.checked;
+    list.forEach(function (r) { if (on) paySel[r.row] = true; else delete paySel[r.row]; });
+    renderPay();
+  });
+  document.getElementById('payChips').addEventListener('click', function (e) {
+    var c = e.target.closest('.expChip'); if (!c) return;
+    payStatus = c.dataset.k; paySel = {}; renderPay();
+  });
+  [['payBrigFilter', function (v) { payBrig = v; payWorker = ''; }], ['payWorkerFilter', function (v) { payWorker = v; }],
+   ['payObjFilter', function (v) { payObj = v; }]].forEach(function (f) {
+    document.getElementById(f[0]).addEventListener('change', function () { f[1](this.value); renderPay(); });
+  });
+  document.getElementById('paySort').addEventListener('change', renderPay);
+  document.getElementById('paySearch').addEventListener('input', function () { if (expOverview) renderPay(); });
+
+  document.getElementById('payApply').addEventListener('click', function () {
+    var btn = this, msg = document.getElementById('payMsg');
+    var items = payFiltered_().filter(function (r) { return paySel[r.row]; }).map(function (r) { return { row: r.row, key: payKey_(r) }; });
+    if (!items.length) return;
+    var status = document.getElementById('payNewStatus').value;
+    var payDate = document.getElementById('payDate').value;
+    btn.disabled = true; msg.textContent = 'Меняю статус…'; msg.className = '';
+    apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, items: items, status: status,
+      payDate: payDate ? payDate : null })
+      .then(function (res) {
+        if (!res || res.status !== 'ok') {
+          btn.disabled = false;
+          msg.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v50';
+          msg.className = 'error'; return;
+        }
+        msg.textContent = '✓ Статус «' + res.newStatus + '» поставлен: ' + res.updated + ' зап.' +
+          (payDate ? ', дата погашения ' + fmtIsoRu_(payDate) : '') +
+          (res.conflicts ? '. ' + res.conflicts + ' зап. изменились в таблице и не тронуты — список обновлён, проверьте' : '');
+        msg.className = res.conflicts ? 'error' : 'success';
+        paySel = {};
+        expOverview = null;
+        loadExpOverview(function (err) { if (!err) renderPay(); else updatePaySel([]); });
+      })
+      .catch(function (err) { btn.disabled = false; msg.textContent = 'Ошибка соединения: ' + err; msg.className = 'error'; });
+  });
+  document.getElementById('payBackLink').addEventListener('click', function () { showExpHubScreen(); });
+  document.getElementById('expGoPayBtn').addEventListener('click', function () { showExpPayScreen(); });
 
   // ===== Админ: согласование отгулов — обработчики =====
   document.getElementById('goToAdminAbsencesBtn').addEventListener('click', function () {
