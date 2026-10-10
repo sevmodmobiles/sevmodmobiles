@@ -806,7 +806,8 @@
     text-align: left; font-weight: 400; color: var(--text); background: var(--card);
     border: 1px solid var(--border); padding: 13px; margin: 0 0 14px;
   }
-  .dateField .dateFieldIcon { color: var(--muted); font-size: 18px; line-height: 1; }
+  .dateField .dateFieldIcon { color: var(--muted); line-height: 1; }
+  .dateField .dateFieldIcon .lineIcon { width: 20px; height: 20px; }
   .calHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   .calHead button { width: 40px; height: 40px; margin: 0; padding: 0; font-size: 20px; background: none; color: var(--text); border: 1px solid var(--border); }
   .calTitle { font-weight: 600; font-size: 16px; text-transform: capitalize; }
@@ -983,11 +984,15 @@
   .expDays .sub { color: var(--muted); font-size: 12px; }
   .expDays td.del { width: 42px; padding: 4px 8px 4px 0; text-align: right; }
   .expDays tr:has(td.del) td:not(.del) { padding-left: 8px; padding-right: 6px; }
-  .expDelRow { width: 32px; height: 32px; margin: 0; padding: 0; background: none; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text); }
+  .lineIcon { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; display: block; }
+  .expDelRow, .expDelPerson { display: inline-flex; align-items: center; justify-content: center; }
+  .expDelRow { width: 32px; height: 32px; margin: 0; padding: 0; background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
+  .expDelRow:hover, .expDelPerson:hover { color: var(--red); border-color: var(--red); }
   .expPersonHeadRow { display: flex; align-items: flex-start; }
   .expPersonHeadRow .expPersonHead { flex: 1; min-width: 0; }
-  .expDelPerson { flex: none; width: 36px; height: 36px; margin: 10px 10px 0 -4px; padding: 0; font-size: 15px;
-    background: none; color: var(--red); border: 1px solid var(--red); border-radius: 8px; }
+  .expDelPerson { flex: none; width: 36px; height: 36px; margin: 10px 10px 0 -4px; padding: 0;
+    background: none; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; }
+  .expDelPerson .lineIcon { width: 19px; height: 19px; }
   .brigadeList { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; }
   .brigadeRow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .brigadeRow:last-child { border-bottom: none; }
@@ -1686,7 +1691,7 @@
     <div class="card">
       <label for="expDateBtn">Дата или период</label>
       <button id="expDateBtn" class="dateField" type="button" aria-haspopup="dialog">
-        <span id="expDateText">—</span><span class="dateFieldIcon" aria-hidden="true">📅</span>
+        <span id="expDateText">—</span><span class="dateFieldIcon" aria-hidden="true"><svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></span>
       </button>
       <label for="expBrigadier" style="margin-top:10px;">Бригадир</label>
       <input id="expBrigadier" type="text" autocomplete="off" placeholder="Необязательно — выберите из списка">
@@ -4562,7 +4567,7 @@
               (r.payDate ? '<div class="sub">погашено ' + fmtIsoRu_(r.payDate) + '</div>' : '') + '</td>' +
               '<td class="num">' + money_(r.total) + '</td>' +
               (r.row ? '<td class="del"><button type="button" class="expDelRow" data-row="' + r.row + '" aria-label="Удалить запись ' +
-                escapeHtml(fmtIsoRu_(r.date || '')) + '">🗑</button></td>' : '') + '</tr>';
+                escapeHtml(fmtIsoRu_(r.date || '')) + '">' + ICON_TRASH + '</button></td>' : '') + '</tr>';
           }).join('') + '</table></div>';
         }
       }
@@ -4574,7 +4579,7 @@
         '<span class="expPersonSum">' + money_(g.sum) + '</span></div>' +
         '<div class="expPersonMeta">' + meta + '</div>' + pills_(g) + '</button>' +
         (canDelAll ? '<button type="button" class="expDelPerson" data-name="' + escapeHtml(g.name) + '" aria-label="Удалить все записи: ' +
-          escapeHtml(g.name) + '">🗑</button>' : '') + '</div>' + details + '</div>';
+          escapeHtml(g.name) + '">' + ICON_TRASH + '</button>' : '') + '</div>' + details + '</div>';
     }).join('');
   }
   function setExpMode_(mode) {
@@ -4601,6 +4606,8 @@
   document.getElementById('expSearch').addEventListener('input', function () { if (expOverview) renderExpView(); });
   // ----- Удаление расходов из «Посмотреть расходы» -----
   var cfModal = document.getElementById('confirmModal'), cfAction = null;
+  // Линейные иконки в стиле нижней панели (без эмодзи).
+  var ICON_TRASH = '<svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l.8 12.2a1.8 1.8 0 0 0 1.8 1.8h5.8a1.8 1.8 0 0 0 1.8-1.8L17.5 7"/><path d="M10 11v6M14 11v6"/></svg>';
   function askConfirm(title, html, okLabel, action, needReason) {
     document.getElementById('cfReasonWrap').hidden = !needReason;
     document.getElementById('cfReason').value = '';
