@@ -862,17 +862,22 @@
   .allocBox { max-height: 88vh; }
   .allocPool { font-size: 13px; color: var(--muted); margin-bottom: 10px; line-height: 1.4; }
   .allocGroups { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
-  .allocG { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .allocG { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-bottom: 1px solid var(--border); }
   .allocG:last-child { border-bottom: none; }
-  .allocG.off .allocName, .allocG.off .allocDebt { color: var(--muted); text-decoration: line-through; }
-  .allocG input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--green); }
-  .allocNo { width: 18px; font-size: 12px; color: var(--muted); text-align: center; flex: none; font-variant-numeric: tabular-nums; }
-  .allocName { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
-  .allocDebt { font-size: 13px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .allocMove { width: 30px; height: 30px; margin: 0; padding: 0; flex: none; display: inline-flex; align-items: center; justify-content: center;
-    background: none; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; }
-  .allocMove:disabled { opacity: 0.3; }
-  .allocMove .lineIcon { width: 16px; height: 16px; }
+  .allocBadge {
+    flex: none; width: 32px; height: 32px; margin: 0; padding: 0; border-radius: 8px; font-size: 15px; font-weight: 800;
+    display: inline-flex; align-items: center; justify-content: center; color: #fff; background: var(--badge, var(--green));
+    font-variant-numeric: tabular-nums; transition: transform .1s;
+  }
+  .allocBadge:active { transform: scale(.92); }
+  .allocG.off .allocBadge { background: none; color: var(--muted); border: 1px dashed var(--muted); }
+  .allocInfo { flex: 1; min-width: 0; }
+  .allocName { display: block; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .allocDebt { display: block; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .allocPay { flex: none; text-align: right; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .allocPay.zero { color: var(--muted); font-weight: 500; }
+  .allocG.off .allocName, .allocG.off .allocDebt { color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .allocBadge { transition: none; } }
   .allocResult { font-size: 13px; margin-bottom: 4px; }
   .allocSum { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
   .allocSum b { font-size: 22px; font-variant-numeric: tabular-nums; }
@@ -1902,7 +1907,7 @@
         <button type="button" id="allocByBrig" class="on">По бригадам</button>
         <button type="button" id="allocByPerson">По людям</button>
       </div>
-      <label>Платим послойно: каждому по одной смене за круг. Порядок решает, кто первым получит в последнем круге. Снимите галочку, чтобы не платить в этот раз.</label>
+      <label>Платим послойно: каждому по одной смене за круг. Номер — приоритет в последнем круге; нажмите на номер, чтобы опустить ниже, у последнего — исключить («—»).</label>
       <div id="allocGroups" class="allocGroups"></div>
       <div id="allocResult" class="allocResult"></div>
       <div class="calBtns">
@@ -5308,8 +5313,8 @@
   // сверху вниз; внутри группы — по кругу, по одной самой старой смене
   // каждому человеку; не влезла следующая смена человека — он пропускается.
   var allocBy = 'brig', allocOrder = { brig: [], person: [] }, allocOff = {}, allocPicked = [];
-  var ICON_UP = '<svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
-  var ICON_DOWN = '<svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  // Цвет номера приоритета: 1 — зелёный, 2 — синий, 3 — оранжевый, …
+  var ALLOC_COLORS = ['#2e9d4f', '#3b7ddd', '#e07b22', '#8e5bd8', '#1a9aa0', '#c2477a', '#7a7f2a', '#6b6f78'];
   var allocModal = document.getElementById('allocModal');
   function allocPool_() {
     var list = payFiltered_();
@@ -5378,22 +5383,28 @@
     document.getElementById('allocByBrig').classList.toggle('on', allocBy === 'brig');
     document.getElementById('allocByPerson').classList.toggle('on', allocBy === 'person');
     var groups = allocGroups_(pool.rows);
-    document.getElementById('allocGroups').innerHTML = groups.map(function (g, i) {
+    var budget = Number(String(document.getElementById('allocBudget').value).replace(',', '.')) || 0;
+    var a = budget > 0 && groups.length ? allocCompute_(groups, budget) : { picked: [], used: 0, left: budget };
+    var pickedSet = {}; a.picked.forEach(function (r) { pickedSet[r.row] = true; });
+    // Включённые — по приоритету, исключённые — внизу.
+    var enabled = groups.filter(function (g) { return !allocOff[allocBy + ':' + g.key]; });
+    var disabled = groups.filter(function (g) { return allocOff[allocBy + ':' + g.key]; });
+    document.getElementById('allocGroups').innerHTML = enabled.concat(disabled).map(function (g) {
       var off = !!allocOff[allocBy + ':' + g.key];
+      var n = enabled.indexOf(g) + 1;
+      var pay = g.rows.reduce(function (s2, r) { return s2 + (pickedSet[r.row] ? (Number(r.total) || 0) : 0); }, 0);
       return '<div class="allocG' + (off ? ' off' : '') + '" data-k="' + escapeHtml(g.key) + '">' +
-        '<input type="checkbox"' + (off ? '' : ' checked') + ' aria-label="Платить: ' + escapeHtml(g.label) + '">' +
-        '<span class="allocNo">' + (i + 1) + '</span>' +
-        '<span class="allocName">' + escapeHtml(g.label) + '</span><span class="allocDebt">' + money_(g.sum) + '</span>' +
-        '<button type="button" class="allocMove" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="Выше">' + ICON_UP + '</button>' +
-        '<button type="button" class="allocMove" data-dir="1"' + (i === groups.length - 1 ? ' disabled' : '') + ' aria-label="Ниже">' + ICON_DOWN + '</button></div>';
+        '<button type="button" class="allocBadge" style="--badge:' + ALLOC_COLORS[(n - 1) % ALLOC_COLORS.length] + '" aria-label="' +
+          (off ? 'Исключён. Нажмите, чтобы вернуть первым' : 'Приоритет ' + n + '. Нажмите, чтобы опустить ниже') + ': ' + escapeHtml(g.label) + '">' +
+          (off ? '—' : n) + '</button>' +
+        '<span class="allocInfo"><span class="allocName">' + escapeHtml(g.label) + '</span>' +
+          '<span class="allocDebt">долг ' + money_(g.sum) + '</span></span>' +
+        '<span class="allocPay' + (pay ? '' : ' zero') + '">' + (off ? 'не платим' : (budget > 0 ? money_(pay) : '—')) + '</span></div>';
     }).join('') || '<div class="statsEmpty">Нет записей — измените фильтры</div>';
 
-    var budget = Number(String(document.getElementById('allocBudget').value).replace(',', '.')) || 0;
     var res = document.getElementById('allocResult'), applyBtn = document.getElementById('allocApply');
     if (!(budget > 0) || !groups.length) { res.innerHTML = ''; allocPicked = []; applyBtn.disabled = true; return; }
-    var a = allocCompute_(groups, budget);
     allocPicked = a.picked;
-    var pickedSet = {}; a.picked.forEach(function (r) { pickedSet[r.row] = true; });
     var html = '<div class="allocSum"><b>' + money_(a.used) + '</b><span>предлагаем из ' + money_(budget) +
       (a.left > 0 ? '<br>останется ' + money_(a.left) : '') + '</span></div>';
     if (budget >= debt) html += '<div class="allocPool">Денег хватает на весь долг.</div>';
@@ -5401,7 +5412,7 @@
       if (allocOff[allocBy + ':' + g.key]) return;
       var paid = g.rows.filter(function (r) { return pickedSet[r.row]; });
       var paidSum = paid.reduce(function (s2, r) { return s2 + (Number(r.total) || 0); }, 0);
-      html += '<div class="allocRG"><div class="h">' + escapeHtml(g.label) + '<span>' + money_(paidSum) + ' из ' + money_(g.sum) + '</span></div>';
+      html += '<div class="allocRG"><div class="h">' + escapeHtml(g.label) + '<span>' + money_(paidSum) + '</span></div>';
       var per = {};
       paid.forEach(function (r) { var w = r.worker || '(без имени)'; (per[w] = per[w] || { n: 0, sum: 0, dates: [] }); per[w].n++; per[w].sum += Number(r.total) || 0; per[w].dates.push(r.date); });
       var names = Object.keys(per);
@@ -5430,18 +5441,27 @@
   document.getElementById('allocByBrig').addEventListener('click', function () { allocBy = 'brig'; renderAlloc(); });
   document.getElementById('allocByPerson').addEventListener('click', function () { allocBy = 'person'; renderAlloc(); });
   document.getElementById('allocGroups').addEventListener('click', function (e) {
-    var row = e.target.closest('.allocG'); if (!row) return;
-    var k = row.dataset.k;
-    if (e.target.type === 'checkbox') {
-      if (e.target.checked) delete allocOff[allocBy + ':' + k]; else allocOff[allocBy + ':' + k] = true;
-      renderAlloc(); return;
+    var badge = e.target.closest('.allocBadge'); if (!badge) return;
+    var k = badge.closest('.allocG').dataset.k;
+    var offKey = allocBy + ':' + k;
+    var order = allocOrder[allocBy];
+    var enabledKeys = order.filter(function (x) { return !allocOff[allocBy + ':' + x]; });
+    if (allocOff[offKey]) {
+      // исключённый → снова в работе, первым
+      delete allocOff[offKey];
+      order.splice(order.indexOf(k), 1); order.unshift(k);
+    } else {
+      var pos = enabledKeys.indexOf(k);
+      if (pos === enabledKeys.length - 1) {
+        allocOff[offKey] = true;             // последний → исключить
+      } else {
+        // поменяться местами со следующим включённым (1 → 2, бывший 2 → 1)
+        var nextKey = enabledKeys[pos + 1];
+        var i = order.indexOf(k), j = order.indexOf(nextKey);
+        order[i] = nextKey; order[j] = k;
+      }
     }
-    var mv = e.target.closest('.allocMove');
-    if (mv) {
-      var order = allocOrder[allocBy], i = order.indexOf(k), j = i + Number(mv.dataset.dir);
-      if (i >= 0 && j >= 0 && j < order.length) { order.splice(i, 1); order.splice(j, 0, k); }
-      renderAlloc();
-    }
+    renderAlloc();
   });
   document.getElementById('allocApply').addEventListener('click', function () {
     if (!allocPicked.length) return;
