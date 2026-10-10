@@ -1,3 +1,6 @@
+// v49: бригадир из приложения — adminAddExpenseWorker(..., asBrigadier):
+//      бригадир тоже пишется в "Работники" (ему платят, в т.ч. по контрактам),
+//      а если колонка B "Бригадиры" ведётся (не пустая) — ещё и туда.
 // v48: добавление работника из приложения — adminAddExpenseWorker: имя
 //      (обязательно), фамилия, телефон. Дописывается в "Справочник расходов":
 //      "Имя Фамилия" в колонку A "Работники", телефон — в колонку C "Телефон"
@@ -397,7 +400,7 @@ function doPost(e) {
         data.objectName, data.rate, data.comment, data.dateTo, data.entries, data.status));
     }
     if (data.action === 'adminAddExpenseWorker') {
-      return jsonOutput(adminAddExpenseWorker(data.phone, data.firstName, data.lastName, data.workerPhone));
+      return jsonOutput(adminAddExpenseWorker(data.phone, data.firstName, data.lastName, data.workerPhone, data.asBrigadier));
     }
     if (data.action === 'adminAddContract') {
       return jsonOutput(adminAddContract(data.phone, data.objectName, data.brigadier, data.total, data.payments, data.comment));
@@ -2884,7 +2887,7 @@ function expenseRefColumn_(sheet, col) {
 }
 
 // Новый работник в справочник расходов. Возвращает { status, name, existed }.
-function adminAddExpenseWorker(phone, firstName, lastName, workerPhone) {
+function adminAddExpenseWorker(phone, firstName, lastName, workerPhone, asBrigadier) {
   var auth = adminAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   function clean_(v) { return String(v || '').replace(/\s+/g, ' ').trim().slice(0, 60); }
@@ -2897,21 +2900,32 @@ function adminAddExpenseWorker(phone, firstName, lastName, workerPhone) {
   lock.waitLock(15000);
   try {
     var ref = getExpenseRefSheet_();
+    // Первая пустая строка колонки col (колонки могут быть разной длины).
+    function firstEmptyRow_(col) {
+      var lr = ref.getLastRow();
+      var vals = lr >= 2 ? ref.getRange(2, col, lr - 1, 1).getValues() : [];
+      for (var i = vals.length - 1; i >= 0; i--) if (String(vals[i][0]).trim()) return i + 3;
+      return 2;
+    }
+    // Бригадир — ещё и в колонку B, если её ведут (иначе бригадиры = работники).
+    function addToBrigadiers_(n) {
+      if (!asBrigadier) return;
+      var brigs = expenseRefColumn_(ref, 2);
+      if (!brigs.length || pickFromList_(brigs, n)) return;
+      var r = firstEmptyRow_(2);
+      if (r > ref.getMaxRows()) ref.insertRowsAfter(ref.getMaxRows(), r - ref.getMaxRows());
+      ref.getRange(r, 2).setValue(n);
+    }
     var existing = pickFromList_(expenseRefColumn_(ref, 1), name);
-    if (existing) return { status: 'ok', name: existing, existed: true };
+    if (existing) { addToBrigadiers_(existing); SpreadsheetApp.flush(); return { status: 'ok', name: existing, existed: true }; }
     if (String(ref.getRange(1, 3).getValue()).trim() === '') {
       ref.getRange(1, 3).setValue('Телефон').setFontWeight('bold');
     }
-    // Первая пустая строка колонки A (колонка B "Бригадиры" может быть длиннее).
-    var lastRow = ref.getLastRow();
-    var colA = lastRow >= 2 ? ref.getRange(2, 1, lastRow - 1, 1).getValues() : [];
-    var row = 2;
-    for (var i = colA.length - 1; i >= 0; i--) {
-      if (String(colA[i][0]).trim()) { row = i + 3; break; }
-    }
+    var row = firstEmptyRow_(1);
     if (row > ref.getMaxRows()) ref.insertRowsAfter(ref.getMaxRows(), row - ref.getMaxRows());
     ref.getRange(row, 1).setValue(name);
     if (tel) ref.getRange(row, 3).setNumberFormat('@').setValue(tel);
+    addToBrigadiers_(name);
     SpreadsheetApp.flush();
     return { status: 'ok', name: name, existed: false };
   } finally {

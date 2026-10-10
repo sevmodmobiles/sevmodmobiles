@@ -3679,7 +3679,7 @@
     { addLabel: 'Добавить работника', onAddNew: function (q) { openAddWorker(q, 'expWorker'); } });
   initAutocomplete(document.getElementById('expBrigadier'), function () {
     return expLookups.brigadiers.length ? expLookups.brigadiers : expLookups.workers;
-  });
+  }, { addLabel: 'Добавить бригадира', onAddNew: function (q) { openAddWorker(q, 'expBrigadier', true); } });
   initAutocomplete(document.getElementById('expObject'), function () { return expLookups.objects; });
 
   // ----- Жёсткий выбор из списка: работник, бригадир, объект -----
@@ -3722,10 +3722,12 @@
   });
 
   // ----- Новый работник прямо из списка: имя (обязательно), фамилия, телефон -----
-  var awTargetId = null;
+  var awTargetId = null, awAsBrigadier = false;
   var awModal = document.getElementById('addWorkerModal');
-  function openAddWorker(query, targetId) {
+  function openAddWorker(query, targetId, asBrigadier) {
     awTargetId = targetId;
+    awAsBrigadier = !!asBrigadier;
+    document.getElementById('awTitle').textContent = awAsBrigadier ? 'Новый бригадир' : 'Новый работник';
     // поле очищаем сразу, иначе строгая проверка при уходе с поля сотрёт его с ошибкой
     var target = document.getElementById(targetId);
     target.value = '';
@@ -3749,7 +3751,8 @@
     apiPost({
       action: 'adminAddExpenseWorker', phone: currentUser && currentUser.phone,
       firstName: first, lastName: document.getElementById('awLast').value.trim(),
-      workerPhone: document.getElementById('awPhone').value.trim()
+      workerPhone: document.getElementById('awPhone').value.trim(),
+      asBrigadier: awAsBrigadier
     }).then(function (res) {
       btn.disabled = false;
       if (!res || res.status !== 'ok' || !res.name) {
@@ -3758,10 +3761,11 @@
         return;
       }
       var name = res.name;
-      if (expLookups.workers.indexOf(name) < 0) {
-        expLookups.workers.push(name);
-        expLookups.workers.sort(function (a, b) { return a.localeCompare(b, 'ru'); });
+      function addSorted_(list) {
+        if (list.indexOf(name) < 0) { list.push(name); list.sort(function (a, b) { return a.localeCompare(b, 'ru'); }); }
       }
+      addSorted_(expLookups.workers);
+      if (awAsBrigadier) addSorted_(expLookups.brigadiers);
       closeAddWorker();
       var target = document.getElementById(awTargetId);
       target.value = name;
@@ -4416,7 +4420,8 @@
   var ctPickObject = { id: 'ctObject', label: 'объект', items: function () { return expLookups.objects; } };
   var ctPickBrig = { id: 'ctBrig', label: 'бригадира', items: function () { return expLookups.brigadiers; } };
   initAutocomplete(document.getElementById('ctObject'), function () { return expLookups.objects; });
-  initAutocomplete(document.getElementById('ctBrig'), function () { return expLookups.brigadiers; });
+  initAutocomplete(document.getElementById('ctBrig'), function () { return expLookups.brigadiers; },
+    { addLabel: 'Добавить бригадира', onAddNew: function (q) { openAddWorker(q, 'ctBrig', true); } });
   initAutocomplete(document.getElementById('ctObjForeman'), function () { return Object.keys(adminAssigneeMap); });
   [ctPickObject, ctPickBrig].forEach(function (f) {
     var el = document.getElementById(f.id);
