@@ -1,4 +1,8 @@
-// v55: смена статуса из «Расходы по людям» (карандаш у записи/человека).
+// v55: цвета статусов — условное форматирование колонки «Статус» по цветам
+//      сводки в шапке (applyExpenseStatusColors_). Ставится один раз само
+//      при открытии расходов в приложении, после каждого пересоздания
+//      выпадающего списка статусов и пунктом меню «Вернуть цвета статусов».
+//      Смена статуса группой из «Расходы по людям» (чекбоксы).
 //      adminSetExpenseStatus(phone, items, status, payDate, reason): если
 //      хоть одна запись была «ОПЛАЧЕНО», а новый статус другой — причина
 //      обязательна (пишется в журнал изменений).
@@ -483,6 +487,7 @@ function onOpen() {
     .addItem('Включить автосинхронизацию объектов с финдиром (раз)', 'setupFindirSyncTrigger')
     .addItem('Отсортировать расходы по дате', 'sortExpensesByDateManual')
     .addItem('Включить строгие списки в расходах', 'applyExpenseStrictListsManual')
+    .addItem('Вернуть цвета статусов в расходах', 'applyExpenseStatusColorsManual')
     .addItem('Включить ежедневный перевод платежей по договорам (раз)', 'setupContractDueTrigger')
     .addItem('Включить уведомления об удалении расходов на почту', 'enableExpenseDeleteNotify')
     .addItem('Восстановить выделенные удаления (лист журнала)', 'restoreExpenseFromAudit')
@@ -3363,6 +3368,50 @@ function ensureExpenseStatuses_(sheet, lay) {
     .setAllowInvalid(rule ? rule.getAllowInvalid() : false)
     .build();
   sheet.getRange(lay.headerRow + 1, col, n, 1).setDataValidation(newRule);
+  // Новое правило теряет цвета вариантов списка — красим условным форматированием.
+  try { applyExpenseStatusColors_(sheet, lay); } catch (e) { /* цвет не важнее списка */ }
+}
+
+// Цвет ячеек колонки «Статус» = цвет строки статуса в сводке шапки.
+// Свои правила (текст равен статусу, только колонка «Статус») заменяются,
+// остальные правила условного форматирования листа не трогаются.
+var STATUS_COLORS_PROP = 'EXPENSE_STATUS_COLORS_V';
+function applyExpenseStatusColors_(sheet, lay) {
+  var col = lay.cols.status;
+  if (!col) return 0;
+  var first = lay.headerRow + 1, n = sheet.getMaxRows() - lay.headerRow;
+  if (n < 1) return 0;
+  var range = sheet.getRange(first, col, n, 1);
+  var colors = [], seen = {};
+  expenseSummary_(sheet, lay).forEach(function (x) {
+    var c = String(x.color || '').toLowerCase(), k = x.label.toLowerCase();
+    if (!x.label || seen[k] || !/^#[0-9a-f]{6}$/.test(c) || c === '#ffffff') return;
+    seen[k] = true;
+    colors.push({ label: x.label, color: c });
+  });
+  if (!colors.length) return 0;
+  var mine = sheet.getConditionalFormatRules().filter(function (r) {
+    var rs = r.getRanges();
+    var b = r.getBooleanCondition();
+    return !(rs.length === 1 && rs[0].getColumn() === col && rs[0].getNumColumns() === 1 && rs[0].getRow() === first &&
+      b && b.getCriteriaType() === SpreadsheetApp.BooleanCriteria.TEXT_EQUAL_TO);
+  });
+  colors.forEach(function (x) {
+    var rgb = [1, 3, 5].map(function (i) { return parseInt(x.color.substr(i, 2), 16); });
+    var light = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) > 150;
+    mine.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(x.label).setBackground(x.color).setFontColor(light ? '#000000' : '#ffffff')
+      .setRanges([range]).build());
+  });
+  sheet.setConditionalFormatRules(mine);
+  PropertiesService.getScriptProperties().setProperty(STATUS_COLORS_PROP, '1');
+  return colors.length;
+}
+function applyExpenseStatusColorsManual() {
+  var lay = expenseLayout_();
+  if (lay.error) { SpreadsheetApp.getUi().alert(lay.error); return; }
+  var n = applyExpenseStatusColors_(lay.sheet, lay);
+  SpreadsheetApp.getActiveSpreadsheet().toast(n ? 'Цвета статусов восстановлены: ' + n : 'В шапке не найдено цветных статусов', 'SEVMOD', 4);
 }
 
 // Допустимые статусы: выпадающий список колонки "Статус" (после
@@ -3754,6 +3803,9 @@ function adminExpenseOverview(phone) {
   var tz = Session.getScriptTimeZone();
 
   try { ensureExpenseStatuses_(sheet, lay); } catch (e) { /* обзор важнее */ }
+  try {
+    if (!PropertiesService.getScriptProperties().getProperty(STATUS_COLORS_PROP)) applyExpenseStatusColors_(sheet, lay);
+  } catch (e) { /* обзор важнее */ }
   var promoted = 0;
   try { promoted = promoteDueContractPayments_(sheet, lay); } catch (e) { /* обзор важнее */ }
   if (promoted) SpreadsheetApp.flush();
