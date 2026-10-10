@@ -867,10 +867,25 @@
     position: sticky; bottom: calc(58px + env(safe-area-inset-bottom, 0px)); z-index: 5;
     box-shadow: 0 -4px 18px rgba(0,0,0,0.25);
   }
-  .payAction .payActRow { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 8px; }
-  .payAction label { margin-bottom: 4px; }
-  .payAction .statusSelectWrap, .payAction input { margin-bottom: 0; }
-  .payAction button { margin-top: 10px; }
+  .payActTop { display: flex; align-items: flex-end; gap: 12px; }
+  .payDateBox { flex: 0 1 170px; min-width: 0; }
+  .payDateBox label { margin-bottom: 4px; }
+  .payDateBox input { margin: 0; padding: 11px 10px; }
+  .payBig { flex: 1; min-width: 0; text-align: right; }
+  .payBigSum { font-size: 28px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .payBigCount { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .paySplit { display: flex; margin-top: 12px; border-radius: 10px; overflow: hidden; }
+  .paySplit .paySplitMain {
+    flex: 1; margin: 0; border-radius: 0; font-size: 18px; font-weight: 800; letter-spacing: .02em;
+    background: var(--payColor, var(--green)); color: var(--payText, #fff);
+  }
+  .paySplitMenu {
+    position: relative; flex: none; width: 56px; display: flex; align-items: center; justify-content: center;
+    background: var(--payColor, var(--green)); color: var(--payText, #fff); font-size: 18px;
+    border-left: 1px solid rgba(0,0,0,0.25);
+  }
+  .paySplitMenu select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+  .paySplit.disabled { opacity: 0.55; }
   .ctAdvRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 8px; align-items: end; margin-bottom: 8px; }
   .ctAdvRow > div { min-width: 0; }
   .ctAdvRow label { margin-bottom: 4px; }
@@ -1567,20 +1582,24 @@
       <div id="payList" class="payList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
     <div class="card payAction">
-      <div class="payActRow">
-        <div>
-          <label for="payNewStatus">Новый статус</label>
-          <div class="statusSelectWrap">
-            <span id="payNewStatusDot" class="dot" aria-hidden="true"></span>
-            <select id="payNewStatus"></select>
-          </div>
-        </div>
-        <div>
+      <div class="payActTop">
+        <div class="payDateBox">
           <label for="payDate">Дата погашения</label>
           <input id="payDate" type="date">
         </div>
+        <div class="payBig">
+          <div id="payBigSum" class="payBigSum">0 ₽</div>
+          <div id="payBigCount" class="payBigCount">ничего не выбрано</div>
+        </div>
       </div>
-      <button id="payApply" type="button" style="background: #e07b22;" disabled>Выберите записи</button>
+      <!-- Кнопка = статус, который будет поставлен; правый край — выбор статуса -->
+      <div class="paySplit" id="paySplit">
+        <button id="payApply" type="button" class="paySplitMain" disabled>ОПЛАЧЕНО</button>
+        <div class="paySplitMenu">
+          <span aria-hidden="true">▾</span>
+          <select id="payNewStatus" aria-label="Сменить статус кнопки"></select>
+        </div>
+      </div>
       <div id="payMsg"></div>
     </div>
   </div>
@@ -4735,11 +4754,19 @@
     if (list.indexOf(cur) >= 0) sel.value = cur;
     updatePayDot();
   }
+  // Кнопка показывает выбранный статус и красится в его цвет из таблицы;
+  // цвет текста — чёрный или белый, смотря по яркости фона.
   function updatePayDot() {
     var st = document.getElementById('payNewStatus').value;
     var c = (expLookups.statusColors || {})[String(st).toLowerCase()];
-    if (!c || /^#?(fff|ffffff)$/i.test(c)) c = expOverview ? expStatusColor_(st) : 'var(--muted)';
-    document.getElementById('payNewStatusDot').style.background = c;
+    if (!c || /^#?(fff|ffffff)$/i.test(c)) c = expOverview ? expStatusColor_(st) : '';
+    if (!/^#[0-9a-f]{6}$/i.test(c || '')) c = '#34A853';
+    var rgb = [1, 3, 5].map(function (i) { return parseInt(c.substr(i, 2), 16); });
+    var light = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) > 150;
+    var split = document.getElementById('paySplit');
+    split.style.setProperty('--payColor', c);
+    split.style.setProperty('--payText', light ? '#111' : '#fff');
+    document.getElementById('payApply').textContent = st || 'Статус';
     // Для «Оплачено» сразу предлагаем сегодняшнюю дату погашения.
     var d = document.getElementById('payDate');
     if (expKey_(st) === 'оплачено' && !d.value) d.value = isoToday_();
@@ -4876,7 +4903,9 @@
       money_(list.reduce(function (a, r) { return a + (Number(r.total) || 0); }, 0));
     var btn = document.getElementById('payApply');
     btn.disabled = !n;
-    btn.textContent = n ? 'Поставить статус — ' + n + ' зап.' : 'Выберите записи';
+    document.getElementById('paySplit').classList.toggle('disabled', !n);
+    document.getElementById('payBigSum').textContent = money_(sum);
+    document.getElementById('payBigCount').textContent = n ? 'выбрано ' + n + ' зап.' : 'ничего не выбрано';
   }
   document.getElementById('payList').addEventListener('click', function (e) {
     var grp = e.target.closest('.payGroup'); if (!grp) return;
