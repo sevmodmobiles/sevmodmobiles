@@ -1057,6 +1057,36 @@
   #expSelStatus { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
   #expSelDel { background: none; color: var(--red); border: 1px solid var(--red); }
   .stOpts { display: grid; gap: 6px; margin: 10px 0; }
+  /* Подотчётные деньги */
+  .cashHead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .cashHead h2 { margin: 0; font-size: 17px; flex: 1; }
+  .cashMoveBtn { width: auto; margin: 0; padding: 8px 12px; font-size: 13px; }
+  .cashTile { display: block; width: 100%; margin: 0; padding: 10px 2px; background: none; color: var(--text); text-align: left;
+    border: none; border-bottom: 1px solid var(--border); border-radius: 0; font-weight: 400; }
+  .cashTile:last-child { border-bottom: none; }
+  .cashTop { display: flex; align-items: baseline; gap: 8px; }
+  .cashName { font-weight: 700; font-size: 16px; }
+  .cashName .me { font-size: 12px; font-weight: 600; color: var(--blue); margin-left: 4px; }
+  .cashBal { margin-left: auto; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cashBal.neg { color: #e07b22; }
+  .cashTile.mine .cashBal { font-size: 28px; }
+  .cashSub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  #cmModal .modalBox, #chModal .modalBox { max-height: calc(100dvh - 32px); overflow-y: auto; }
+  .cmAmt { font-size: 22px; font-weight: 700; margin: 0; padding: 10px; font-variant-numeric: tabular-nums; }
+  .cmHint { font-size: 12px; color: var(--muted); margin: -4px 0 8px; }
+  .chSum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 6px 0 12px; }
+  .chSum div { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+  .chSum span { display: block; font-size: 11px; color: var(--muted); }
+  .chSum b { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .chItem { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .chItem:last-child { border-bottom: none; }
+  .chItem .d { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .chItem .t { flex: 1; min-width: 0; }
+  .chItem .t small { display: block; color: var(--muted); font-size: 12px; }
+  .chItem .a { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .chItem .a.plus { color: var(--green); }
+  .pcBal { font-weight: 500; opacity: .75; margin-left: 4px; }
+  .pcWarn { font-size: 12px; color: #e07b22; margin: -2px 0 8px; }
   /* Комментарий к оплате */
   #pcModal .modalBox { max-height: calc(100dvh - 32px); overflow-y: auto; }
   .pcBlock { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin: 10px 0; background: var(--bg); }
@@ -1618,6 +1648,11 @@
       <h1 style="margin-top:0;">Расходы</h1>
       <div class="switchUser"><a id="expHubBackLink">← Панель администратора</a></div>
     </div>
+    <div class="card" id="cashCard" hidden>
+      <div class="cashHead"><h2>Деньги на руках</h2>
+        <button id="cashMoveBtn" type="button" class="cashMoveBtn">Передать деньги</button></div>
+      <div id="cashList"></div>
+    </div>
     <div class="card">
       <div id="expSummary"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
       <div id="expUpdated" class="expUpdated"></div>
@@ -2035,6 +2070,30 @@
       <div class="calBtns">
         <button id="stCancel" type="button" class="calCancel">Отмена</button>
         <button id="stOk" type="button" disabled>Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Передача подотчётных денег: от кого → кому -->
+  <div id="cmModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="cmTitle">
+    <div class="modalBox">
+      <h2 id="cmTitle" style="margin-top:0; color: var(--text);">Передать деньги</h2>
+      <div id="cmForm"></div>
+      <div id="cmStatus"></div>
+      <div class="calBtns">
+        <button id="cmCancel" type="button" class="calCancel">Отмена</button>
+        <button id="cmOk" type="button">Записать</button>
+      </div>
+    </div>
+  </div>
+  <!-- История подотчёта одного держателя -->
+  <div id="chModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="chTitle">
+    <div class="modalBox">
+      <h2 id="chTitle" style="margin-top:0; color: var(--text);"></h2>
+      <div id="chBody"></div>
+      <div class="calBtns">
+        <button id="chClose" type="button" class="calCancel">Закрыть</button>
+        <button id="chMove" type="button">Передать деньги</button>
       </div>
     </div>
   </div>
@@ -4544,7 +4603,160 @@
   }
   // Сводка как в шапке таблицы: строка без суммы — заголовок группы
   // ("Под отчет"), строки под ней — с отступом.
+  // ----- Подотчётные деньги -----
+  function cashData_() { return (expOverview && expOverview.cash) || null; }
+  function cashHolder_(name) {
+    var c = cashData_(); if (!c) return null;
+    return c.holders.filter(function (h) { return h.name === name; })[0] || null;
+  }
+  // Держатель, которым является текущий пользователь (по первому слову имени).
+  function cashMe_() {
+    var c = cashData_(); if (!c || !currentUser || !currentUser.name) return '';
+    var first = expKey_(String(currentUser.name).split(/\s+/)[0]);
+    var full = expKey_(currentUser.name);
+    var h = c.holders.filter(function (x) { var k = expKey_(x.name); return k === full || k === first || k.split(' ')[0] === first; })[0];
+    return h ? h.name : '';
+  }
+  function signedMoney_(n) { return (n < 0 ? '−' : '') + money_(Math.abs(n)); }
+  function cashBalText_(h) {
+    return h.balance < 0 ? 'компания должна ' + money_(-h.balance) : money_(h.balance);
+  }
+  function renderCash_() {
+    var c = cashData_(), card = document.getElementById('cashCard');
+    card.hidden = !c || !c.holders.length;
+    if (card.hidden) return;
+    var me = cashMe_();
+    var list = c.holders.slice().sort(function (a, b) { return (b.name === me) - (a.name === me); });
+    document.getElementById('cashList').innerHTML = list.map(function (h) {
+      return '<button type="button" class="cashTile' + (h.name === me ? ' mine' : '') + '" data-name="' + escapeHtml(h.name) + '">' +
+        '<div class="cashTop"><span class="cashName">' + escapeHtml(h.name) + (h.name === me ? '<span class="me">вы</span>' : '') + '</span>' +
+        '<span class="cashBal' + (h.balance < 0 ? ' neg' : '') + '">' + (h.balance < 0 ? '−' + money_(-h.balance) : money_(h.balance)) + '</span></div>' +
+        '<div class="cashSub">' + (h.balance < 0 ? 'Потратил своих — компания должна ' + money_(-h.balance) + ' · ' : '') +
+        'получено ' + money_(h.received) + ' · раздал ' + money_(h.paid + h.given) + '</div></button>';
+    }).join('');
+  }
+  document.getElementById('cashList').addEventListener('click', function (e) {
+    var t = e.target.closest('.cashTile'); if (t) openCashHistory_(t.dataset.name);
+  });
+  document.getElementById('cashMoveBtn').addEventListener('click', function () { openCashMove_({}); });
+
+  // История держателя: передачи + оплаты работникам (по дням оплаты).
+  var chModal = document.getElementById('chModal'), chName = '';
+  function openCashHistory_(name) {
+    var h = cashHolder_(name); if (!h) return;
+    chName = name;
+    document.getElementById('chTitle').textContent = name + ': ' + cashBalText_(h);
+    var items = [];
+    cashData_().moves.forEach(function (m) {
+      if (m.to === name) items.push({ d: m.date, t: 'Получил от ' + m.from, s: [m.method, m.comment].filter(Boolean).join(' · '), a: m.amount });
+      else if (m.from === name) items.push({ d: m.date, t: (m.to === cashData_().company ? 'Вернул в компанию' : 'Передал ' + m.to), s: [m.method, m.comment].filter(Boolean).join(' · '), a: -m.amount });
+    });
+    var byDay = {};
+    expRows_().forEach(function (r) {
+      if (r.payer !== name || !isPaid_(r.status)) return;
+      var d = r.payDate || r.date || '';
+      var g = byDay[d] || (byDay[d] = { sum: 0, n: 0, people: {} });
+      g.sum += Number(r.total) || 0; g.n++; g.people[r.worker || '—'] = true;
+    });
+    Object.keys(byDay).forEach(function (d) {
+      var g = byDay[d], ppl = Object.keys(g.people);
+      items.push({ d: d, t: 'Оплатил работникам: ' + g.n + ' зап.', s: ppl.slice(0, 4).join(', ') + (ppl.length > 4 ? ' и ещё ' + (ppl.length - 4) : ''), a: -g.sum });
+    });
+    items.sort(function (a, b) { return a.d < b.d ? 1 : (a.d > b.d ? -1 : 0); });
+    document.getElementById('chBody').innerHTML =
+      '<div class="chSum"><div><span>Получено</span><b>' + money_(h.received) + '</b></div>' +
+      '<div><span>Раздал</span><b>' + money_(h.paid + h.given) + '</b></div>' +
+      '<div><span>' + (h.balance < 0 ? 'Компания должна' : 'На руках') + '</span><b>' + money_(Math.abs(h.balance)) + '</b></div></div>' +
+      (items.length ? items.map(function (it) {
+        return '<div class="chItem"><span class="d">' + (it.d ? fmtIsoRu_(it.d) : '—') + '</span><span class="t">' + escapeHtml(it.t) +
+          (it.s ? '<small>' + escapeHtml(it.s) + '</small>' : '') + '</span><span class="a' + (it.a > 0 ? ' plus' : '') + '">' +
+          (it.a > 0 ? '+' : '−') + money_(Math.abs(it.a)) + '</span></div>';
+      }).join('') : '<div class="statsEmpty">Пока нет движений</div>');
+    chModal.classList.add('open');
+  }
+  document.getElementById('chClose').addEventListener('click', function () { chModal.classList.remove('open'); });
+  chModal.addEventListener('click', function (e) { if (e.target === chModal) chModal.classList.remove('open'); });
+  document.getElementById('chMove').addEventListener('click', function () { chModal.classList.remove('open'); openCashMove_({ to: chName }); });
+
+  // Передача денег: Компания → держатель, держатель → держатель, держатель → Компания.
+  var cmModal = document.getElementById('cmModal'), mv = null;
+  function openCashMove_(pre) {
+    if (!expLookups.loaded) loadExpLookups();
+    mv = { from: pre.from || cashData_().company, to: pre.to || '', amount: '', date: isoToday_(), method: '', bank: '', comment: '' };
+    document.getElementById('cmStatus').textContent = ''; document.getElementById('cmStatus').className = '';
+    document.getElementById('cmOk').disabled = false;
+    renderCashMove_();
+    cmModal.classList.add('open');
+  }
+  function renderCashMove_() {
+    var c = cashData_(), names = c.holders.map(function (h) { return h.name; });
+    function chips(field, list) {
+      return list.map(function (x) {
+        var h = cashHolder_(x);
+        return '<button type="button" class="pcChip' + (mv[field] === x ? ' on' : '') + '" data-f="' + field + '" data-v="' + escapeHtml(x) + '">' +
+          escapeHtml(x) + (h && field === 'from' ? '<span class="pcBal">' + signedMoney_(h.balance) + '</span>' : '') + '</button>';
+      }).join('');
+    }
+    var fromH = cashHolder_(mv.from), amt = Number(String(mv.amount).replace(/\s/g, '')) || 0;
+    document.getElementById('cmForm').innerHTML =
+      '<div class="pcRow"><span class="lbl">От кого</span>' + chips('from', [c.company].concat(names)) + '</div>' +
+      '<div class="pcRow"><span class="lbl">Кому</span>' + chips('to', names.concat([c.company]).filter(function (x) { return x !== mv.from; })) + '</div>' +
+      '<label for="cmAmount">Сумма, ₽</label><input id="cmAmount" class="cmAmt" type="text" inputmode="numeric" autocomplete="off" placeholder="0" value="' + escapeHtml(mv.amount) + '">' +
+      (fromH && amt > fromH.balance ? '<div class="pcWarn">' + escapeHtml(mv.from) + ': на руках ' + signedMoney_(fromH.balance) + ' — уйдёт в минус (компания будет должна)</div>' : '') +
+      '<label for="cmDate">Дата</label><input id="cmDate" type="date" value="' + escapeHtml(mv.date) + '">' +
+      '<div class="pcRow"><span class="lbl">Как</span>' +
+        '<button type="button" class="pcChip' + (mv.method === 'cash' ? ' on' : '') + '" data-f="method" data-v="cash">Наличными</button>' +
+        '<button type="button" class="pcChip' + (mv.method === 'card' ? ' on' : '') + '" data-f="method" data-v="card">На карту</button></div>' +
+      (mv.method === 'card' ? '<div class="pcRow"><span class="lbl">Банк</span>' + pcBanks_().map(function (b) {
+        return '<button type="button" class="pcChip' + (mv.bank === b ? ' on' : '') + '" data-f="bank" data-v="' + escapeHtml(b) + '">' + escapeHtml(b) + '</button>';
+      }).join('') + '</div>' : '') +
+      '<input id="cmComment" type="text" maxlength="300" placeholder="Комментарий (необязательно)" value="' + escapeHtml(mv.comment) + '">';
+  }
+  cmModal.addEventListener('click', function (e) {
+    if (e.target === cmModal) { cmModal.classList.remove('open'); return; }
+    var b = e.target.closest('.pcChip'); if (!b) return;
+    var f = b.dataset.f;
+    mv[f] = (mv[f] === b.dataset.v && f !== 'from') ? '' : b.dataset.v;
+    if (f === 'from' && mv.to === mv.from) mv.to = '';
+    if (f === 'method' && mv.method !== 'card') mv.bank = '';
+    renderCashMove_();
+  });
+  cmModal.addEventListener('input', function (e) {
+    if (e.target.id === 'cmAmount') {
+      var digits = e.target.value.replace(/[^\d]/g, '').replace(/^0+/, '');
+      var was = mv.amount;
+      mv.amount = digits ? Number(digits).toLocaleString('ru-RU') : '';
+      e.target.value = mv.amount;
+      var fromH = cashHolder_(mv.from), amt = Number(digits) || 0;
+      var need = !!(fromH && amt > fromH.balance), had = !!cmModal.querySelector('.pcWarn');
+      if (need !== had) { renderCashMove_(); var el = document.getElementById('cmAmount'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+      void was;
+    } else if (e.target.id === 'cmDate') mv.date = e.target.value;
+    else if (e.target.id === 'cmComment') mv.comment = e.target.value;
+  });
+  document.getElementById('cmCancel').addEventListener('click', function () { cmModal.classList.remove('open'); });
+  document.getElementById('cmOk').addEventListener('click', function () {
+    var st = document.getElementById('cmStatus'), btn = this;
+    var amt = Number(String(mv.amount).replace(/\s/g, '')) || 0;
+    var err = !mv.from ? 'Укажите, от кого' : !mv.to ? 'Укажите, кому' : !(amt > 0) ? 'Укажите сумму' : !mv.date ? 'Укажите дату' :
+      !mv.method ? 'Укажите, как передали' : (mv.method === 'card' && !mv.bank) ? 'Укажите банк' : '';
+    if (err) { st.textContent = err; st.className = 'error'; return; }
+    btn.disabled = true; st.textContent = 'Записываю…'; st.className = '';
+    apiPost({ action: 'adminAddCashMove', phone: currentUser && currentUser.phone, from: mv.from, to: mv.to, amount: amt, date: mv.date,
+      method: mv.method === 'cash' ? 'наличными' : 'на карту ' + mv.bank, comment: mv.comment.trim() })
+      .then(function (res) {
+        if (!res || res.status !== 'ok') {
+          btn.disabled = false; st.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v57'; st.className = 'error'; return;
+        }
+        cmModal.classList.remove('open');
+        expOverview = null;
+        loadExpOverview(function (e2) { if (!e2) { renderExpSummary(); } });
+      })
+      .catch(function (e2) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + e2; st.className = 'error'; });
+  });
+
   function renderExpSummary() {
+    renderCash_();
     var box = document.getElementById('expSummary');
     var items = expOverview.summary || [];
     if (!items.length) { box.innerHTML = '<div class="statsEmpty">В шапке листа расходов нет сводки</div>'; return; }
@@ -4941,7 +5153,7 @@
     function sendSt_(cm) {
     okBtn.disabled = true; st.textContent = 'Сохраняю…'; st.className = '';
     apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: stPick, payDate: payDate, reason: reason,
-      items: rows.map(function (r) { return { row: r.row, key: payKey_(r), comment: cm[r.row] || '' }; }) })
+      items: rows.map(function (r) { var x = cm[r.row] || {}; return { row: r.row, key: payKey_(r), comment: x.comment || '', payer: x.payer || '' }; }) })
       .then(function (res) {
         if (!res || res.status !== 'ok') {
           okBtn.disabled = false;
@@ -4972,7 +5184,17 @@
   // Последний выбор запоминается, чтобы в следующий раз хватило одного нажатия.
   var pcModal = document.getElementById('pcModal'), pcRows = [], pcGroups = [], pcCommon = null, pcOwn = {}, pcOpenOwn = {}, pcDone = null, pcCancelCb = null;
   var PC_LAST_KEY = 'sevmod_pay_comment_last';
-  function pcPayers_() { return (expLookups.payers && expLookups.payers.length) ? expLookups.payers : ['Дмитрий', 'Кирилл', 'Влад']; }
+  function pcPayers_() {
+    var c = cashData_();
+    if (c && c.holders.length) return c.holders.map(function (h) { return h.name; });
+    return (expLookups.payers && expLookups.payers.length) ? expLookups.payers : ['Дмитрий', 'Кирилл', 'Влад'];
+  }
+  // Сколько уйдёт с подотчёта каждого плательщика при этой оплате.
+  function pcPayerTotals_() {
+    var t = {};
+    pcGroups.forEach(function (g) { var p = pcEffective_(g.name).payer; if (p) t[p] = (t[p] || 0) + g.sum; });
+    return t;
+  }
   function pcBanks_() { return (expLookups.banks && expLookups.banks.length) ? expLookups.banks : ['Сбер', 'Т-Банк', 'Альфа-Банк', 'ВТБ', 'Озон Банк', 'Райффайзен']; }
   function pcText_(c) {
     if (!c || !c.payer || !c.method || (c.method === 'card' && !c.bank)) return '';
@@ -4992,7 +5214,20 @@
           '" data-v="' + escapeHtml(x) + '">' + escapeHtml(x) + '</button>';
       }).join('');
     }
-    var html = '<div class="pcRow"><span class="lbl">Кто оплатил</span>' + chips(pcPayers_(), 'payer', c.payer) + '</div>' +
+    var payerChips = pcPayers_().map(function (x) {
+      var h = cashHolder_(x);
+      return '<button type="button" class="pcChip' + (c.payer === x ? ' on' : '') + '" data-scope="' + escapeHtml(scope) + '" data-f="payer" data-v="' + escapeHtml(x) + '">' +
+        escapeHtml(x) + (h ? '<span class="pcBal">' + signedMoney_(h.balance) + '</span>' : '') + '</button>';
+    }).join('');
+    var warn = '';
+    if (scope === '*' || pcOwn[scope]) {
+      var tot = pcPayerTotals_(), h0 = cashHolder_(c.payer);
+      if (h0 && tot[c.payer] > h0.balance) {
+        warn = '<div class="pcWarn">' + escapeHtml(c.payer) + ': на руках ' + signedMoney_(h0.balance) + ', спишется ' + money_(tot[c.payer]) +
+          ' → ' + signedMoney_(h0.balance - tot[c.payer]) + ' (компания будет должна)</div>';
+      }
+    }
+    var html = '<div class="pcRow"><span class="lbl">Кто оплатил</span>' + payerChips + '</div>' + warn +
       '<div class="pcRow"><span class="lbl">Как</span>' +
       '<button type="button" class="pcChip' + (c.method === 'cash' ? ' on' : '') + '" data-scope="' + escapeHtml(scope) + '" data-f="method" data-v="cash">Наличными</button>' +
       '<button type="button" class="pcChip' + (c.method === 'card' ? ' on' : '') + '" data-scope="' + escapeHtml(scope) + '" data-f="method" data-v="card">На карту</button></div>';
@@ -5117,7 +5352,10 @@
     }
     try { localStorage.setItem(PC_LAST_KEY, JSON.stringify({ payer: pcCommon.payer, method: pcCommon.method, bank: pcCommon.bank })); } catch (e) {}
     var byRow = {};
-    pcGroups.forEach(function (g) { var t = pcText_(pcEffective_(g.name)); g.rows.forEach(function (r) { byRow[r.row] = t; }); });
+    pcGroups.forEach(function (g) {
+      var c1 = pcEffective_(g.name), t = pcText_(c1);
+      g.rows.forEach(function (r) { byRow[r.row] = { comment: t, payer: c1.payer }; });
+    });
     closePayComments_(false);
     if (pcDone) pcDone(byRow);
   });
@@ -5710,7 +5948,7 @@
     cm = cm || {};
     btn.disabled = true; msg.textContent = 'Меняю статус…'; msg.className = '';
     apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: status,
-      items: items.map(function (it) { return { row: it.row, key: it.key, comment: cm[it.row] || '' }; }),
+      items: items.map(function (it) { var x = cm[it.row] || {}; return { row: it.row, key: it.key, comment: x.comment || '', payer: x.payer || '' }; }),
       payDate: payDate ? payDate : null, reason: reason })
       .then(function (res) {
         if (!res || res.status !== 'ok') {

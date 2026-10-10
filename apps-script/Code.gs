@@ -1,3 +1,9 @@
+// v57: подотчётные деньги. Лист «Подотчёт» — журнал передач (от кого →
+//      кому, «Компания» — касса/счёт фирмы). Колонка «Оплатил» в листе
+//      расходов (создаётся сама). Остаток держателя = получил − передал −
+//      оплатил работникам (строки «ОПЛАЧЕНО» с его именем в «Оплатил»).
+//      Минус — компания должна держателю. adminAddCashMove(...), обзор
+//      расходов возвращает cash { holders, moves }.
 // v56: комментарий к оплате. adminSetExpenseStatus принимает в items поле
 //      comment — дописывается в «Комментарий» строки (через « · », если там
 //      уже что-то есть). Справочник: колонка D «Банки», E «Кто платит»
@@ -450,6 +456,9 @@ function doPost(e) {
     }
     if (data.action === 'adminDeleteExpenseRows') {
       return jsonOutput(adminDeleteExpenseRows(data.phone, data.items, data.reason));
+    }
+    if (data.action === 'adminAddCashMove') {
+      return jsonOutput(adminAddCashMove(data.phone, data.from, data.to, data.amount, data.date, data.method, data.comment));
     }
     if (data.action === 'adminAddExpenseBank') {
       return jsonOutput(adminAddExpenseBank(data.phone, data.name));
@@ -2850,6 +2859,7 @@ function expenseLayout_() {
         else if (h.indexOf('кол-во') === 0 && !cols.count) cols.count = c + 1;
         else if (h.indexOf('итого') === 0 && !cols.total) cols.total = c + 1;
         else if (h.indexOf('статус') === 0 && !cols.status) cols.status = c + 1;
+        else if (h.indexOf('оплатил') === 0 && !cols.payer) cols.payer = c + 1;
       }
       if (cols.date && cols.rate && cols.worker && cols.object) {
         return { sheet: sheet, headerRow: r + 1, cols: cols };
@@ -3788,7 +3798,7 @@ function adminSetExpenseStatus(phone, items, status, payDate, reason) {
     var n = last - first + 1;
     // Всё читаем одним блоком; проверяем отпечатки.
     var data = sheet.getRange(first, 1, n, sheet.getLastColumn()).getValues();
-    var updated = 0, conflicts = 0, rowsToSet = {}, rowComments = {}, minR = Infinity, maxR = -Infinity;
+    var updated = 0, conflicts = 0, rowsToSet = {}, rowComments = {}, rowPayers = {}, minR = Infinity, maxR = -Infinity;
     items.forEach(function (it) {
       var r = Number(it && it.row);
       if (!(r >= first && r <= last)) { conflicts++; return; }
@@ -3801,6 +3811,8 @@ function adminSetExpenseStatus(phone, items, status, payDate, reason) {
       rowsToSet[r] = true; updated++;
       var cm = String(it.comment || '').replace(/\s+/g, ' ').trim().slice(0, 500);
       if (cm) rowComments[r] = cm;
+      var py = String(it.payer || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (py) rowPayers[r] = py;
       if (r < minR) minR = r; if (r > maxR) maxR = r;
     });
     // Запись одним диапазоном на колонку (minR..maxR). Непомеченные строки
@@ -3827,6 +3839,19 @@ function adminSetExpenseStatus(phone, items, status, payDate, reason) {
         .map(function (r) { return { row: r, values: data[r - first], newStatus: picked }; }), lay);
       writeCol_(cols.status, picked);
       if (pay !== null && cols.payDate) writeCol_(cols.payDate, pay, pay === '' ? null : 'dd.MM.yyyy');
+      // «Оплатил»: при «ОПЛАЧЕНО» — кто платил (списывается с его подотчёта),
+      // при любом другом статусе — очищается (деньги снова «на руках»).
+      var isPaid = String(picked).toLowerCase() === 'оплачено';
+      if (isPaid && Object.keys(rowPayers).length && !cols.payer) cols.payer = ensurePayerCol_(sheet, lay);
+      if (cols.payer) {
+        var pr = sheet.getRange(minR, cols.payer, maxR - minR + 1, 1);
+        var pv = pr.getValues();
+        pr.setValues(pv.map(function (row, i) {
+          var r = minR + i;
+          if (!rowsToSet[r]) return [row[0]];
+          return [isPaid ? (rowPayers[r] || row[0]) : ''];
+        }));
+      }
       if (cols.comment && Object.keys(rowComments).length) {
         var cr = sheet.getRange(minR, cols.comment, maxR - minR + 1, 1);
         var cv = cr.getValues(), cf = cr.getFormulas();
@@ -3840,6 +3865,112 @@ function adminSetExpenseStatus(phone, items, status, payDate, reason) {
     }
     SpreadsheetApp.flush();
     return { status: 'ok', updated: updated, conflicts: conflicts, newStatus: picked };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ===== Подотчётные деньги =====
+var CASH_SHEET_NAME = 'Подотчёт';
+var CASH_HEADERS = ['Дата', 'От кого', 'Кому', 'Сумма', 'Способ', 'Комментарий', 'Кто записал', 'Записано'];
+var CASH_COMPANY = 'Компания';
+function getCashSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(CASH_SHEET_NAME);
+  if (!sh) {
+    sh = ss.insertSheet(CASH_SHEET_NAME);
+    sh.getRange(1, 1, 1, CASH_HEADERS.length).setValues([CASH_HEADERS]).setFontWeight('bold').setBackground('#e8eaf6');
+    sh.setFrozenRows(1);
+    sh.setColumnWidths(1, CASH_HEADERS.length, 140);
+    sh.setColumnWidth(6, 280);
+  }
+  return sh;
+}
+function expensePayers_() {
+  var ref = getExpenseRefSheet_();
+  var p = expenseRefColumn_(ref, 5);
+  return p.length ? p : EXPENSE_DEFAULT_PAYERS;
+}
+// Колонка «Оплатил» справа от последнего заголовка листа расходов.
+function ensurePayerCol_(sheet, lay) {
+  if (lay.cols.payer) return lay.cols.payer;
+  var width = sheet.getLastColumn();
+  var hdr = sheet.getRange(lay.headerRow, 1, 1, width).getValues()[0];
+  var lastH = 0;
+  for (var c = 0; c < hdr.length; c++) if (String(hdr[c]).trim()) lastH = c + 1;
+  var col = lastH + 1;
+  if (col > sheet.getMaxColumns()) sheet.insertColumnsAfter(sheet.getMaxColumns(), col - sheet.getMaxColumns());
+  sheet.getRange(lay.headerRow, lastH).copyTo(sheet.getRange(lay.headerRow, col), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+  sheet.getRange(lay.headerRow, col).setValue('Оплатил');
+  lay.cols.payer = col;
+  return col;
+}
+// rows — строки обзора расходов (массивы как в adminExpenseOverview).
+function cashOverview_(rows) {
+  var holders = {}, order = [];
+  function h_(name) {
+    var k = String(name || '').trim();
+    if (!k || k === CASH_COMPANY) return null;
+    if (!holders[k]) { holders[k] = { name: k, received: 0, given: 0, paid: 0 }; order.push(k); }
+    return holders[k];
+  }
+  expensePayers_().forEach(h_);
+  var moves = [];
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CASH_SHEET_NAME);
+  var tz = Session.getScriptTimeZone();
+  if (sh && sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, CASH_HEADERS.length).getValues().forEach(function (v, i) {
+      var amt = Number(v[3]) || 0;
+      if (!amt) return;
+      var from = h_(v[1]), to = h_(v[2]);
+      if (from) from.given += amt;
+      if (to) to.received += amt;
+      moves.push({ date: v[0] instanceof Date ? Utilities.formatDate(v[0], tz, 'yyyy-MM-dd') : '', from: String(v[1] || ''),
+        to: String(v[2] || ''), amount: amt, method: String(v[4] || ''), comment: String(v[5] || ''), by: String(v[6] || ''), row: i + 2 });
+    });
+  }
+  (rows || []).forEach(function (r) {
+    if (String(r[6]).toLowerCase() !== 'оплачено' || !r[10]) return;
+    var h = h_(r[10]);
+    if (h) h.paid += Number(r[5]) || 0;
+  });
+  return {
+    holders: order.map(function (k) {
+      var h = holders[k];
+      h.balance = h.received - h.given - h.paid;
+      return h;
+    }),
+    moves: moves.slice(-200).reverse(),
+    company: CASH_COMPANY
+  };
+}
+// Передача денег: Компания → держатель (выдача под отчёт), держатель →
+// держатель, держатель → Компания (возврат остатка).
+function adminAddCashMove(phone, from, to, amount, dateIso, method, comment) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  function clean_(v, n) { return String(v || '').replace(/\s+/g, ' ').trim().slice(0, n); }
+  from = clean_(from, 60); to = clean_(to, 60);
+  var sum = Math.round(Number(String(amount).replace(/\s/g, '').replace(',', '.')) * 100) / 100;
+  if (!from || !to) return { status: 'error', message: 'Укажите, от кого и кому' };
+  if (from === to) return { status: 'error', message: 'Отправитель и получатель совпадают' };
+  if (!(sum > 0)) return { status: 'error', message: 'Укажите сумму' };
+  if (sum > 100000000) return { status: 'error', message: 'Слишком большая сумма' };
+  var date = parseIsoDate_(dateIso);
+  if (!date) return { status: 'error', message: 'Неверная дата' };
+  var who = findEmployeeByPhone_(auth.phone);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var sh = getCashSheet_();
+    var row = sh.getLastRow() + 1;
+    sh.getRange(row, 1, 1, CASH_HEADERS.length).setValues([[date, from, to, sum, clean_(method, 80), clean_(comment, 300),
+      who ? who.name : auth.phone, new Date()]]);
+    sh.getRange(row, 1).setNumberFormat('dd.MM.yyyy');
+    sh.getRange(row, 4).setNumberFormat('#,##0 ₽');
+    sh.getRange(row, 8).setNumberFormat('dd.MM.yyyy HH:mm');
+    SpreadsheetApp.flush();
+    return { status: 'ok', row: row };
   } finally {
     lock.releaseLock();
   }
@@ -3892,15 +4023,17 @@ function adminExpenseOverview(phone) {
         String(v_(row, cols.status) || '').trim(),
         iso_(v_(row, cols.payDate)),
         String(v_(row, cols.comment) || '').trim(),
-        first + i
+        first + i,
+        String(v_(row, cols.payer) || '').trim()
       ]);
     }
   }
   return {
     status: 'ok',
     summary: summary,
-    fields: ['date', 'worker', 'brigadier', 'object', 'rate', 'total', 'status', 'payDate', 'comment', 'row'],
+    fields: ['date', 'worker', 'brigadier', 'object', 'rate', 'total', 'status', 'payDate', 'comment', 'row', 'payer'],
     rows: rows,
+    cash: cashOverview_(rows),
     promoted: promoted,
     updatedAt: Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy HH:mm')
   };
