@@ -852,6 +852,17 @@
   .payMeta { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
   .payMeta .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
   .payMore { padding: 10px 12px; font-size: 13px; color: var(--muted); text-align: center; }
+  .payGroup { border-bottom: 1px solid var(--border); }
+  .payGroup:last-child { border-bottom: none; }
+  .payGHead { display: flex; gap: 10px; align-items: center; padding: 10px 12px; }
+  .payGHead.sel { background: rgba(52,168,83,0.12); }
+  .payGChk { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--green); }
+  .payGBody { flex: 1; min-width: 0; cursor: pointer; }
+  .payChev { color: var(--muted); font-size: 18px; width: 18px; text-align: center; flex: none; cursor: pointer; transition: transform .15s; }
+  .payGroup.open .payChev { transform: rotate(90deg); }
+  .payGroup .payRow { padding-left: 44px; background: var(--bg); }
+  .payGroup .payRow.sel { background: rgba(52,168,83,0.12); }
+  @media (prefers-reduced-motion: reduce) { .payChev { transition: none; } }
   .payAction {
     position: sticky; bottom: calc(58px + env(safe-area-inset-bottom, 0px)); z-index: 5;
     box-shadow: 0 -4px 18px rgba(0,0,0,0.25);
@@ -4690,6 +4701,7 @@
   var payStatus = null;            // фильтр статуса ('*' — все), по умолчанию «не оплачено»
   var payBrig = '', payWorker = '', payObj = '';
   var paySel = {};                 // { номер строки: true }
+  var payOpen = {};                // раскрытые люди { имя: true }
   var PAY_SHOW_MAX = 400;
   function payKey_(r) {
     return [r.date, String(r.worker || '').trim(), String(r.object || '').trim(), Number(r.rate) || 0,
@@ -4777,34 +4789,81 @@
 
     var list = payFiltered_();
     var sortBy = document.getElementById('paySort').value;
-    var cmp = {
-      dateDesc: function (a, b) { return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); },
-      dateAsc: function (a, b) { return a.date > b.date ? 1 : (a.date < b.date ? -1 : 0); },
-      sumDesc: function (a, b) { return (Number(b.total) || 0) - (Number(a.total) || 0); },
-      worker: function (a, b) { return String(a.worker).localeCompare(String(b.worker), 'ru') || (a.date < b.date ? 1 : -1); },
-      brigadier: function (a, b) { return String(a.brigadier || 'я').localeCompare(String(b.brigadier || 'я'), 'ru') || String(a.worker).localeCompare(String(b.worker), 'ru'); },
-      status: function (a, b) { return String(a.status).localeCompare(String(b.status), 'ru') || (a.date < b.date ? 1 : -1); }
-    }[sortBy] || function () { return 0; };
-    list.sort(cmp);
     // выбор держим только среди видимых по фильтру записей
     var visible = {}; list.forEach(function (r) { visible[r.row] = true; });
     Object.keys(paySel).forEach(function (k) { if (!visible[k]) delete paySel[k]; });
 
+    // Сжатый список: одна строка на человека (сумма его смен), смены — по раскрытию.
+    var groups = {}, gl = [];
+    list.forEach(function (r) {
+      var name = r.worker || '(без имени)';
+      var g = groups[name];
+      if (!g) { g = groups[name] = { name: name, rows: [], sum: 0, min: '', max: '', objects: {}, brigs: {}, statuses: {} }; gl.push(g); }
+      g.rows.push(r);
+      g.sum += Number(r.total) || 0;
+      if (r.date && (!g.min || r.date < g.min)) g.min = r.date;
+      if (r.date && (!g.max || r.date > g.max)) g.max = r.date;
+      if (r.object) g.objects[r.object] = true;
+      if (r.brigadier) g.brigs[r.brigadier] = true;
+      g.statuses[r.status || 'Без статуса'] = (g.statuses[r.status || 'Без статуса'] || 0) + (Number(r.total) || 0);
+    });
+    var gcmp = {
+      dateDesc: function (a, b) { return a.max < b.max ? 1 : (a.max > b.max ? -1 : 0); },
+      dateAsc: function (a, b) { return a.min > b.min ? 1 : (a.min < b.min ? -1 : 0); },
+      sumDesc: function (a, b) { return b.sum - a.sum; },
+      worker: function (a, b) { return a.name.localeCompare(b.name, 'ru'); },
+      brigadier: function (a, b) {
+        var x = Object.keys(a.brigs)[0] || 'я', y = Object.keys(b.brigs)[0] || 'я';
+        return x.localeCompare(y, 'ru') || a.name.localeCompare(b.name, 'ru');
+      },
+      status: function (a, b) {
+        return Object.keys(a.statuses)[0].localeCompare(Object.keys(b.statuses)[0], 'ru') || a.name.localeCompare(b.name, 'ru');
+      }
+    }[sortBy] || function () { return 0; };
+    gl.sort(gcmp);
+    var asc = sortBy === 'dateAsc';
+    gl.forEach(function (g) { g.rows.sort(function (a, b) { return (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)) * (asc ? -1 : 1); }); });
+
     var box = document.getElementById('payList');
     if (!list.length) { box.innerHTML = '<div class="statsEmpty">Нет записей под эти фильтры</div>'; updatePaySel(list); return; }
-    var shown = list.slice(0, PAY_SHOW_MAX);
-    box.innerHTML = shown.map(function (r) {
+    function shortD_(iso) { var p = String(iso).split('-'); return p.length === 3 ? p[2] + '.' + p[1] : ''; }
+    function rowHtml_(r) {
       var on = !!paySel[r.row];
-      var meta = [r.date ? fmtIsoRu_(r.date) : '—', r.object, r.brigadier ? 'бриг. ' + r.brigadier : ''].filter(Boolean).map(escapeHtml).join(' · ');
+      var meta = [r.object, r.brigadier && !payBrig ? 'бриг. ' + r.brigadier : ''].filter(Boolean).map(escapeHtml).join(' · ');
       return '<div class="payRow' + (on ? ' sel' : '') + '" data-row="' + r.row + '">' +
-        '<input type="checkbox" tabindex="-1"' + (on ? ' checked' : '') + ' aria-label="Выбрать">' +
-        '<div class="payMain"><div class="payTop"><span class="payName">' + escapeHtml(r.worker || '(без имени)') + '</span>' +
+        '<input type="checkbox" tabindex="-1"' + (on ? ' checked' : '') + ' aria-label="Выбрать смену">' +
+        '<div class="payMain"><div class="payTop"><span class="payName" style="font-weight:500">' + (r.date ? fmtIsoRu_(r.date) : '—') + '</span>' +
         '<span class="paySum">' + money_(r.total) + '</span></div>' +
-        '<div class="payMeta">' + meta + (payStatus === '*' || r.comment ? '<br>' : '') +
-        (payStatus === '*' ? '<span class="dot" style="background:' + escapeHtml(expStatusColor_(r.status)) + '"></span>' + escapeHtml(r.status || 'Без статуса') : '') +
-        (r.comment ? (payStatus === '*' ? ' · ' : '') + escapeHtml(r.comment) : '') + '</div></div></div>';
-    }).join('') + (list.length > shown.length ? '<div class="payMore">Показаны первые ' + shown.length + ' из ' + list.length +
-      '. «Выбрать все» отметит все ' + list.length + '; уточните фильтр, чтобы увидеть остальные.</div>' : '');
+        '<div class="payMeta">' + meta +
+        (payStatus === '*' ? (meta ? ' · ' : '') + '<span class="dot" style="background:' + escapeHtml(expStatusColor_(r.status)) + '"></span>' + escapeHtml(r.status || 'Без статуса') : '') +
+        (r.comment ? '<br>' + escapeHtml(r.comment) : '') + '</div></div></div>';
+    }
+    var shownG = gl.slice(0, PAY_SHOW_MAX);
+    box.innerHTML = shownG.map(function (g) {
+      var nSel = g.rows.filter(function (r) { return paySel[r.row]; }).length;
+      var open = !!payOpen[g.name];
+      var objs = Object.keys(g.objects);
+      var days = {}; g.rows.forEach(function (r) { if (r.date) days[r.date] = true; });
+      var nd = Object.keys(days).length;
+      var meta = g.rows.length + ' ' + (g.rows.length % 10 === 1 && g.rows.length % 100 !== 11 ? 'смена' : (g.rows.length % 10 >= 2 && g.rows.length % 10 <= 4 && (g.rows.length % 100 < 12 || g.rows.length % 100 > 14) ? 'смены' : 'смен')) +
+        (g.min ? ' · ' + (g.min === g.max ? fmtIsoRu_(g.min) : shortD_(g.min) + ' – ' + fmtIsoRu_(g.max)) : '') +
+        (objs.length && !payObj ? ' · ' + escapeHtml(objs[0]) + (objs.length > 1 ? ' и ещё ' + (objs.length - 1) : '') : '');
+      if (nd && nd !== g.rows.length) meta += ' · ' + nd + ' ' + daysWord_(nd);
+      var stPills = payStatus === '*' ? '<div class="payMeta">' + Object.keys(g.statuses).map(function (st) {
+        return '<span class="dot" style="background:' + escapeHtml(expStatusColor_(st)) + '"></span>' + escapeHtml(st) + ' ' + money_(g.statuses[st]);
+      }).join(' · ') + '</div>' : '';
+      return '<div class="payGroup' + (open ? ' open' : '') + '" data-name="' + escapeHtml(g.name) + '">' +
+        '<div class="payGHead' + (nSel === g.rows.length ? ' sel' : '') + '">' +
+        '<input type="checkbox" class="payGChk"' + (nSel === g.rows.length ? ' checked' : '') + (nSel && nSel < g.rows.length ? ' data-ind="1"' : '') +
+        ' aria-label="Выбрать все смены: ' + escapeHtml(g.name) + '">' +
+        '<div class="payGBody"><div class="payTop"><span class="payName">' + escapeHtml(g.name) + '</span>' +
+        '<span class="paySum">' + money_(g.sum) + '</span></div>' +
+        '<div class="payMeta">' + meta + (nSel && nSel < g.rows.length ? ' · <b>выбрано ' + nSel + '</b>' : '') + '</div>' + stPills + '</div>' +
+        '<span class="payChev" aria-hidden="true">›</span></div>' +
+        (open ? g.rows.map(rowHtml_).join('') : '') + '</div>';
+    }).join('') + (gl.length > shownG.length ? '<div class="payMore">Показаны первые ' + shownG.length + ' человек из ' + gl.length +
+      '. «Выбрать все» отметит всех; уточните фильтр, чтобы увидеть остальных.</div>' : '');
+    box.querySelectorAll('.payGChk[data-ind]').forEach(function (el) { el.indeterminate = true; });
     updatePaySel(list);
   }
   function updatePaySel(list) {
@@ -4820,12 +4879,27 @@
     btn.textContent = n ? 'Поставить статус — ' + n + ' зап.' : 'Выберите записи';
   }
   document.getElementById('payList').addEventListener('click', function (e) {
-    var rowEl = e.target.closest('.payRow'); if (!rowEl) return;
-    var r = rowEl.dataset.row;
-    if (paySel[r]) delete paySel[r]; else paySel[r] = true;
-    rowEl.classList.toggle('sel', !!paySel[r]);
-    rowEl.querySelector('input').checked = !!paySel[r];
-    updatePaySel();
+    var grp = e.target.closest('.payGroup'); if (!grp) return;
+    var name = grp.dataset.name;
+    // галочка у имени — выбрать / снять все смены человека
+    if (e.target.classList.contains('payGChk')) {
+      var rows = payFiltered_().filter(function (r) { return (r.worker || '(без имени)') === name; });
+      var all = rows.every(function (r) { return paySel[r.row]; });
+      rows.forEach(function (r) { if (all) delete paySel[r.row]; else paySel[r.row] = true; });
+      renderPay(); return;
+    }
+    // отдельная смена
+    var rowEl = e.target.closest('.payRow');
+    if (rowEl) {
+      var r = rowEl.dataset.row;
+      if (paySel[r]) delete paySel[r]; else paySel[r] = true;
+      renderPay(); return;
+    }
+    // имя / стрелка — раскрыть или свернуть смены
+    if (e.target.closest('.payGBody') || e.target.closest('.payChev')) {
+      payOpen[name] = !payOpen[name];
+      renderPay();
+    }
   });
   document.getElementById('payAll').addEventListener('change', function () {
     var list = payFiltered_();
@@ -4835,7 +4909,7 @@
   });
   document.getElementById('payChips').addEventListener('click', function (e) {
     var c = e.target.closest('.expChip'); if (!c) return;
-    payStatus = c.dataset.k; paySel = {}; renderPay();
+    payStatus = c.dataset.k; paySel = {}; payOpen = {}; renderPay();
   });
   [['payBrigFilter', function (v) { payBrig = v; payWorker = ''; }], ['payWorkerFilter', function (v) { payWorker = v; }],
    ['payObjFilter', function (v) { payObj = v; }]].forEach(function (f) {
