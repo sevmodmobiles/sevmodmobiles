@@ -1036,11 +1036,12 @@
   .expDelRow:hover, .expDelPerson:hover { color: var(--red); border-color: var(--red); }
   .expDays tr.pick { cursor: pointer; }
   .expDays tr.sel td { background: rgba(52,168,83,0.12); }
-  .expDays td.chk { width: 22px; padding-right: 0; }
+  .expDays td.chk { width: 22px; padding-left: 0; }
   .expDays td.chk input, .expSelAll input { width: 20px; height: 20px; margin: 0; accent-color: var(--green); pointer-events: none; }
   .expSelAll { display: flex; align-items: center; gap: 10px; margin: 0; padding: 9px 10px; font-size: 13px; font-weight: 600;
     color: var(--text); border-bottom: 1px solid var(--border); cursor: pointer; }
-  .expSelAll .n { margin-left: auto; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .expSelAll { justify-content: flex-end; }
+  .expSelAll .n { margin-right: auto; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
   .expSelBar {
     position: sticky; bottom: calc(88px + env(safe-area-inset-bottom, 0px)); z-index: 5; margin-top: 10px;
     background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px;
@@ -2636,8 +2637,10 @@
   }
   function fmtIsoRu_(iso) {
     var p = String(iso).split('-');
-    return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : String(iso);
+    return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0].slice(-2) : String(iso);
   }
+  // «дд.мм.гггг» с сервера → «дд.мм.гг» (короче на телефоне)
+  function shortYear_(s) { return String(s || '').replace(/(\b\d{2}\.\d{2}\.)\d{2}(\d{2})\b/g, '$1$2'); }
   function fmtNum_(n) { return String(Math.round(n * 100) / 100).replace('.', ','); }
 
   function showAbsenceScreen(mode) {
@@ -2942,7 +2945,7 @@
               '<div><span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
               (t.objectName ? ' <b>' + escapeHtml(t.objectName) + '</b>' : '') + '</div>' +
               '<div class="taskText">' + escapeHtml(t.text) + '</div>' +
-              '<div class="taskDate">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
+              '<div class="taskDate">Поставлена: ' + escapeHtml(shortYear_(t.createdAt)) + '</div>' +
             '</div>'
           );
         }).join('');
@@ -3054,7 +3057,7 @@
     document.getElementById('taskDetailObjectTitle').textContent = t.objectName || 'Задача';
     document.getElementById('taskDetailText').textContent = t.text;
     renderPhotoGrid(document.getElementById('taskDetailTaskPhotos'), t.taskPhotos);
-    document.getElementById('taskDetailMeta').textContent = 'Поставлена: ' + (t.createdAt || '');
+    document.getElementById('taskDetailMeta').textContent = 'Поставлена: ' + shortYear_(t.createdAt);
 
     var beforeSection = document.getElementById('taskDetailBeforeSection');
     var afterSection = document.getElementById('taskDetailAfterSection');
@@ -3560,7 +3563,7 @@
               '</div>' +
               '<div class="adminTaskMeta">' + escapeHtml(t.objectName || '') + '</div>' +
               '<div class="adminTaskText">' + escapeHtml(t.text) + '</div>' +
-              '<div class="adminTaskMeta">Поставлена: ' + escapeHtml(t.createdAt || '') + '</div>' +
+              '<div class="adminTaskMeta">Поставлена: ' + escapeHtml(shortYear_(t.createdAt)) + '</div>' +
               '<div class="adminTaskDetail" style="display:none;"></div>' +
             '</div>'
           );
@@ -3815,7 +3818,7 @@
 
       row.innerHTML =
         '<div class="dayRowTop">' +
-          '<div class="dayDate">' + d.date + '</div>' +
+          '<div class="dayDate">' + shortYear_(d.date) + '</div>' +
           '<div class="dayRight"><div class="dayPay">' + (d.pay ? d.pay + ' ₽' : '—') + '</div></div>' +
         '</div>' +
         '<div class="dayRowBottom">' +
@@ -4704,21 +4707,21 @@
             var sub = [r.brigadier && !useBrig ? 'бригадир ' + r.brigadier : '', r.comment].filter(Boolean).join(' · ');
             var picked = r.row && expSel[r.row];
             return '<tr' + (r.row ? ' class="pick' + (picked ? ' sel' : '') + '" data-row="' + r.row + '"' : '') + '>' +
-              '<td class="chk">' + (r.row ? '<input type="checkbox" tabindex="-1" aria-label="Выбрать запись"' + (picked ? ' checked' : '') + '>' : '') + '</td>' +
               '<td class="d">' + (r.date ? fmtIsoRu_(r.date) : '—') + '</td>' +
               '<td>' + escapeHtml(r.object || '—') + (sub ? '<div class="sub">' + escapeHtml(sub) + '</div>' : '') +
               (expViewStatus === '*' ? '<div class="sub"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
                 escapeHtml(expStatusColor_(r.status)) + '"></span> ' + escapeHtml(r.status || 'Без статуса') + '</div>' : '') +
               (r.payDate ? '<div class="sub">погашено ' + fmtIsoRu_(r.payDate) + '</div>' : '') + '</td>' +
-              '<td class="num">' + money_(r.total) + '</td></tr>';
+              '<td class="num">' + money_(r.total) + '</td>' +
+              '<td class="chk">' + (r.row ? '<input type="checkbox" tabindex="-1" aria-label="Выбрать запись"' + (picked ? ' checked' : '') + '>' : '') + '</td></tr>';
           }).join('') + '</table></div>';
           var selectable = g.rows.filter(function (r) { return r.row; });
           var nSel = selectable.filter(function (r) { return expSel[r.row]; }).length;
           if (selectable.length) {
             details = details.replace('<div class="expDays">', '<div class="expDays"><label class="expSelAll" data-key="' + escapeHtml(g.key) + '">' +
-              '<input type="checkbox" tabindex="-1"' + (nSel === selectable.length ? ' checked' : '') + '>' +
-              (nSel === selectable.length ? 'Снять выделение' : 'Выбрать все') + '<span class="n">' +
-              (nSel ? 'выбрано ' + nSel + ' из ' + selectable.length : selectable.length + ' зап.') + '</span></label>');
+              '<span class="n">' + (nSel ? 'выбрано ' + nSel + ' из ' + selectable.length : selectable.length + ' зап.') + '</span>' +
+              (nSel === selectable.length ? 'Снять выделение' : 'Выбрать все') +
+              '<input type="checkbox" tabindex="-1"' + (nSel === selectable.length ? ' checked' : '') + '></label>');
           }
         }
       }
