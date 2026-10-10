@@ -981,6 +981,11 @@
   .expDays td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .expDays td.d { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
   .expDays .sub { color: var(--muted); font-size: 12px; }
+  .expDays td.del { width: 42px; padding: 4px 8px 4px 0; text-align: right; }
+  .expDays tr:has(td.del) td:not(.del) { padding-left: 8px; padding-right: 6px; }
+  .expDelRow { width: 32px; height: 32px; margin: 0; padding: 0; background: none; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text); }
+  .expDelPerson { display: block; width: calc(100% - 20px); margin: 8px 10px 10px; padding: 10px; font-size: 14px; font-weight: 600;
+    background: none; color: var(--red); border: 1px solid var(--red); border-radius: 10px; }
   .brigadeList { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; }
   .brigadeRow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .brigadeRow:last-child { border-bottom: none; }
@@ -1849,6 +1854,19 @@
       <div class="calBtns">
         <button id="awCancel" type="button" class="calCancel">Отмена</button>
         <button id="awSave" type="button">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Подтверждение опасных действий (удаление) -->
+  <div id="confirmModal" class="modalOverlay" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle">
+    <div class="modalBox">
+      <h2 id="cfTitle" style="margin-top:0; color: var(--text);">Удалить?</h2>
+      <div id="cfText" class="modalText" style="font-size:14px;"></div>
+      <div id="cfStatus"></div>
+      <div class="calBtns">
+        <button id="cfCancel" type="button" class="calCancel">Отмена</button>
+        <button id="cfOk" type="button" style="background: var(--red);">Удалить</button>
       </div>
     </div>
   </div>
@@ -4535,8 +4553,12 @@
               (expViewStatus === '*' ? '<div class="sub"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
                 escapeHtml(expStatusColor_(r.status)) + '"></span> ' + escapeHtml(r.status || 'Без статуса') + '</div>' : '') +
               (r.payDate ? '<div class="sub">погашено ' + fmtIsoRu_(r.payDate) + '</div>' : '') + '</td>' +
-              '<td class="num">' + money_(r.total) + '</td></tr>';
-          }).join('') + '</table></div>';
+              '<td class="num">' + money_(r.total) + '</td>' +
+              (r.row ? '<td class="del"><button type="button" class="expDelRow" data-row="' + r.row + '" aria-label="Удалить запись ' +
+                escapeHtml(fmtIsoRu_(r.date || '')) + '">🗑</button></td>' : '') + '</tr>';
+          }).join('') + '</table>' +
+          (g.rows.some(function (r) { return r.row; }) ? '<button type="button" class="expDelPerson" data-name="' + escapeHtml(g.name) + '">' +
+            'Удалить все записи «' + escapeHtml(g.name) + '» (' + g.rows.length + ') — ' + money_(g.sum) + '</button>' : '') + '</div>';
         }
       }
       return '<div class="expPerson"><button type="button" class="expPersonHead" data-name="' + escapeHtml(g.name) + '" aria-expanded="' + open + '">' +
@@ -4567,7 +4589,79 @@
     renderExpView();
   });
   document.getElementById('expSearch').addEventListener('input', function () { if (expOverview) renderExpView(); });
+  // ----- Удаление расходов из «Посмотреть расходы» -----
+  var cfModal = document.getElementById('confirmModal'), cfAction = null;
+  function askConfirm(title, html, okLabel, action) {
+    document.getElementById('cfTitle').textContent = title;
+    document.getElementById('cfText').innerHTML = html;
+    document.getElementById('cfOk').textContent = okLabel;
+    document.getElementById('cfOk').disabled = false;
+    document.getElementById('cfStatus').textContent = '';
+    cfAction = action;
+    cfModal.classList.add('open');
+  }
+  function closeConfirm() { cfModal.classList.remove('open'); cfAction = null; }
+  document.getElementById('cfCancel').addEventListener('click', closeConfirm);
+  cfModal.addEventListener('click', function (e) { if (e.target === cfModal) closeConfirm(); });
+  document.getElementById('cfOk').addEventListener('click', function () { if (cfAction) cfAction(); });
+
+  function deleteExpenseRows_(rows, doneText) {
+    var okBtn = document.getElementById('cfOk'), st = document.getElementById('cfStatus');
+    okBtn.disabled = true; st.textContent = 'Удаляю…'; st.className = '';
+    apiPost({ action: 'adminDeleteExpenseRows', phone: currentUser && currentUser.phone,
+      items: rows.map(function (r) { return { row: r.row, key: payKey_(r) }; }) })
+      .then(function (res) {
+        if (!res || res.status !== 'ok') {
+          okBtn.disabled = false;
+          st.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v52';
+          st.className = 'error'; return;
+        }
+        closeConfirm();
+        var tot = document.getElementById('expTotals');
+        expOverview = null;
+        expOpenPeople = {};
+        loadExpOverview(function (err) {
+          if (err) { document.getElementById('expPeople').innerHTML = '<div class="statsEmpty">' + escapeHtml(err) + '</div>'; return; }
+          renderExpView();
+          var note = document.createElement('div');
+          note.className = res.conflicts ? 'error' : 'success';
+          note.style.margin = '0 0 8px';
+          note.textContent = '✓ ' + doneText + ': удалено ' + res.deleted + ' зап.' +
+            (res.conflicts ? '. ' + res.conflicts + ' зап. изменились в таблице и не удалены — проверьте список' : '');
+          tot.parentNode.insertBefore(note, tot);
+          setTimeout(function () { if (note.parentNode) note.parentNode.removeChild(note); }, 6000);
+        });
+      })
+      .catch(function (err) { okBtn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+  }
+  function viewRowsOf_(predicate) {
+    // те же фильтры, что сейчас на экране, — берём строки из текущего обзора
+    return expRows_().filter(predicate);
+  }
+
   document.getElementById('expPeople').addEventListener('click', function (e) {
+    var dr = e.target.closest('.expDelRow');
+    if (dr) {
+      var r = viewRowsOf_(function (x) { return String(x.row) === dr.dataset.row; })[0];
+      if (!r) return;
+      askConfirm('Удалить запись?',
+        '<b>' + escapeHtml(r.worker) + '</b>, ' + escapeHtml(r.date ? fmtIsoRu_(r.date) : '—') + ', ' + escapeHtml(r.object || '—') +
+        ' — <b>' + money_(r.total) + '</b> (' + escapeHtml(r.status || 'без статуса') + ').<br>Строка будет удалена из таблицы.',
+        'Удалить', function () { deleteExpenseRows_([r], r.worker); });
+      return;
+    }
+    var dp = e.target.closest('.expDelPerson');
+    if (dp) {
+      var rowsSel = Array.prototype.map.call(dp.closest('.expPerson').querySelectorAll('.expDelRow'), function (b) { return b.dataset.row; });
+      var rows = viewRowsOf_(function (x) { return rowsSel.indexOf(String(x.row)) >= 0; });
+      if (!rows.length) return;
+      var sum = rows.reduce(function (a, x) { return a + (Number(x.total) || 0); }, 0);
+      askConfirm('Удалить все записи?',
+        '<b>' + escapeHtml(dp.dataset.name) + '</b>: ' + rows.length + ' зап. на <b>' + money_(sum) + '</b>.<br>' +
+        'Удаляются только записи, которые сейчас видны с выбранными фильтрами (статус, объект, бригада). Строки будут удалены из таблицы.',
+        'Удалить ' + rows.length + ' зап.', function () { deleteExpenseRows_(rows, dp.dataset.name); });
+      return;
+    }
     var ob = e.target.closest('.expOpenBrig');
     if (ob) { expBrigFilter = ob.dataset.brig; expOpenPeople = {}; renderExpView(); return; }
     var h = e.target.closest('.expPersonHead');

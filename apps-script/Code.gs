@@ -1,3 +1,7 @@
+// v52: удаление расходов из приложения — adminDeleteExpenseRows(phone, items
+//      [{row, key}]): удаляет строки листа расходов, если их отпечаток совпал
+//      (как в adminSetExpenseStatus); изменившиеся/переехавшие — conflicts.
+//      Строки удаляются снизу вверх, подряд идущие — одним вызовом.
 // v51: платежи по договорам наступают сами — строки контракта ("Работы" =
 //      "Договор") со статусом "По Графику"/"По Акту", дата которых попадает на
 //      текущую неделю (пн–вс) или раньше, получают статус "НЕ ОПЛАЧЕНО".
@@ -415,6 +419,9 @@ function doPost(e) {
     }
     if (data.action === 'adminAddContract') {
       return jsonOutput(adminAddContract(data.phone, data.objectName, data.brigadier, data.total, data.payments, data.comment));
+    }
+    if (data.action === 'adminDeleteExpenseRows') {
+      return jsonOutput(adminDeleteExpenseRows(data.phone, data.items));
     }
     if (data.action === 'adminSetExpenseStatus') {
       return jsonOutput(adminSetExpenseStatus(data.phone, data.items, data.status, data.payDate));
@@ -3410,6 +3417,50 @@ function setupContractDueTrigger() {
 function expenseRowKey_(dateIso, worker, object, rate, status) {
   return [dateIso, String(worker || '').trim(), String(object || '').trim(), Number(rate) || 0,
     String(status || '').trim().toLowerCase()].join('|');
+}
+
+// Удаление выбранных строк расходов (с проверкой отпечатка).
+function adminDeleteExpenseRows(phone, items) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  if (!items || !items.length) return { status: 'error', message: 'Не выбрано ни одной записи' };
+  if (items.length > 2000) return { status: 'error', message: 'Слишком много записей за раз' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var lay = expenseLayout_();
+    if (lay.error) return { status: 'error', message: lay.error };
+    var sheet = lay.sheet, cols = lay.cols;
+    var tz = Session.getScriptTimeZone();
+    var first = lay.headerRow + 1, last = sheet.getLastRow();
+    if (last < first) return { status: 'ok', deleted: 0, conflicts: items.length };
+    var data = sheet.getRange(first, 1, last - first + 1, sheet.getLastColumn()).getValues();
+    var del = {}, conflicts = 0;
+    items.forEach(function (it) {
+      var r = Number(it && it.row);
+      if (!(r >= first && r <= last) || del[r]) { conflicts++; return; }
+      var v = data[r - first];
+      var d = cols.date ? v[cols.date - 1] : '';
+      var key = expenseRowKey_(d instanceof Date ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : '',
+        cols.worker ? v[cols.worker - 1] : '', cols.object ? v[cols.object - 1] : '',
+        cols.rate ? v[cols.rate - 1] : '', cols.status ? v[cols.status - 1] : '');
+      if (key !== String(it.key || '')) { conflicts++; return; }
+      del[r] = true;
+    });
+    var rowsDesc = Object.keys(del).map(Number).sort(function (a, b) { return b - a; });
+    // подряд идущие строки — одним deleteRows
+    var i = 0;
+    while (i < rowsDesc.length) {
+      var top = rowsDesc[i], n = 1;
+      while (i + n < rowsDesc.length && rowsDesc[i + n] === top - n) n++;
+      sheet.deleteRows(top - n + 1, n);
+      i += n;
+    }
+    SpreadsheetApp.flush();
+    return { status: 'ok', deleted: rowsDesc.length, conflicts: conflicts };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Смена статуса у выбранных строк. payDate: 'yyyy-MM-dd' — поставить дату
