@@ -843,9 +843,11 @@
   .ctAct { background: var(--bg); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
   .ctAct .ctActSum { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .ctHint { font-size: 12px; color: var(--muted); margin: -8px 0 12px; }
-  .statusSelectWrap { position: relative; }
-  .statusSelectWrap .dot { position: absolute; left: 14px; top: 23px; width: 12px; height: 12px; border-radius: 50%; pointer-events: none; }
-  .statusSelectWrap select { padding-left: 36px; }
+  /* Отступ под полем — у обёртки, а не у select: тогда точка по центру
+     обёртки = по центру самого поля при любой его высоте. */
+  .statusSelectWrap { position: relative; margin-bottom: 14px; }
+  .statusSelectWrap .dot { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; border-radius: 50%; pointer-events: none; }
+  .statusSelectWrap select { padding-left: 36px; margin-bottom: 0; }
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
