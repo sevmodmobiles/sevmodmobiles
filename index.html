@@ -876,6 +876,11 @@
   .allocDebt { display: block; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .allocPay { flex: none; text-align: right; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .allocPay.zero { color: var(--muted); font-weight: 500; }
+  .allocPayWrap { position: relative; flex: none; display: inline-flex; align-items: baseline; gap: 4px; padding: 4px 6px; border-radius: 8px; border: 1px solid transparent; }
+  .allocPayWrap.manual { border-color: var(--blue); background: rgba(66,133,244,0.12); }
+  .allocPayWrap.manual .allocPay { color: var(--blue); }
+  .allocCaret { font-size: 11px; color: var(--muted); }
+  .allocPaySel { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
   .allocG.off .allocName, .allocG.off .allocDebt { color: var(--muted); }
   @media (prefers-reduced-motion: reduce) { .allocBadge { transition: none; } }
   .allocResult { font-size: 13px; margin-bottom: 4px; }
@@ -1907,7 +1912,7 @@
         <button type="button" id="allocByBrig" class="on">По бригадам</button>
         <button type="button" id="allocByPerson">По людям</button>
       </div>
-      <label>Платим послойно: каждому по одной смене за круг. Номер — приоритет в последнем круге; нажмите на номер, чтобы опустить ниже, у последнего — исключить («—»).</label>
+      <label>Платим послойно: каждому по одной смене за круг. Номер — приоритет в последнем круге; нажмите на номер, чтобы опустить ниже, у последнего — исключить («—»). Нажмите на сумму, чтобы задать её вручную.</label>
       <div id="allocGroups" class="allocGroups"></div>
       <div id="allocResult" class="allocResult"></div>
       <div class="calBtns">
@@ -5313,6 +5318,7 @@
   // сверху вниз; внутри группы — по кругу, по одной самой старой смене
   // каждому человеку; не влезла следующая смена человека — он пропускается.
   var allocBy = 'brig', allocOrder = { brig: [], person: [] }, allocOff = {}, allocPicked = [];
+  var allocManual = {};            // { 'brig:ключ': число записей } — ручная сумма группы
   // Цвет номера приоритета: 1 — зелёный, 2 — синий, 3 — оранжевый, …
   var ALLOC_COLORS = ['#2e9d4f', '#3b7ddd', '#e07b22', '#8e5bd8', '#1a9aa0', '#c2477a', '#7a7f2a', '#6b6f78'];
   var allocModal = document.getElementById('allocModal');
@@ -5348,10 +5354,37 @@
   // Порядок внутри круга — по приоритету групп (сверху вниз), внутри группы —
   // по размеру долга; он важен только в последнем, неполном круге. Не влезла
   // следующая смена человека — он выбывает (частичных оплат нет).
+  // Очередь записей группы в том же порядке, что и при послойной оплате:
+  // по кругу, по одной самой старой смене каждому (люди — по размеру долга).
+  function allocSeq_(g) {
+    var per = {}, people = [];
+    g.rows.slice().sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); }).forEach(function (r) {
+      var w = r.worker || '(без имени)';
+      if (!per[w]) { per[w] = { rows: [], sum: 0 }; people.push(w); }
+      per[w].rows.push(r); per[w].sum += Number(r.total) || 0;
+    });
+    people.sort(function (a, b) { return per[b].sum - per[a].sum; });
+    var seq = [], more = true;
+    for (var i = 0; more; i++) {
+      more = false;
+      people.forEach(function (w) { if (per[w].rows[i]) { seq.push(per[w].rows[i]); more = true; } });
+    }
+    return seq;
+  }
+  // Ручная сумма группы = первые N записей её очереди (целыми сменами).
+  // Сначала закрепляем ручные, остаток — послойно по остальным (авто) группам.
+  // Порядок внутри круга — по приоритету групп; не влезла следующая смена
+  // человека — он выбывает (частичных оплат нет).
   function allocCompute_(groups, budget) {
     var left = budget, picked = [], order = [], queues = {};
     groups.forEach(function (g) {
-      if (allocOff[allocBy + ':' + g.key]) return;
+      var mk = allocBy + ':' + g.key;
+      if (allocOff[mk] || allocManual[mk] === undefined) return;
+      allocSeq_(g).slice(0, allocManual[mk]).forEach(function (r) { picked.push(r); left -= Number(r.total) || 0; });
+    });
+    groups.forEach(function (g) {
+      var mk = allocBy + ':' + g.key;
+      if (allocOff[mk] || allocManual[mk] !== undefined) return;
       var per = {};
       g.rows.forEach(function (r) {
         var w = r.worker || '(без имени)';
@@ -5363,7 +5396,7 @@
         order.push(pp.id);
       });
     });
-    var active = order.slice();
+    var active = left > 0 ? order.slice() : [];
     while (active.length) {
       var next = [];
       active.forEach(function (id) {
@@ -5374,6 +5407,21 @@
       active = next;
     }
     return { picked: picked, used: budget - left, left: left };
+  }
+  // Сумма в строке — это выпадающий список: «Авто» и все суммы, которые
+  // складываются из целых записей очереди группы, от большей к меньшей.
+  function allocPaySelect_(g, pay) {
+    var mk = allocBy + ':' + g.key, manual = allocManual[mk] !== undefined;
+    var seq = allocSeq_(g), sums = [0];
+    seq.forEach(function (r, i) { sums.push(sums[i] + (Number(r.total) || 0)); });
+    var opts = '<option value="auto"' + (manual ? '' : ' selected') + '>Авто — ' + money_(manual ? 0 : pay).replace(/^0 ₽$/, 'по расчёту') + '</option>';
+    for (var n = seq.length; n >= 0; n--) {
+      opts += '<option value="' + n + '"' + (manual && allocManual[mk] === n ? ' selected' : '') + '>' + money_(sums[n]) +
+        (n ? ' — ' + n + ' зап.' : ' — ничего') + '</option>';
+    }
+    return '<span class="allocPayWrap' + (manual ? ' manual' : '') + '"><span class="allocPay' + (pay ? '' : ' zero') + '">' + money_(pay) +
+      '</span><span class="allocCaret" aria-hidden="true">▾</span>' +
+      '<select class="allocPaySel" aria-label="Сумма для ' + escapeHtml(g.label) + '">' + opts + '</select></span>';
   }
   function renderAlloc() {
     var pool = allocPool_();
@@ -5399,14 +5447,15 @@
           (off ? '—' : n) + '</button>' +
         '<span class="allocInfo"><span class="allocName">' + escapeHtml(g.label) + '</span>' +
           '<span class="allocDebt">долг ' + money_(g.sum) + '</span></span>' +
-        '<span class="allocPay' + (pay ? '' : ' zero') + '">' + (off ? 'не платим' : (budget > 0 ? money_(pay) : '—')) + '</span></div>';
+        (off || !(budget > 0) ? '<span class="allocPay zero">' + (off ? 'не платим' : '—') + '</span>' : allocPaySelect_(g, pay)) + '</div>';
     }).join('') || '<div class="statsEmpty">Нет записей — измените фильтры</div>';
 
     var res = document.getElementById('allocResult'), applyBtn = document.getElementById('allocApply');
     if (!(budget > 0) || !groups.length) { res.innerHTML = ''; allocPicked = []; applyBtn.disabled = true; return; }
     allocPicked = a.picked;
-    var html = '<div class="allocSum"><b>' + money_(a.used) + '</b><span>предлагаем из ' + money_(budget) +
-      (a.left > 0 ? '<br>останется ' + money_(a.left) : '') + '</span></div>';
+    var html = '<div class="allocSum"><b' + (a.left < 0 ? ' style="color:var(--red)"' : '') + '>' + money_(a.used) + '</b><span>предлагаем из ' + money_(budget) +
+      (a.left > 0 ? '<br>останется ' + money_(a.left) : '') +
+      (a.left < 0 ? '<br><span style="color:var(--red)">больше, чем есть, на ' + money_(-a.left) + '</span>' : '') + '</span></div>';
     if (budget >= debt) html += '<div class="allocPool">Денег хватает на весь долг.</div>';
     groups.forEach(function (g) {
       if (allocOff[allocBy + ':' + g.key]) return;
@@ -5440,6 +5489,12 @@
   document.getElementById('allocBudget').addEventListener('input', renderAlloc);
   document.getElementById('allocByBrig').addEventListener('click', function () { allocBy = 'brig'; renderAlloc(); });
   document.getElementById('allocByPerson').addEventListener('click', function () { allocBy = 'person'; renderAlloc(); });
+  document.getElementById('allocGroups').addEventListener('change', function (e) {
+    if (!e.target.classList.contains('allocPaySel')) return;
+    var mk = allocBy + ':' + e.target.closest('.allocG').dataset.k;
+    if (e.target.value === 'auto') delete allocManual[mk]; else allocManual[mk] = Number(e.target.value);
+    renderAlloc();
+  });
   document.getElementById('allocGroups').addEventListener('click', function (e) {
     var badge = e.target.closest('.allocBadge'); if (!badge) return;
     var k = badge.closest('.allocG').dataset.k;
