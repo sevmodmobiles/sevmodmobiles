@@ -2506,7 +2506,7 @@
         text = 'Значок появится на главном экране — открывать как обычное приложение.';
         action = '<button type="button" class="installBtn">Установить</button>';
       } else if (env.android && !env.chrome) {
-        text = 'Страница открыта внутри другого приложения — отсюда установить нельзя. Скопируйте ссылку, откройте <b class="inl">Chrome</b> и вставьте её в адресную строку.';
+        text = 'Страница открыта внутри другого приложения — отсюда установить нельзя. Нажмите значок <b class="inl">↗</b> или «Открыть в браузере» вверху экрана. Если его нет — скопируйте ссылку и вставьте её в <b class="inl">Chrome</b>.';
         var intent = 'intent://' + location.host + location.pathname + location.search +
           '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
         action = '<button type="button" class="copyLinkBtn">Скопировать ссылку</button><a class="alt" href="' + escapeHtml(intent) + '">Открыть в Chrome</a>';
@@ -2514,7 +2514,7 @@
       } else if (env.android) {
         text = 'Нажмите ⋮ справа вверху → «Установить приложение» или «Добавить на главный экран».';
       } else if (env.ios && !env.iosSafari) {
-        text = 'Установить можно только из <b class="inl">Safari</b>. Скопируйте ссылку, откройте Safari, вставьте её в адресную строку, затем «Поделиться» → «На экран «Домой»».';
+        text = 'Установить можно только из <b class="inl">Safari</b>. Нажмите «Открыть в Safari» или значок ↗ вверху экрана. Если его нет — скопируйте ссылку и вставьте её в Safari.';
         action = '<button type="button" class="copyLinkBtn">Скопировать ссылку</button><a class="alt" href="' + escapeHtml('x-safari-' + url) + '">Открыть в Safari</a>';
         extra = linkBox_(url);
       } else if (env.ios) {
