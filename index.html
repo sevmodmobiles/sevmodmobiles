@@ -1058,9 +1058,6 @@
   #expSelDel { background: none; color: var(--red); border: 1px solid var(--red); }
   .stOpts { display: grid; gap: 6px; margin: 10px 0; }
   /* Журнал отгулов */
-  .alDates { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-  .alDates input { flex: 1; min-width: 0; margin: 0; padding: 9px 8px; font-size: 14px; }
-  .alDates span { color: var(--muted); }
   .alOnly { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 14px; color: var(--text); }
   .alOnly input { width: 18px; height: 18px; margin: 0; accent-color: var(--green); }
   .alBig { font-weight: 800; font-size: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1672,11 +1669,9 @@
         <button type="button" id="alModeFeed" role="tab">Лента</button>
       </div>
       <div id="alPeriods" class="expChips" role="tablist" aria-label="Период"></div>
-      <div class="alDates">
-        <input id="alFrom" type="date" aria-label="С даты">
-        <span>—</span>
-        <input id="alTo" type="date" aria-label="По дату">
-      </div>
+      <button id="alDateBtn" class="dateField" type="button" aria-haspopup="dialog" style="margin-bottom:10px;">
+        <span id="alDateText">—</span><span class="dateFieldIcon" aria-hidden="true"><svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></span>
+      </button>
       <div id="alTypes" class="expChips" role="tablist" aria-label="Тип"></div>
       <label class="alOnly"><input id="alOnlyApproved" type="checkbox" checked> Только согласованные</label>
       <input id="alSearch" type="search" placeholder="Поиск по имени" autocomplete="off">
@@ -1926,23 +1921,6 @@
       <div id="expStatus"></div>
     </div>
 
-    <!-- Календарь: одно нажатие — одна дата, второе — конец периода. -->
-    <div id="expDateModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="expCalTitle">
-      <div class="modalBox">
-        <div class="calHead">
-          <button id="expCalPrev" type="button" aria-label="Предыдущий месяц">‹</button>
-          <div id="expCalTitle" class="calTitle"></div>
-          <button id="expCalNext" type="button" aria-label="Следующий месяц">›</button>
-        </div>
-        <div id="expCalGrid" class="calGrid"></div>
-        <div id="expCalSummary" class="calSummary"></div>
-        <div class="calHint">Нажмите один день — будет одна дата. Нажмите второй день — получится период (с первого по второй включительно).</div>
-        <div class="calBtns">
-          <button id="expCalCancel" class="calCancel" type="button">Отмена</button>
-          <button id="expCalDone" type="button">Готово</button>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- Экран "Отсутствия" — заявка на отгул/больничный (период по датам) или
@@ -2157,6 +2135,24 @@
       <div class="calBtns">
         <button id="pcCancel" type="button" class="calCancel">Отмена</button>
         <button id="pcOk" type="button">ОПЛАЧЕНО</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Календарь: одно нажатие — одна дата, второе — конец периода. -->
+  <div id="expDateModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="expCalTitle">
+    <div class="modalBox">
+      <div class="calHead">
+        <button id="expCalPrev" type="button" aria-label="Предыдущий месяц">‹</button>
+        <div id="expCalTitle" class="calTitle"></div>
+        <button id="expCalNext" type="button" aria-label="Следующий месяц">›</button>
+      </div>
+      <div id="expCalGrid" class="calGrid"></div>
+      <div id="expCalSummary" class="calSummary"></div>
+      <div class="calHint">Нажмите один день — будет одна дата. Нажмите второй день — получится период (с первого по второй включительно).</div>
+      <div class="calBtns">
+        <button id="expCalCancel" class="calCancel" type="button">Отмена</button>
+        <button id="expCalDone" type="button">Готово</button>
       </div>
     </div>
   </div>
@@ -4381,6 +4377,7 @@
   var expDraft = { from: '', to: '' };          // выбор внутри открытого календаря
   var expPickingEnd = false;                    // true — первый день нажат, ждём конец периода
   var expCalMonth = null;                       // Date — 1-е число показанного месяца
+  var calMax = 0, calDone = null;               // ограничение длины (0 — нет) и куда отдать выбор
   var MONTHS_RU = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
   var DOW_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
@@ -4472,16 +4469,16 @@
     }
     var sum = document.getElementById('expCalSummary');
     var n = expDraft.from ? daysBetween_(expDraft.from, to) : 0;
-    if (n > EXP_MAX_DAYS) {
+    if (calMax && n > calMax) {
       sum.className = 'calSummary error';
-      sum.textContent = 'Слишком длинный период: ' + n + ' ' + daysWord_(n) + '. Максимум — ' + EXP_MAX_DAYS + '.';
+      sum.textContent = 'Слишком длинный период: ' + n + ' ' + daysWord_(n) + '. Максимум — ' + calMax + '.';
     } else {
       sum.className = 'calSummary';
       sum.textContent = !expDraft.from ? 'Выберите дату'
         : (expDraft.to && expDraft.to !== expDraft.from ? 'Период: ' : 'Дата: ') + rangeText_(expDraft) +
           (expPickingEnd ? '. Нажмите последний день, если нужен период.' : '');
     }
-    document.getElementById('expCalDone').disabled = !expDraft.from || n > EXP_MAX_DAYS;
+    document.getElementById('expCalDone').disabled = !expDraft.from || (calMax && n > calMax);
   }
 
   document.getElementById('expCalGrid').addEventListener('click', function (e) {
@@ -4508,21 +4505,27 @@
   });
   var expDateModal = document.getElementById('expDateModal');
   function closeExpCal() { expDateModal.classList.remove('open'); }
-  document.getElementById('expDateBtn').addEventListener('click', function () {
-    expDraft = { from: expRange.from, to: expRange.to && expRange.to !== expRange.from ? expRange.to : '' };
+  // Общий календарь «одна дата или период»: range — текущий выбор, max — предел дней (0 — без),
+  // done(range) — что сделать с выбором.
+  function openRangeCal_(range, max, done) {
+    calMax = max || 0; calDone = done;
+    expDraft = { from: range.from || '', to: range.to && range.to !== range.from ? range.to : '' };
     expPickingEnd = false;
-    var base = dateOfIso_(expRange.from || isoToday_());
+    var base = dateOfIso_(range.to || range.from || isoToday_());
     expCalMonth = new Date(base.getFullYear(), base.getMonth(), 1);
     renderExpCal();
     expDateModal.classList.add('open');
+  }
+  document.getElementById('expDateBtn').addEventListener('click', function () {
+    openRangeCal_(expRange, EXP_MAX_DAYS, function (r) { expRange = r; renderExpDateField(); });
   });
   document.getElementById('expCalCancel').addEventListener('click', closeExpCal);
   expDateModal.addEventListener('click', function (e) { if (e.target === expDateModal) closeExpCal(); });
   document.getElementById('expCalDone').addEventListener('click', function () {
     if (!expDraft.from) return;
-    expRange = { from: expDraft.from, to: expDraft.to || expDraft.from };
-    renderExpDateField();
+    var r = { from: expDraft.from, to: expDraft.to || expDraft.from };
     closeExpCal();
+    if (calDone) calDone(r);
   });
 
   document.getElementById('goToAdminExpenseBtn').addEventListener('click', function () {
@@ -6370,7 +6373,7 @@
   document.getElementById('expGoPayBtn').addEventListener('click', function () { showExpPayScreen(); });
 
   // ===== Журнал отгулов =====
-  var alItems = null, alPeriod = 'month', alType = '*', alOpen = {}, alMode = 'people';
+  var alItems = null, alPeriod = 'month', alType = '*', alOpen = {}, alMode = 'people', alRange = { from: '', to: '' };
   var AL_TYPES = [['*', 'Все'], ['leave', 'Отгулы'], ['sick', 'Больничные'], ['part', 'Опоздания / уходы']];
   var AL_PERIODS = [['month', 'Этот месяц'], ['prev', 'Прошлый месяц'], ['q', '3 месяца'], ['year', 'Этот год'], ['all', 'Всё время']];
   function alIso_(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
@@ -6381,8 +6384,7 @@
     else if (k === 'prev') { f = alIso_(new Date(y, m - 1, 1)); t = alIso_(new Date(y, m, 0)); }
     else if (k === 'q') { f = alIso_(new Date(y, m - 2, 1)); t = alIso_(new Date(y, m + 1, 0)); }
     else if (k === 'year') { f = y + '-01-01'; t = y + '-12-31'; }
-    document.getElementById('alFrom').value = f;
-    document.getElementById('alTo').value = t;
+    alRange = { from: f, to: t };
   }
   function alKind_(type) {
     var k = expKey_(type);
@@ -6422,7 +6424,8 @@
     }).join('');
     var box = document.getElementById('alList');
     if (!alItems) return;
-    var f = document.getElementById('alFrom').value, t = document.getElementById('alTo').value;
+    var f = alRange.from, t = alRange.to;
+    document.getElementById('alDateText').textContent = f || t ? rangeText_(alRange) : 'Всё время';
     var only = document.getElementById('alOnlyApproved').checked;
     var q = expKey_(document.getElementById('alSearch').value);
     var people = {}, list = [], feed = [];
@@ -6501,7 +6504,7 @@
     showBottomNav();
     setActiveNav('profile');
     pushScreenState('absLog');
-    if (!document.getElementById('alFrom').value && alPeriod !== 'all') alSetPeriod_(alPeriod);
+    if (!alRange.from && alPeriod !== 'all') alSetPeriod_(alPeriod);
     renderAbsLog();
     if (!alItems) document.getElementById('alList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
     apiPost({ action: 'adminGetAbsences', phone: currentUser && currentUser.phone })
@@ -6527,8 +6530,8 @@
     var c = e.target.closest('.expChip'); if (!c) return;
     alType = c.dataset.k; renderAbsLog();
   });
-  ['alFrom', 'alTo'].forEach(function (id) {
-    document.getElementById(id).addEventListener('change', function () { alPeriod = ''; renderAbsLog(); });
+  document.getElementById('alDateBtn').addEventListener('click', function () {
+    openRangeCal_(alRange, 0, function (r) { alRange = r; alPeriod = ''; alOpen = {}; renderAbsLog(); });
   });
   document.getElementById('alOnlyApproved').addEventListener('change', renderAbsLog);
   document.getElementById('alSearch').addEventListener('input', renderAbsLog);
