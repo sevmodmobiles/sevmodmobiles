@@ -767,6 +767,7 @@
   .absTable td { padding: 8px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
   .absTable td.num, .absTable th.num { text-align: right; white-space: nowrap; }
   .absTag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  #absenceList { overflow-x: auto; }
   .absTag.ok { background: rgba(52,168,83,0.18); color: #2e9a4d; }
   .absTag.wait { background: rgba(245,180,0,0.22); color: #b98600; }
   .absTag.no { background: rgba(234,67,53,0.18); color: #d93025; }
@@ -973,7 +974,7 @@
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
-  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog { width: 100%; max-width: 440px; }
+  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog, #screenAbsence { width: 100%; max-width: 440px; }
   .expSumList { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
   .expSumTile {
     display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 8px 14px;
@@ -2986,14 +2987,15 @@
       listEl.innerHTML = '<div class="statsEmpty">В этом году отсутствий пока нет</div>';
       return;
     }
-    listEl.innerHTML = '<table class="absTable"><thead><tr><th>Тип</th><th>Когда</th><th class="num">Часов</th><th class="num">Дней</th><th>Статус</th></tr></thead><tbody>' +
+    // Статус — под типом заявки: пять колонок не помещаются на узком телефоне.
+    listEl.innerHTML = '<table class="absTable"><thead><tr><th>Тип и статус</th><th>Когда</th><th class="num">Часов</th><th class="num">Дней</th></tr></thead><tbody>' +
       res.items.map(function (it) {
         var when;
         if (it.timeFrom) when = fmtIsoRu_(it.dateFrom) + ', ' + escapeHtml(it.timeFrom) + '–' + escapeHtml(it.timeTo);
         else if (it.dateFrom === it.dateTo) when = fmtIsoRu_(it.dateFrom);
         else when = fmtIsoRu_(it.dateFrom) + ' – ' + fmtIsoRu_(it.dateTo);
-        return '<tr><td>' + escapeHtml(it.type) + '</td><td>' + when + '</td><td class="num">' +
-          fmtNum_(it.hours) + '</td><td class="num">' + fmtNum_(it.days) + '</td><td>' + absStatusTag_(it.status) + '</td></tr>';
+        return '<tr><td>' + escapeHtml(it.type) + '<div style="margin-top:4px">' + absStatusTag_(it.status) + '</div></td><td>' + when + '</td><td class="num">' +
+          fmtNum_(it.hours) + '</td><td class="num">' + fmtNum_(it.days) + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
 
