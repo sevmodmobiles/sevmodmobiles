@@ -1073,6 +1073,19 @@
   .alFeed .alItem:first-child { border-top: none; }
   .alItem .t .who { display: block; font-weight: 700; font-size: 14px; color: var(--text); }
   .alTag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
+  /* Установка приложения на телефон */
+  .installCard { border: 1px solid var(--blue); }
+  .installCard .ic { display: flex; gap: 12px; align-items: flex-start; }
+  .installCard img { width: 44px; height: 44px; border-radius: 10px; flex: none; }
+  .installCard b { display: block; font-size: 15px; margin-bottom: 3px; }
+  .installCard p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+  .installCard .ib { display: flex; gap: 8px; margin-top: 12px; }
+  .installCard .ib button, .installCard .ib a { flex: 1; margin: 0; padding: 11px 8px; font-size: 14px; text-align: center; text-decoration: none; border-radius: 10px; }
+  .installCard .ib a { background: var(--green); color: #fff; font-weight: 700; }
+  .installCard .ib button { width: auto; }
+  .installCard .ib .later { flex: 0 0 auto; padding: 11px 14px; background: none; color: var(--muted); border: 1px solid var(--border); }
+  .installCard .ib .installBtn { background: var(--green); color: #fff; }
+  .installCard .ib .copyLinkBtn { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
   /* Подотчётные деньги */
   .cashHead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
   .cashHead h2 { margin: 0; font-size: 17px; flex: 1; }
@@ -1265,6 +1278,7 @@
 
   <!-- Экран входа -->
   <div id="screenLogin">
+    <div class="card installCard" hidden></div>
     <div class="card logo-card">
       <img class="logo logo-light" src="logo-sevmod.png" alt="SEVMOD"><img class="logo logo-dark" src="logo-sevmod-dark.png" alt="SEVMOD">
       <h1>Учёт рабочего времени</h1>
@@ -1341,6 +1355,7 @@
 
   <!-- Экран сканирования -->
   <div id="screenScan">
+    <div class="card installCard" hidden></div>
     <div class="card logo-card">
       <img class="logo logo-light" src="logo-sevmod.png" alt="SEVMOD"><img class="logo logo-dark" src="logo-sevmod-dark.png" alt="SEVMOD">
       <h1>Учёт рабочего времени</h1>
@@ -2450,6 +2465,78 @@
         default: showScanScreen();
       }
   }
+
+  // ===== Установка приложения на главный экран =====
+  // Ссылку часто открывают из PDF или мессенджера — во встроенном браузере,
+  // где установить приложение нельзя. Тогда предлагаем открыть страницу в
+  // Chrome (Android) или Safari (iPhone); там — кнопка установки или подсказка.
+  var installPromptEvt = null;
+  var INSTALL_LATER_KEY = 'sevmod_install_later';
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installPromptEvt = e; renderInstallCards_(); });
+  window.addEventListener('appinstalled', function () { installPromptEvt = null; renderInstallCards_(); });
+  function isStandalone_() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  }
+  function installEnv_() {
+    var ua = navigator.userAgent || '';
+    var ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var android = /Android/i.test(ua);
+    // встроенные браузеры приложений (мессенджеры, просмотрщики, WebView)
+    var inApp = /Telegram|WhatsApp|FBAN|FBAV|Instagram|Line\/|VKClient|OKApp|YaApp|MicroMessenger|; wv\)|GSA\//i.test(ua);
+    var iosSafari = ios && /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|YaBrowser/i.test(ua) && !inApp;
+    var chrome = android && /Chrome\//i.test(ua) && !/SamsungBrowser|YaBrowser|OPR|Edg|MiuiBrowser/i.test(ua) && !inApp;
+    return { ios: ios, android: android, inApp: inApp, iosSafari: iosSafari, chrome: chrome };
+  }
+  function renderInstallCards_() {
+    var html = '';
+    var later = false;
+    try { later = Number(localStorage.getItem(INSTALL_LATER_KEY) || 0) > Date.now(); } catch (e) {}
+    var env = installEnv_();
+    if (!isStandalone_() && !later && (env.ios || env.android || installPromptEvt)) {
+      var url = location.href.split('#')[0];
+      var title = 'Установите SEVMOD на телефон', text = '', action = '';
+      if (installPromptEvt) {
+        text = 'Значок появится на главном экране — открывать как обычное приложение.';
+        action = '<button type="button" class="installBtn">Установить</button>';
+      } else if (env.android && !env.chrome) {
+        text = 'Сейчас страница открыта во встроенном браузере — отсюда установить нельзя. Откройте её в Chrome.';
+        var intent = 'intent://' + location.host + location.pathname + location.search +
+          '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
+        action = '<a href="' + escapeHtml(intent) + '">Открыть в Chrome</a>';
+      } else if (env.android) {
+        text = 'Нажмите ⋮ справа вверху → «Установить приложение» или «Добавить на главный экран».';
+      } else if (env.ios && !env.iosSafari) {
+        text = 'Установить можно только из Safari. Нажмите кнопку — страница откроется в Safari, затем «Поделиться» → «На экран «Домой»».';
+        action = '<a href="' + escapeHtml('x-safari-' + url) + '">Открыть в Safari</a><button type="button" class="copyLinkBtn">Копировать ссылку</button>';
+      } else if (env.ios) {
+        text = 'Нажмите «Поделиться» (квадрат со стрелкой внизу экрана) → «На экран «Домой»» → «Добавить».';
+      }
+      html = '<div class="ic"><img src="icon-192.png?v=2" alt=""><div><b>' + title + '</b><p>' + text + '</p></div></div>' +
+        '<div class="ib">' + action + '<button type="button" class="later">Позже</button></div>';
+    }
+    document.querySelectorAll('.installCard').forEach(function (el) { el.innerHTML = html; el.hidden = !html; });
+  }
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('.installCard .installBtn') && installPromptEvt) {
+      var ev = installPromptEvt; installPromptEvt = null;
+      ev.prompt();
+      (ev.userChoice || Promise.resolve()).then(renderInstallCards_);
+      return;
+    }
+    if (e.target.closest('.installCard .later')) {
+      try { localStorage.setItem(INSTALL_LATER_KEY, String(Date.now() + 3 * 86400000)); } catch (err) {}
+      renderInstallCards_();
+      return;
+    }
+    var cp = e.target.closest('.installCard .copyLinkBtn');
+    if (cp) {
+      var url = location.href.split('#')[0];
+      (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(function () {
+        cp.textContent = 'Скопировано — вставьте в Safari';
+      }, function () { window.prompt('Скопируйте ссылку и вставьте в Safari:', url); });
+    }
+  });
+  renderInstallCards_();
 
   // ===== Нижняя навигация =====
   // Видна только когда человек вошёл в приложение (скрыта на экранах
