@@ -1070,6 +1070,11 @@
   .alItem .t b { font-weight: 600; }
   .alItem .t small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
   .alItem .n { white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .alMonth { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 2px 6px; }
+  .alMonth:first-child { margin-top: 0; }
+  .alFeed { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .alFeed .alItem:first-child { border-top: none; }
+  .alItem .t .who { display: block; font-weight: 700; font-size: 14px; color: var(--text); }
   .alTag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
   /* Подотчётные деньги */
   .cashHead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
@@ -1662,6 +1667,10 @@
       <div class="switchUser"><a id="absLogBackLink">← Панель администратора</a></div>
     </div>
     <div class="card">
+      <div class="expSeg" role="tablist" aria-label="Вид">
+        <button type="button" id="alModePeople" class="on" role="tab">По людям</button>
+        <button type="button" id="alModeFeed" role="tab">Лента</button>
+      </div>
       <div id="alPeriods" class="expChips" role="tablist" aria-label="Период"></div>
       <div class="alDates">
         <input id="alFrom" type="date" aria-label="С даты">
@@ -6361,7 +6370,7 @@
   document.getElementById('expGoPayBtn').addEventListener('click', function () { showExpPayScreen(); });
 
   // ===== Журнал отгулов =====
-  var alItems = null, alPeriod = 'month', alType = '*', alOpen = {};
+  var alItems = null, alPeriod = 'month', alType = '*', alOpen = {}, alMode = 'people';
   var AL_TYPES = [['*', 'Все'], ['leave', 'Отгулы'], ['sick', 'Больничные'], ['part', 'Опоздания / уходы']];
   var AL_PERIODS = [['month', 'Этот месяц'], ['prev', 'Прошлый месяц'], ['q', '3 месяца'], ['year', 'Этот год'], ['all', 'Всё время']];
   function alIso_(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
@@ -6403,6 +6412,8 @@
     return r + ' ' + daysWord_(r);
   }
   function renderAbsLog() {
+    document.getElementById('alModePeople').classList.toggle('on', alMode === 'people');
+    document.getElementById('alModeFeed').classList.toggle('on', alMode === 'feed');
     document.getElementById('alPeriods').innerHTML = AL_PERIODS.map(function (p) {
       return '<button type="button" class="expChip' + (alPeriod === p[0] ? ' on' : '') + '" data-k="' + p[0] + '">' + p[1] + '</button>';
     }).join('');
@@ -6414,7 +6425,7 @@
     var f = document.getElementById('alFrom').value, t = document.getElementById('alTo').value;
     var only = document.getElementById('alOnlyApproved').checked;
     var q = expKey_(document.getElementById('alSearch').value);
-    var people = {}, list = [];
+    var people = {}, list = [], feed = [];
     alItems.forEach(function (it) {
       if (only && it.status !== 'Согласовано') return;
       if (!only && it.status === 'Не согласовано') return;
@@ -6422,6 +6433,7 @@
       if (alType !== '*' && kind !== alType) return;
       if (q && expKey_(it.name).indexOf(q) < 0) return;
       var ip = alInPeriod_(it, f, t); if (!ip) return;
+      feed.push({ it: it, ip: ip, kind: kind });
       var key = it.phone || it.name;
       var p = people[key] || (people[key] = { key: key, name: it.name || '—', days: 0, leave: 0, sick: 0, partH: 0, partN: 0, items: [] });
       if (!p.items.length) list.push(p);
@@ -6438,6 +6450,27 @@
       var ip = x.ip, it = x.it;
       if (x.kind === 'part') return fmtIsoRu_(ip.from) + (it.timeFrom ? '<br>' + escapeHtml(it.timeFrom) + '–' + escapeHtml(it.timeTo) : '');
       return ip.from === ip.to ? fmtIsoRu_(ip.from) : fmtIsoRu_(ip.from) + ' –<br>' + fmtIsoRu_(ip.to);
+    }
+    if (alMode === 'feed') {
+      // Лента: все заявки по дате начала, свежие сверху, с разбивкой по месяцам.
+      var MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+      feed.sort(function (a, b) { return a.ip.from < b.ip.from ? 1 : (a.ip.from > b.ip.from ? -1 : String(a.it.name).localeCompare(String(b.it.name), 'ru')); });
+      var html = '', curMonth = '', open = false;
+      feed.forEach(function (x) {
+        var it = x.it, mk = x.ip.from.slice(0, 7);
+        if (mk !== curMonth) {
+          if (open) html += '</div>';
+          curMonth = mk; open = true;
+          html += '<div class="alMonth">' + MONTHS[Number(mk.slice(5, 7)) - 1] + ' ' + mk.slice(0, 4) + '</div><div class="alFeed">';
+        }
+        var amount = x.kind === 'part' ? alNum_(x.ip.hours) + ' ч' : alDaysText_(x.ip.days);
+        html += '<div class="alItem"><span class="d">' + when_(x) + '</span><span class="t"><span class="who">' + escapeHtml(it.name || '—') + '</span>' +
+          escapeHtml(it.type || '') + (it.status !== 'Согласовано' ? '<span class="alTag">' + escapeHtml(it.status) + '</span>' : '') +
+          (it.comment ? '<small>' + escapeHtml(it.comment) + '</small>' : '') + '</span><span class="n">' + amount + '</span></div>';
+      });
+      if (open) html += '</div>';
+      box.innerHTML = html;
+      return;
     }
     box.innerHTML = list.map(function (p) {
       var open = !!alOpen[p.key];
@@ -6483,6 +6516,8 @@
       .catch(function (err) { document.getElementById('alList').innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
   }
   document.getElementById('goToAbsLogBtn').addEventListener('click', showAbsLogScreen);
+  document.getElementById('alModePeople').addEventListener('click', function () { alMode = 'people'; renderAbsLog(); });
+  document.getElementById('alModeFeed').addEventListener('click', function () { alMode = 'feed'; renderAbsLog(); });
   document.getElementById('absLogBackLink').addEventListener('click', function () { showAdminScreen(); });
   document.getElementById('alPeriods').addEventListener('click', function (e) {
     var c = e.target.closest('.expChip'); if (!c) return;
