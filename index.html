@@ -760,7 +760,7 @@
   #screenScan #reader { margin-top: 8px; }
 
   /* ===== Отсутствия (отгулы / больничные) ===== */
-  #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay { display: none; }
+  #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog { display: none; }
   .absTotals { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
   .absTable { width: 100%; border-collapse: collapse; font-size: 13px; }
   .absTable th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--border); }
@@ -973,7 +973,7 @@
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
-  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay { width: 100%; max-width: 440px; }
+  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog { width: 100%; max-width: 440px; }
   .expSumList { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
   .expSumTile {
     display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 8px 14px;
@@ -1057,6 +1057,20 @@
   #expSelStatus { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
   #expSelDel { background: none; color: var(--red); border: 1px solid var(--red); }
   .stOpts { display: grid; gap: 6px; margin: 10px 0; }
+  /* Журнал отгулов */
+  .alDates { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .alDates input { flex: 1; min-width: 0; margin: 0; padding: 9px 8px; font-size: 14px; }
+  .alDates span { color: var(--muted); }
+  .alOnly { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 14px; color: var(--text); }
+  .alOnly input { width: 18px; height: 18px; margin: 0; accent-color: var(--green); }
+  .alBig { font-weight: 800; font-size: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .alItem { display: flex; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--border); font-size: 13px; }
+  .alItem .d { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 92px; }
+  .alItem .t { flex: 1; min-width: 0; }
+  .alItem .t b { font-weight: 600; }
+  .alItem .t small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+  .alItem .n { white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .alTag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
   /* Подотчётные деньги */
   .cashHead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
   .cashHead h2 { margin: 0; font-size: 17px; flex: 1; }
@@ -1532,6 +1546,7 @@
 
       <div class="card">
         <button id="goToAdminAbsencesBtn" type="button" class="hasDot">Согласовать отгулы</button>
+        <button id="goToAbsLogBtn" type="button" style="background: var(--blue); margin-top: 10px;">Журнал отгулов</button>
       </div>
     </div>
   </div>
@@ -1637,6 +1652,27 @@
     </div>
     <div class="card">
       <div id="adminAbsencesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Журнал отгулов: сколько каждый отгулял за период; по нажатию — дни и причины -->
+  <div id="screenAbsLog">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Журнал отгулов</h1>
+      <div class="switchUser"><a id="absLogBackLink">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <div id="alPeriods" class="expChips" role="tablist" aria-label="Период"></div>
+      <div class="alDates">
+        <input id="alFrom" type="date" aria-label="С даты">
+        <span>—</span>
+        <input id="alTo" type="date" aria-label="По дату">
+      </div>
+      <div id="alTypes" class="expChips" role="tablist" aria-label="Тип"></div>
+      <label class="alOnly"><input id="alOnlyApproved" type="checkbox" checked> Только согласованные</label>
+      <input id="alSearch" type="search" placeholder="Поиск по имени" autocomplete="off">
+      <div id="alTotals" class="expTotals"></div>
+      <div id="alList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
   </div>
 
@@ -2313,6 +2349,7 @@
   var screenExpView = document.getElementById('screenExpView');
   var screenExpContract = document.getElementById('screenExpContract');
   var screenExpPay = document.getElementById('screenExpPay');
+  var screenAbsLog = document.getElementById('screenAbsLog');
   var bottomNav = document.getElementById('bottomNav');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
@@ -2404,6 +2441,7 @@
         case 'expView': showExpViewScreen(); break;
         case 'expContract': showExpContractScreen(); break;
         case 'expPay': showExpPayScreen(); break;
+        case 'absLog': showAbsLogScreen(); break;
         default: showScanScreen();
       }
   }
@@ -2458,6 +2496,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     checkShiftStatus();
@@ -2518,6 +2557,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenLogin.style.display = 'block';
     hideBottomNav();
     pushScreenState('login');
@@ -2541,6 +2581,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
     hideBottomNav();
@@ -2695,6 +2736,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
@@ -2722,6 +2764,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
@@ -2764,6 +2807,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenAbsence.style.display = 'block';
 
     var isPartial = absenceMode === 'partial';
@@ -2916,6 +2960,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     hideAdminPopup_();
     saveNotified_(adminPendingCount);
     loadAdminAbsences();
@@ -3008,6 +3053,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenProfile.style.display = 'block';
     document.getElementById('profileWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     refreshAdminStatus();
@@ -3125,6 +3171,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenTaskDetail.style.display = 'block';
     document.getElementById('taskDetailLoading').style.display = 'block';
     document.getElementById('taskDetailBody').style.display = 'none';
@@ -3309,6 +3356,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenAdmin.style.display = 'block';
     showBottomNav();
     setActiveNav('profile');
@@ -3335,6 +3383,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenTaskManage.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
@@ -3362,6 +3411,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
     showBottomNav();
@@ -3388,6 +3438,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenAdminObjects.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
     loadAdminObjects();
@@ -4076,6 +4127,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
+    screenAbsLog.style.display = 'none';
     screenAdminExpense.style.display = 'block';
     if (!expRange.from) { expRange.from = isoToday_(); expRange.to = expRange.from; }
     renderExpDateField();
@@ -4569,7 +4621,7 @@
   function hideAllForExp_() {
     [screenLogin, screenReg, screenScan, screenAdmin, screenAdminRates, screenAdminObjects, screenTaskManage,
      screenStats, screenTasks, screenTaskDetail, screenProfile, screenAbsence, screenAdminAbsences,
-     screenAdminExpense, screenExpHub, screenExpView, screenExpContract, screenExpPay].forEach(function (el) { el.style.display = 'none'; });
+     screenAdminExpense, screenExpHub, screenExpView, screenExpContract, screenExpPay, screenAbsLog].forEach(function (el) { el.style.display = 'none'; });
   }
   // Цвет статуса — из цвета ячейки сводки в таблице (белый/пустой не используем).
   function expStatusColor_(status) {
@@ -6307,6 +6359,148 @@
 
   document.getElementById('payBackLink').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('expGoPayBtn').addEventListener('click', function () { showExpPayScreen(); });
+
+  // ===== Журнал отгулов =====
+  var alItems = null, alPeriod = 'month', alType = '*', alOpen = {};
+  var AL_TYPES = [['*', 'Все'], ['leave', 'Отгулы'], ['sick', 'Больничные'], ['part', 'Опоздания / уходы']];
+  var AL_PERIODS = [['month', 'Этот месяц'], ['prev', 'Прошлый месяц'], ['q', '3 месяца'], ['year', 'Этот год'], ['all', 'Всё время']];
+  function alIso_(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function alSetPeriod_(k) {
+    alPeriod = k;
+    var now = new Date(), y = now.getFullYear(), m = now.getMonth(), f = '', t = '';
+    if (k === 'month') { f = alIso_(new Date(y, m, 1)); t = alIso_(new Date(y, m + 1, 0)); }
+    else if (k === 'prev') { f = alIso_(new Date(y, m - 1, 1)); t = alIso_(new Date(y, m, 0)); }
+    else if (k === 'q') { f = alIso_(new Date(y, m - 2, 1)); t = alIso_(new Date(y, m + 1, 0)); }
+    else if (k === 'year') { f = y + '-01-01'; t = y + '-12-31'; }
+    document.getElementById('alFrom').value = f;
+    document.getElementById('alTo').value = t;
+  }
+  function alKind_(type) {
+    var k = expKey_(type);
+    if (k === 'больничный') return 'sick';
+    if (k === 'отгул') return 'leave';
+    return 'part';
+  }
+  // Рабочие дни (пн–пт) в пересечении заявки с периодом — так же, как их считает таблица.
+  function alWorkdays_(fromIso, toIso) {
+    var a = dateOfIso_(fromIso), b = dateOfIso_(toIso), n = 0;
+    for (var d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) { var w = d.getDay(); if (w !== 0 && w !== 6) n++; }
+    return n;
+  }
+  function alInPeriod_(it, f, t) {
+    var a = it.dateFrom, b = it.dateTo || it.dateFrom;
+    if ((f && b < f) || (t && a > t)) return null;
+    var ca = f && a < f ? f : a, cb = t && b > t ? t : b;
+    if (alKind_(it.type) === 'part') return { from: ca, to: cb, days: (Number(it.hours) || 0) / 8, hours: Number(it.hours) || 0 };
+    var clipped = ca !== a || cb !== b;
+    var days = clipped ? alWorkdays_(ca, cb) : (Number(it.days) || alWorkdays_(a, b));
+    return { from: ca, to: cb, days: days, hours: days * 8 };
+  }
+  function alNum_(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
+  function alDaysText_(n) {
+    var r = Math.round(n * 10) / 10;
+    if (r !== Math.floor(r)) return alNum_(r) + ' дн.';
+    return r + ' ' + daysWord_(r);
+  }
+  function renderAbsLog() {
+    document.getElementById('alPeriods').innerHTML = AL_PERIODS.map(function (p) {
+      return '<button type="button" class="expChip' + (alPeriod === p[0] ? ' on' : '') + '" data-k="' + p[0] + '">' + p[1] + '</button>';
+    }).join('');
+    document.getElementById('alTypes').innerHTML = AL_TYPES.map(function (p) {
+      return '<button type="button" class="expChip' + (alType === p[0] ? ' on' : '') + '" data-k="' + p[0] + '">' + p[1] + '</button>';
+    }).join('');
+    var box = document.getElementById('alList');
+    if (!alItems) return;
+    var f = document.getElementById('alFrom').value, t = document.getElementById('alTo').value;
+    var only = document.getElementById('alOnlyApproved').checked;
+    var q = expKey_(document.getElementById('alSearch').value);
+    var people = {}, list = [];
+    alItems.forEach(function (it) {
+      if (only && it.status !== 'Согласовано') return;
+      if (!only && it.status === 'Не согласовано') return;
+      var kind = alKind_(it.type);
+      if (alType !== '*' && kind !== alType) return;
+      if (q && expKey_(it.name).indexOf(q) < 0) return;
+      var ip = alInPeriod_(it, f, t); if (!ip) return;
+      var key = it.phone || it.name;
+      var p = people[key] || (people[key] = { key: key, name: it.name || '—', days: 0, leave: 0, sick: 0, partH: 0, partN: 0, items: [] });
+      if (!p.items.length) list.push(p);
+      p.items.push({ it: it, ip: ip, kind: kind });
+      if (kind === 'part') { p.partH += ip.hours; p.partN++; } else { p.days += ip.days; p[kind] += ip.days; }
+    });
+    list.sort(function (a, b) { return (b.days - a.days) || (b.partH - a.partH) || String(a.name).localeCompare(String(b.name), 'ru'); });
+    var totalDays = list.reduce(function (a, p) { return a + p.days; }, 0);
+    document.getElementById('alTotals').innerHTML = list.length
+      ? '<span class="big">' + alDaysText_(totalDays) + '</span><span class="meta">' + list.length + ' чел. · ' +
+        list.reduce(function (a, p) { return a + p.items.length; }, 0) + ' заяв.</span>' : '';
+    if (!list.length) { box.innerHTML = '<div class="statsEmpty">За этот период отгулов нет</div>'; return; }
+    function when_(x) {
+      var ip = x.ip, it = x.it;
+      if (x.kind === 'part') return fmtIsoRu_(ip.from) + (it.timeFrom ? '<br>' + escapeHtml(it.timeFrom) + '–' + escapeHtml(it.timeTo) : '');
+      return ip.from === ip.to ? fmtIsoRu_(ip.from) : fmtIsoRu_(ip.from) + ' –<br>' + fmtIsoRu_(ip.to);
+    }
+    box.innerHTML = list.map(function (p) {
+      var open = !!alOpen[p.key];
+      var parts = [];
+      if (p.leave) parts.push('отгулы ' + alDaysText_(p.leave));
+      if (p.sick) parts.push('больничные ' + alDaysText_(p.sick));
+      if (p.partN) parts.push('опоздания/уходы ' + p.partN + ' (' + alNum_(p.partH) + ' ч)');
+      var big = p.days ? alDaysText_(p.days) : alNum_(p.partH) + ' ч';
+      var details = '';
+      if (open) {
+        details = p.items.slice().sort(function (a, b) { return a.ip.from < b.ip.from ? 1 : -1; }).map(function (x) {
+          var it = x.it;
+          var amount = x.kind === 'part' ? alNum_(x.ip.hours) + ' ч' : alDaysText_(x.ip.days);
+          return '<div class="alItem"><span class="d">' + when_(x) + '</span><span class="t"><b>' + escapeHtml(it.type || '') + '</b>' +
+            (it.status !== 'Согласовано' ? '<span class="alTag">' + escapeHtml(it.status) + '</span>' : '') +
+            '<small>' + (it.comment ? escapeHtml(it.comment) : 'причина не указана') + '</small></span>' +
+            '<span class="n">' + amount + '</span></div>';
+        }).join('');
+      }
+      return '<div class="expPerson"><button type="button" class="expPersonHead" data-key="' + escapeHtml(p.key) + '" aria-expanded="' + open + '">' +
+        '<div class="expPersonTop"><span class="expPersonName">' + escapeHtml(p.name) + '</span><span class="alBig">' + big + '</span></div>' +
+        '<div class="expPersonMeta">' + escapeHtml(parts.join(' · ')) + '</div></button>' + details + '</div>';
+    }).join('');
+  }
+  function showAbsLogScreen() {
+    hideAllForExp_();
+    screenAbsLog.style.display = 'block';
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('absLog');
+    if (!document.getElementById('alFrom').value && alPeriod !== 'all') alSetPeriod_(alPeriod);
+    renderAbsLog();
+    if (!alItems) document.getElementById('alList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    apiPost({ action: 'adminGetAbsences', phone: currentUser && currentUser.phone })
+      .then(function (res) {
+        if (!res || res.status !== 'ok') {
+          document.getElementById('alList').innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Не удалось загрузить') + '</div>';
+          return;
+        }
+        alItems = res.items || [];
+        renderAbsLog();
+      })
+      .catch(function (err) { document.getElementById('alList').innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+  }
+  document.getElementById('goToAbsLogBtn').addEventListener('click', showAbsLogScreen);
+  document.getElementById('absLogBackLink').addEventListener('click', function () { showAdminScreen(); });
+  document.getElementById('alPeriods').addEventListener('click', function (e) {
+    var c = e.target.closest('.expChip'); if (!c) return;
+    alSetPeriod_(c.dataset.k); alOpen = {}; renderAbsLog();
+  });
+  document.getElementById('alTypes').addEventListener('click', function (e) {
+    var c = e.target.closest('.expChip'); if (!c) return;
+    alType = c.dataset.k; renderAbsLog();
+  });
+  ['alFrom', 'alTo'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', function () { alPeriod = ''; renderAbsLog(); });
+  });
+  document.getElementById('alOnlyApproved').addEventListener('change', renderAbsLog);
+  document.getElementById('alSearch').addEventListener('input', renderAbsLog);
+  document.getElementById('alList').addEventListener('click', function (e) {
+    var h = e.target.closest('.expPersonHead'); if (!h) return;
+    alOpen[h.dataset.key] = !alOpen[h.dataset.key]; renderAbsLog();
+  });
 
   // ===== Админ: согласование отгулов — обработчики =====
   document.getElementById('goToAdminAbsencesBtn').addEventListener('click', function () {
