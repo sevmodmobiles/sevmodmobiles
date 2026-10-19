@@ -1,3 +1,5 @@
+// v58: «Кабинет» — у каждой смены объект (из колонки «Объект» журнала «Учет»:
+//      объект прихода, а если прихода нет — ухода).
 // v57: подотчётные деньги. Лист «Подотчёт» — журнал передач (от кого →
 //      кому, «Компания» — касса/счёт фирмы). Колонка «Оплатил» в листе
 //      расходов (создаётся сама). Остаток держателя = получил − передал −
@@ -2451,15 +2453,18 @@ function getMyStatsCore_(phone) {
 
     var dateStr = Utilities.formatDate(ts, 'Europe/Moscow', 'dd.MM.yyyy');
     if (!shifts[dateStr]) {
-      shifts[dateStr] = { date: dateStr, arrival: null, departure: null, lateMinutes: '' };
+      shifts[dateStr] = { date: dateStr, arrival: null, departure: null, lateMinutes: '', object: '' };
     }
+    var rowObject = String(data[i][3] || '').trim();
     if (eventType === 'Приход') {
       if (!shifts[dateStr].arrival || ts < shifts[dateStr].arrival) {
         shifts[dateStr].arrival = ts;
+        if (rowObject) shifts[dateStr].object = rowObject;
         shifts[dateStr].lateMinutes = (lateVal === '' || lateVal === null || lateVal === undefined) ? '' : Number(lateVal);
       }
     } else if (eventType === 'Уход') {
       if (!shifts[dateStr].departure || ts > shifts[dateStr].departure) shifts[dateStr].departure = ts;
+      if (!shifts[dateStr].arrival && !shifts[dateStr].object && rowObject) shifts[dateStr].object = rowObject;
     }
   }
 
@@ -2514,6 +2519,7 @@ function getMyStatsCore_(phone) {
       departure: s.departure ? Utilities.formatDate(s.departure, 'Europe/Moscow', 'HH:mm') : '',
       hours: hoursStr,
       pay: payForDay,
+      object: s.object || '',
       lateMinutes: lateMinutes // null - нет данных (например старая запись до внедрения смен), 0 - вовремя/раньше, >0 - опоздание в минутах
     });
   });

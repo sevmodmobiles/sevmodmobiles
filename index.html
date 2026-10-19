@@ -436,6 +436,10 @@
   .dayRow .dayDate { font-weight: 600; }
   .dayRowBottom { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 8px; }
   .dayRow .dayTimes { font-size: 12px; color: var(--muted); }
+  .dayRow .dayTimes.right { text-align: right; white-space: nowrap; flex: none; }
+  .dayObject { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600;
+    background: rgba(52,168,83,0.18); color: #2e9a4d; }
   .dayRow .arrivalTime { font-weight: 600; }
   .dayRow .arrivalTime.late { color: var(--red); }
   .dayRow .arrivalTime.onTime { color: var(--green); }
@@ -979,7 +983,7 @@
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
-  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog, #screenAbsence { width: 100%; max-width: 440px; }
+  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog, #screenAbsence, #screenStats { width: 100%; max-width: 440px; }
   .expSumList { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
   .expSumTile {
     display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 8px 14px;
@@ -4101,14 +4105,15 @@
       var timesText = arrivalHtml + ' – ' + (d.departure || '—') +
         ' · <span class="dayHoursInline">' + (d.hours || '—') + '</span>';
 
+      // Под датой — объект (зелёная плашка), время смены — справа.
       row.innerHTML =
         '<div class="dayRowTop">' +
           '<div class="dayDate">' + shortYear_(d.date) + '</div>' +
           '<div class="dayRight"><div class="dayPay">' + (d.pay ? d.pay + ' ₽' : '—') + '</div></div>' +
         '</div>' +
         '<div class="dayRowBottom">' +
-          '<div class="dayTimes">' + timesText + '</div>' +
-          badgeHtml +
+          (d.object ? '<span class="dayObject">' + escapeHtml(d.object) + '</span>' : '<span></span>') +
+          '<div class="dayTimes right">' + timesText + (badgeHtml ? ' ' + badgeHtml : '') + '</div>' +
         '</div>';
       list.appendChild(row);
     });
