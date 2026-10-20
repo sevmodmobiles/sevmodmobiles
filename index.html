@@ -811,6 +811,7 @@
   .absReqBtns .rejectBtn { background: var(--red); }
 
   /* ===== Расходы: поле даты и календарь с выбором периода ===== */
+  input[type="date"], input[type="time"], input[type="datetime-local"], input[type="month"] { cursor: pointer; }
   .dateField {
     display: flex; justify-content: space-between; align-items: center; gap: 8px;
     text-align: left; font-weight: 400; color: var(--text); background: var(--card);
@@ -2580,6 +2581,16 @@
     }
   });
   renderInstallCards_();
+
+  // Поля даты и времени: календарь/часы открываются нажатием на всё поле,
+  // а не только на значок справа (так интуитивнее). Работает и для полей,
+  // которые создаются динамически (авансы в контрактах и т.п.).
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    if (!el || el.tagName !== 'INPUT' || el.disabled || el.readOnly) return;
+    if (!/^(date|time|datetime-local|month)$/.test(el.type) || typeof el.showPicker !== 'function') return;
+    try { el.showPicker(); } catch (err) { /* браузер не разрешил — останется обычный ввод */ }
+  });
 
   // ===== Нижняя навигация =====
   // Видна только когда человек вошёл в приложение (скрыта на экранах
