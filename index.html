@@ -22,7 +22,7 @@
 <link rel="manifest" href="manifest.json">
 
 <script src="https://accounts.google.com/gsi/client"></script>
-<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
   :root {
     --bg: #f4f5f7;
@@ -767,6 +767,16 @@
   #screenScan .card:not(.logo-card) { padding: 14px; }
   #screenScan h2 { margin: 0 0 8px; }
   #screenScan #reader { margin-top: 8px; }
+  .scanView { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: 10px; overflow: hidden; }
+  .scanView video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scanFrame { position: absolute; left: 50%; top: 50%; width: 62%; aspect-ratio: 1; transform: translate(-50%, -50%);
+    border: 3px solid rgba(255,255,255,0.9); border-radius: 14px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.25); pointer-events: none; }
+  .scanHelp { margin-top: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+  .scanHelp[hidden] { display: none; }
+  .scanHelp p { margin: 0 0 8px; font-size: 13px; line-height: 1.4; color: var(--text); }
+  .scanHelp button { margin: 6px 0 0; padding: 11px; font-size: 14px; }
+  #scanSwitchCam { background: var(--blue); }
+  .scanHelp .scanCancel { background: none; color: var(--muted); border: 1px solid var(--border); }
 
   /* ===== Отсутствия (отгулы / больничные) ===== */
   #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog { display: none; }
@@ -1391,6 +1401,13 @@
       <h2>Отметка на объекте</h2>
       <div id="shiftStatusBanner" class="shiftBanner"></div>
       <div id="reader"></div>
+      <div id="scanHelp" class="scanHelp" hidden>
+        <p>Код не читается? Держите телефон ровно 1–2 секунды, протрите камеру. Не помогло — смените камеру или сфотографируйте код.</p>
+        <button type="button" id="scanSwitchCam">Сменить камеру</button>
+        <button type="button" id="scanPhotoBtn">Сфотографировать код</button>
+        <button type="button" id="scanCancelBtn" class="scanCancel">Отмена</button>
+        <input type="file" id="scanPhotoInput" accept="image/*" capture="environment" hidden>
+      </div>
       <button id="actionBtn">Отметить приход</button>
       <div id="objectLabel"></div>
       <div id="status"></div>
@@ -7133,7 +7150,6 @@
 
   // --- Сканирование ---
   var scannedObject = null;
-  var html5QrCode = null;
 
   function setStatus(text, kind) {
     stopWaitIndicator(statusEl);
@@ -7174,53 +7190,196 @@
   // заранее отражает текущий статус смены (см. applyActionButtonState),
   // а нажатие сразу запускает камеру. Отдельной кнопки "Сканировать QR-код"
   // больше нет — сканирование и отметка объединены в одно действие.
+  // Сканирование QR. Кадр разбирается в ПОЛНОМ разрешении камеры (раньше
+  // библиотека уменьшала его до размера окошка, и мелкий/далёкий код не
+  // читался): встроенный распознаватель браузера (BarcodeDetector, есть в
+  // Chrome на Android), а где его нет — jsQR. Камера — задняя, высокое
+  // разрешение, непрерывная фокусировка. Если за 6 с код не найден —
+  // подсказка с «Сменить камеру» и «Сфотографировать код».
+  var scanStream = null, scanVideo = null, scanTimer = null, scanHelpTimer = null;
+  var scanCameras = null, scanCamIdx = -1, scanHandled = false, scanDetector = undefined, scanBusy = false;
+  var scanCanvas = document.createElement('canvas');
+  function getDetector_() {
+    if (scanDetector !== undefined) return Promise.resolve(scanDetector);
+    if (!('BarcodeDetector' in window)) { scanDetector = null; return Promise.resolve(null); }
+    var check = BarcodeDetector.getSupportedFormats ? BarcodeDetector.getSupportedFormats() : Promise.resolve(['qr_code']);
+    return check.then(function (f) {
+      scanDetector = f.indexOf('qr_code') >= 0 ? new BarcodeDetector({ formats: ['qr_code'] }) : null;
+      return scanDetector;
+    }, function () { scanDetector = null; return null; });
+  }
+  // Распознать QR на картинке/кадре (video, img, canvas). Возвращает Promise<строка|null>.
+  function decodeQr_(source, w, h) {
+    return getDetector_().then(function (det) {
+      if (det) {
+        return det.detect(source).then(function (codes) { return codes && codes[0] ? codes[0].rawValue : null; }, function () { return null; })
+          .then(function (txt) { return txt || decodeJsQr_(source, w, h); });
+      }
+      return decodeJsQr_(source, w, h);
+    });
+  }
+  function decodeJsQr_(source, w, h) {
+    if (typeof jsQR !== 'function' || !w || !h) return null;
+    // ограничиваем размер, чтобы не тормозить на телефонах (код всё равно остаётся крупным)
+    var k = Math.min(1, 1280 / Math.max(w, h));
+    var cw = Math.round(w * k), ch = Math.round(h * k);
+    scanCanvas.width = cw; scanCanvas.height = ch;
+    var ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(source, 0, 0, cw, ch);
+    var img = ctx.getImageData(0, 0, cw, ch);
+    var code = jsQR(img.data, cw, ch, { inversionAttempts: 'dontInvert' });
+    if (!code) return null;
+    // Кириллица («Офис SEVMOD»): jsQR не всегда сам декодирует UTF-8 — берём сырые байты.
+    var txt = code.data;
+    if ((!txt || /\uFFFD|[\u00C0-\u00FF]{2}/.test(txt)) && code.binaryData && code.binaryData.length && window.TextDecoder) {
+      var bytes = new Uint8Array(code.binaryData);
+      var encs = ['utf-8', 'shift_jis', 'windows-1251'];
+      for (var i = 0; i < encs.length; i++) {
+        try { txt = new TextDecoder(encs[i], { fatal: true }).decode(bytes); break; } catch (e) { /* следующая кодировка */ }
+      }
+    }
+    return txt || null;
+  }
+  function hideScanHelp_() {
+    clearTimeout(scanHelpTimer); scanHelpTimer = null;
+    document.getElementById('scanHelp').hidden = true;
+  }
+  function stopScanner_() {
+    hideScanHelp_();
+    clearTimeout(scanTimer); scanTimer = null;
+    if (scanStream) { scanStream.getTracks().forEach(function (t) { t.stop(); }); scanStream = null; }
+    scanVideo = null;
+    document.getElementById('reader').innerHTML = '';
+    return Promise.resolve();
+  }
+  function scanTune_(track) {
+    // Непрерывная автофокусировка и небольшое приближение — где камера это умеет.
+    try {
+      var caps = track.getCapabilities ? track.getCapabilities() : {};
+      var adv = [];
+      if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) adv.push({ focusMode: 'continuous' });
+      if (caps.zoom && caps.zoom.max >= 1.5) adv.push({ zoom: Math.min(1.5, caps.zoom.max) });
+      if (adv.length) track.applyConstraints({ advanced: adv }).catch(function () {});
+    } catch (e) { /* не критично */ }
+  }
+  function scanLoop_() {
+    if (!scanVideo || scanHandled) return;
+    if (!scanBusy && scanVideo.readyState >= 2 && scanVideo.videoWidth) {
+      scanBusy = true;
+      Promise.resolve(decodeQr_(scanVideo, scanVideo.videoWidth, scanVideo.videoHeight)).then(function (txt) {
+        scanBusy = false;
+        if (txt) onScanDecoded_(txt);
+      }, function () { scanBusy = false; });
+    }
+    scanTimer = setTimeout(scanLoop_, 150);
+  }
+  function startScanner_() {
+    scanHandled = false; scanBusy = false;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.reject('камера недоступна в этом браузере');
+    var video = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    if (scanCameras && scanCamIdx >= 0 && scanCameras[scanCamIdx]) video.deviceId = { exact: scanCameras[scanCamIdx].deviceId };
+    else video.facingMode = { ideal: 'environment' };
+    return navigator.mediaDevices.getUserMedia({ video: video, audio: false }).then(function (stream) {
+      scanStream = stream;
+      var box = document.getElementById('reader');
+      box.innerHTML = '<div class="scanView"><video playsinline muted autoplay></video><div class="scanFrame"></div></div>';
+      scanVideo = box.querySelector('video');
+      scanVideo.srcObject = stream;
+      var track = stream.getVideoTracks()[0];
+      if (track) scanTune_(track);
+      return scanVideo.play().catch(function () {}).then(function () {
+        scanLoop_();
+        clearTimeout(scanHelpTimer);
+        scanHelpTimer = setTimeout(function () { if (scanVideo) document.getElementById('scanHelp').hidden = false; }, 6000);
+      });
+    });
+  }
+  function onScanDecoded_(decodedText) {
+    if (scanHandled) return;
+    scanHandled = true;
+    var trimmed = String(decodedText).trim();
+    stopScanner_();
+    if (validObjectsLoaded && validObjects.indexOf(trimmed) === -1) {
+      setStatus('Этот QR-код не относится ни к одному известному объекту', 'error');
+      document.getElementById('actionBtn').style.display = 'block';
+      scannedObject = null;
+      return;
+    }
+    // Смена уже открыта, но на ДРУГОМ объекте — нельзя ни открыть новую,
+    // ни закрыть эту (сервер тоже это проверит, но лучше сразу
+    // предупредить, не тратя время на отправку).
+    if (currentShiftOpen && currentOpenObjectName !== trimmed) {
+      setStatus('Вы ещё не закончили работу на объекте «' + currentOpenObjectName + '». Сначала отметьте там уход.', 'error');
+      document.getElementById('actionBtn').style.display = 'block';
+      scannedObject = null;
+      return;
+    }
+    scannedObject = trimmed;
+    var lbl = document.getElementById('objectLabel');
+    lbl.style.display = 'block';
+    lbl.textContent = 'Объект: ' + trimmed;
+    // Тип события уже известен по статусу, полученному ДО сканирования —
+    // отдельного подтверждения не требуется, отправляем сразу.
+    sendEvent(currentShiftOpen ? 'Уход' : 'Приход');
+  }
+
+  // Кнопка одна — её текст ("Отметить приход" / "Отметить уход") заранее
+  // отражает текущий статус смены (см. applyActionButtonState), а нажатие
+  // сразу запускает камеру.
   document.getElementById('actionBtn').addEventListener('click', function () {
     document.getElementById('actionBtn').style.display = 'none';
     setStatus('');
-    // Запрашиваем геолокацию сразу, параллельно со сканированием QR —
-    // к моменту успешного скана (и вызова sendEvent) результат обычно уже
-    // готов, и заметной дополнительной задержки не добавляется.
+    // Геолокацию запрашиваем сразу, параллельно со сканированием QR.
     geoPositionPromise = getGeoPositionPromise();
-    html5QrCode = new Html5Qrcode('reader');
-    html5QrCode.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: 220 },
-      function (decodedText) {
-        var trimmed = String(decodedText).trim();
-
-        html5QrCode.stop().then(function () {
-          document.getElementById('reader').innerHTML = '';
-        });
-
-        if (validObjectsLoaded && validObjects.indexOf(trimmed) === -1) {
-          setStatus('Этот QR-код не относится ни к одному известному объекту', 'error');
-          document.getElementById('actionBtn').style.display = 'block';
-          scannedObject = null;
-          return;
-        }
-
-        // Смена уже открыта, но на ДРУГОМ объекте — нельзя ни открыть новую,
-        // ни закрыть эту (сервер тоже это проверит, но лучше сразу
-        // предупредить, не тратя время на отправку).
-        if (currentShiftOpen && currentOpenObjectName !== trimmed) {
-          setStatus('Вы ещё не закончили работу на объекте «' + currentOpenObjectName + '». Сначала отметьте там уход.', 'error');
-          document.getElementById('actionBtn').style.display = 'block';
-          scannedObject = null;
-          return;
-        }
-
-        scannedObject = trimmed;
-        var lbl = document.getElementById('objectLabel');
-        lbl.style.display = 'block';
-        lbl.textContent = 'Объект: ' + trimmed;
-        // Тип события уже известен по статусу, полученному ДО сканирования —
-        // отдельного подтверждения не требуется, отправляем сразу.
-        sendEvent(currentShiftOpen ? 'Уход' : 'Приход');
-      }
-    ).catch(function (err) {
+    startScanner_().catch(function (err) {
+      stopScanner_();
       setStatus('Не удалось включить камеру: ' + err, 'error');
       document.getElementById('actionBtn').style.display = 'block';
     });
+  });
+  // «Сменить камеру» — по очереди все задние камеры телефона.
+  document.getElementById('scanSwitchCam').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    (scanCameras ? Promise.resolve(scanCameras) : navigator.mediaDevices.enumerateDevices().then(function (all) {
+      var cams = all.filter(function (d) { return d.kind === 'videoinput'; });
+      var back = cams.filter(function (c) { return !/front|перед|user|facetime/i.test(c.label || ''); });
+      scanCameras = back.length ? back : cams;
+      return scanCameras;
+    })).then(function (list) {
+      if (!list || list.length < 2) { btn.textContent = 'Другой камеры нет'; return; }
+      scanCamIdx = (scanCamIdx + 1) % list.length;
+      return stopScanner_().then(startScanner_).then(function () {
+        btn.textContent = 'Сменить камеру (' + (scanCamIdx + 1) + ' из ' + list.length + ')';
+      });
+    }).catch(function (err) { setStatus('Не удалось переключить камеру: ' + err, 'error'); })
+      .then(function () { btn.disabled = false; });
+  });
+  // «Сфотографировать код» — снимок обычной камерой телефона и распознавание с фото.
+  document.getElementById('scanPhotoBtn').addEventListener('click', function () {
+    document.getElementById('scanPhotoInput').click();
+  });
+  document.getElementById('scanPhotoInput').addEventListener('change', function () {
+    var file = this.files && this.files[0];
+    this.value = '';
+    if (!file) return;
+    stopScanner_();
+    setStatus('Распознаём код на фото…');
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function () {
+      Promise.resolve(decodeQr_(img, img.naturalWidth, img.naturalHeight)).then(function (txt) {
+        URL.revokeObjectURL(url);
+        if (txt) { setStatus(''); onScanDecoded_(txt); return; }
+        setStatus('На фото не удалось найти QR-код. Снимите код крупнее и чётче — так, чтобы он занимал большую часть кадра.', 'error');
+        document.getElementById('actionBtn').style.display = 'block';
+      });
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); setStatus('Не удалось открыть фото', 'error'); document.getElementById('actionBtn').style.display = 'block'; };
+    img.src = url;
+  });
+  document.getElementById('scanCancelBtn').addEventListener('click', function () {
+    stopScanner_();
+    document.getElementById('actionBtn').style.display = 'block';
   });
 
   // Показывает на главном экране (ещё до сканирования QR-кода), открыта
