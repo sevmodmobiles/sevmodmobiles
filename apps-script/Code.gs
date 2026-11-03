@@ -1,3 +1,8 @@
+// v59: досылка отметок. logEvent принимает clientTime — время, когда
+//      сотрудник отметился на телефоне. Если отметка дошла позже (приложение
+//      закрыли до ответа, пропала связь), записывается исходное время, если
+//      прошло не больше 12 часов; в колонке J «Получено сервером» — фактическое
+//      время получения. Раньше вечерние уходы терялись.
 // v58: «Кабинет» — у каждой смены объект (из колонки «Объект» журнала «Учет»:
 //      объект прихода, а если прихода нет — ухода).
 // v57: подотчётные деньги. Лист «Подотчёт» — журнал передач (от кого →
@@ -384,7 +389,7 @@ function doPost(e) {
       return jsonOutput(loginUser(data.phone));
     }
     if (data.action === 'log') {
-      return jsonOutput(logEvent(data.name, data.phone, data.objectName, data.eventType, data.geo));
+      return jsonOutput(logEvent(data.name, data.phone, data.objectName, data.eventType, data.geo, data.clientTime));
     }
     if (data.action === 'stats') {
       return jsonOutput(getMyStats(data.phone));
@@ -2117,8 +2122,22 @@ function getOpenShift(phone) {
   return { open: false, objectName: null };
 }
 
-function logEvent(name, phone, objectName, eventType, geo) {
+var LOG_MAX_DELAY_MS = 12 * 3600 * 1000;
+function logEvent(name, phone, objectName, eventType, geo, clientTime) {
   phone = normalizePhone_(phone);
+  // Время события: время отметки на телефоне, если отметка дошла с опозданием
+  // (не больше 12 ч и не из будущего), иначе — время получения.
+  var receivedAt = new Date();
+  var eventTime = receivedAt, delayed = false;
+  var ct = Number(clientTime);
+  if (ct > 0) {
+    var lag = receivedAt.getTime() - ct;
+    if (lag > LOG_MAX_DELAY_MS) {
+      return { status: 'error', reason: 'stale',
+        message: 'Отметка сделана больше 12 часов назад и не может быть принята автоматически. Сообщите руководителю время прихода/ухода.' };
+    }
+    if (lag > 2 * 60 * 1000) { eventTime = new Date(ct); delayed = true; }
+  }
   var validObjects = getValidObjects();
   var trimmedObject = String(objectName).trim();
 
@@ -2212,7 +2231,7 @@ function logEvent(name, phone, objectName, eventType, geo) {
       }
     }
 
-    var now = new Date();
+    var now = eventTime;
     var lateMinutes = '';
 
     if (eventType === 'Приход') {
@@ -2229,10 +2248,15 @@ function logEvent(name, phone, objectName, eventType, geo) {
       now, name, phone, objectName, eventType, lateMinutes,
       geo && typeof geo.lat === 'number' ? geo.lat : '',
       geo && typeof geo.lng === 'number' ? geo.lng : '',
-      geoDistance
+      geoDistance,
+      delayed ? receivedAt : ''
     ]);
     var newRow = sheet.getLastRow();
     sheet.getRange(newRow, 3).setNumberFormat('@').setValue(String(phone));
+    if (delayed) {
+      if (String(sheet.getRange(1, 10).getValue()).trim() === '') sheet.getRange(1, 10).setValue('Получено сервером (досланная отметка)');
+      sheet.getRange(newRow, 10).setNumberFormat('dd.MM.yyyy HH:mm:ss');
+    }
 
     // Обновляем карту открытых смен — именно она (а не весь "Учет")
     // теперь используется для мгновенной проверки статуса.
@@ -2259,6 +2283,7 @@ function logEvent(name, phone, objectName, eventType, geo) {
       objectName: objectName,
       eventType: eventType,
       time: Utilities.formatDate(now, 'Europe/Moscow', 'dd.MM.yyyy HH:mm:ss'),
+      delayed: delayed,
       lateMinutes: lateMinutes
     };
   } finally {

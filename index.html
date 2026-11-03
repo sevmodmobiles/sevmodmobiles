@@ -7455,6 +7455,8 @@
       applyActionButtonState(false, null);
       return;
     }
+    // Есть неотправленная отметка — сначала досылаем её (статус обновится по ответу).
+    if (flushPendingEvent_()) return;
     if (shiftStatusKnown) {
       // Статус уже известен с прошлой проверки в этой сессии (например,
       // человек просто зашёл в админ-панель и вернулся назад) — сразу
@@ -7512,66 +7514,99 @@
     });
   }
 
+  // ===== Отправка отметки прихода/ухода =====
+  // Раньше после скана сразу показывалось «Записано», а запрос уходил на
+  // сервер только после получения геолокации (до 8 с) — человек видел
+  // «Записано», блокировал телефон, браузер «замораживал» страницу, и уход
+  // так и не доходил до сервера (утром смена оказывалась открытой).
+  // Теперь: отметка сначала сохраняется в телефоне (outbox), «Записано»
+  // показывается только после ответа сервера, а неотправленная отметка
+  // досылается сама при следующем открытии/появлении связи — с исходным
+  // временем (сервер принимает его, если прошло не больше 12 часов).
+  var PENDING_KEY = 'sevmod_pending_event_v1';
+  var pendingInFlight = false;
+  function loadPending_() {
+    try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function savePending_(ev) { try { localStorage.setItem(PENDING_KEY, JSON.stringify(ev)); } catch (e) {} }
+  function clearPending_() { try { localStorage.removeItem(PENDING_KEY); } catch (e) {} }
+  function hhmm_(ts) { var d = new Date(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+
   function sendEvent(eventType) {
     if (!scannedObject || !currentUser) return;
     document.getElementById('actionBtn').style.display = 'none';
-
-    var objectAtSend = scannedObject;
-    var eventTypeAtSend = eventType;
+    var ev = { phone: currentUser.phone, name: currentUser.name, objectName: scannedObject, eventType: eventType, clientTime: Date.now() };
     document.getElementById('objectLabel').style.display = 'none';
     scannedObject = null;
-
-    // Оптимистичный интерфейс: запись в таблицу на сервере происходит
-    // почти мгновенно, а вот подтверждающий ответ иногда идёт ещё 10-15
-    // секунд из-за особенностей инфраструктуры Apps Script (см. пояснения
-    // в чате). Ждать все эти секунды с пустым экраном хуже, чем сразу
-    // показать ожидаемый результат — включая баннер статуса смены и кнопку
-    // следующего действия — а если сервер в итоге откажет (в том числе
-    // из-за GPS-проверки — см. showGeoBlockedAlert), заметно откатить это.
-    var optimisticShiftOpen = (eventTypeAtSend === 'Приход');
-    var optimisticOpenObjectName = optimisticShiftOpen ? objectAtSend : null;
-    renderShiftBanner(optimisticShiftOpen, optimisticOpenObjectName);
-    // applyActionButtonState сама очищает статус (setStatus('')) — поэтому
-    // сообщение "Записано" выставляем ПОСЛЕ неё, а не до.
-    applyActionButtonState(optimisticShiftOpen, optimisticOpenObjectName);
-    setStatus('Записано: ' + currentUser.name + ', ' + eventTypeAtSend + ' (объект: ' + objectAtSend + ')', 'success');
-
-    (geoPositionPromise || getGeoPositionPromise()).then(function (geo) {
-      apiPost({
-        action: 'log',
-        name: currentUser.name,
-        phone: currentUser.phone,
-        objectName: objectAtSend,
-        eventType: eventTypeAtSend,
-        geo: geo
-      })
-        .then(function (res) {
-          if (res.status === 'ok') {
-            // Подтверждено — просто уточняем точное серверное время, статус
-            // и кнопка уже показывают верную картину (обновили оптимистично).
-            setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time, 'success');
-            if (eventTypeAtSend === 'Уход') {
-              // Смена только что закрыта — в фоне сразу подтягиваем свежую
-              // статистику и сохраняем её на телефоне. Так при следующем
-              // открытии "Личного кабинета" (даже в другой день) он сразу
-              // покажет эту смену, без ожидания сервера.
-              refreshStatsCache(currentUser.phone, function (fresh) {
-                if (screenStats.style.display === 'block') {
-                  renderStats(fresh);
-                }
-              });
-            }
-          } else if (res.reason === 'geo_blocked') {
-            showGeoBlockedAlert(res.message || 'Вы находитесь не на объекте.');
-          } else {
-            showSendFailure(res.message || 'сервер отклонил отметку без пояснения');
-          }
-        })
-        .catch(function (err) {
-          showSendFailure('не удалось получить подтверждение от сервера (' + err + ')');
-        });
+    savePending_(ev);   // сохранили сразу — даже если страницу сейчас закроют, отметка не потеряется
+    startWaitIndicator(statusEl, 'Отправляем отметку «' + eventType + '» — не закрывайте приложение');
+    // Геолокацию ждём недолго: её запрос начался ещё при открытии камеры.
+    var geoWait = new Promise(function (r) { setTimeout(function () { r(null); }, 6000); });
+    Promise.race([geoPositionPromise || getGeoPositionPromise(), geoWait]).then(function (geo) {
+      ev.geo = geo || null;
+      savePending_(ev);
+      postPendingEvent_(ev, false);
     });
   }
+
+  function postPendingEvent_(ev, isResend) {
+    if (pendingInFlight) return;
+    pendingInFlight = true;
+    apiPost({
+      action: 'log', name: ev.name, phone: ev.phone, objectName: ev.objectName,
+      eventType: ev.eventType, geo: ev.geo || null, clientTime: ev.clientTime
+    })
+      .then(function (res) {
+        pendingInFlight = false;
+        clearPending_();
+        stopWaitIndicator(statusEl);
+        if (res.status === 'ok') {
+          var open = ev.eventType === 'Приход';
+          shiftStatusKnown = true;
+          applyActionButtonState(open, open ? ev.objectName : null);
+          renderShiftBanner(open, open ? ev.objectName : null);
+          setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time + (res.delayed ? ' (отправлено позже, время сохранено)' : ''), 'success');
+          if (navigator.vibrate) { try { navigator.vibrate(80); } catch (e) {} }
+          if (ev.eventType === 'Уход') {
+            refreshStatsCache(ev.phone, function (fresh) {
+              if (screenStats.style.display === 'block') renderStats(fresh);
+            });
+          }
+        } else if (res.reason === 'geo_blocked') {
+          showGeoBlockedAlert(res.message || 'Вы находитесь не на объекте.');
+        } else {
+          showSendFailure((isResend ? 'Отметка «' + ev.eventType + '» от ' + hhmm_(ev.clientTime) + ' не принята: ' : '') +
+            (res.message || 'сервер отклонил отметку без пояснения'));
+        }
+      })
+      .catch(function (err) {
+        pendingInFlight = false;
+        // Нет связи / страницу усыпили — отметка остаётся в телефоне и будет дослана.
+        stopWaitIndicator(statusEl);
+        statusEl.className = 'error';
+        statusEl.innerHTML = '<div class="failAlert"><div class="failAlertTitle">Нет связи с сервером</div>' +
+          '<div>Отметка «' + escapeHtml(ev.eventType) + '» в ' + hhmm_(ev.clientTime) + ' сохранена в телефоне и будет отправлена автоматически, как только появится интернет — время сохранится.</div>' +
+          '<button id="retryPendingBtn" type="button">Отправить сейчас</button></div>';
+        document.getElementById('retryPendingBtn').addEventListener('click', function () { flushPendingEvent_(); });
+        void err;
+      });
+  }
+
+  // Дослать сохранённую отметку (при открытии главного экрана, возвращении
+  // в приложение, появлении сети). Возвращает true, если было что досылать.
+  function flushPendingEvent_() {
+    var ev = loadPending_();
+    if (!ev || !currentUser || ev.phone !== currentUser.phone) return false;
+    if (pendingInFlight) return true;
+    document.getElementById('actionBtn').style.display = 'none';
+    startWaitIndicator(statusEl, 'Досылаем отметку «' + ev.eventType + '» от ' + hhmm_(ev.clientTime));
+    postPendingEvent_(ev, true);
+    return true;
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && screenScan.style.display === 'block') flushPendingEvent_();
+  });
+  window.addEventListener('online', function () { if (screenScan.style.display === 'block') flushPendingEvent_(); });
 
   // Специальный, подчёркнуто тревожный экран — именно для случая попытки
   // отметиться далеко от объекта (а не обычного сбоя сети/сервера, для
