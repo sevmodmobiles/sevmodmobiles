@@ -2356,8 +2356,11 @@
       });
   }
 
-  function apiPost(body) {
-    return apiFetch(API_URL, { method: 'POST', body: JSON.stringify(body) });
+  function apiPost(body, opts) {
+    var o = { method: 'POST', body: JSON.stringify(body) };
+    // keepalive — запрос доходит до сервера, даже если страницу свернули/«усыпили».
+    if (opts && opts.keepalive) o.keepalive = true;
+    return apiFetch(API_URL, o);
   }
 
   // GPS-координаты телефона в момент отметки — нужны серверу, чтобы
@@ -2366,7 +2369,18 @@
   // бэкенде). Запрашивается заранее (см. actionBtn click) и кешируется на
   // несколько секунд, чтобы к моменту реальной отметки результат уже был
   // готов и не добавлял заметной задержки.
-  var geoPositionPromise = null;
+  var geoPositionPromise = null, geoPositionAt = 0;
+  // Свежая геолокация: запрашивается заранее (при открытии главного экрана),
+  // чтобы к моменту скана координаты уже были и отметка уходила сразу.
+  function prefetchGeo_() {
+    if (!geoPositionPromise || Date.now() - geoPositionAt > 45000) {
+      geoPositionAt = Date.now();
+      geoPositionPromise = getGeoPositionPromise();
+    }
+    return geoPositionPromise;
+  }
+  // Ключ для сравнения названий объектов из QR: без лишних пробелов, регистра и «ё».
+  function objKey_(s) { return String(s || '').replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase().replace(/ё/g, 'е'); }
   function getGeoPositionPromise() {
     return new Promise(function (resolve) {
       if (!navigator.geolocation) { resolve(null); return; }
@@ -2375,7 +2389,7 @@
           resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
         },
         function () { resolve(null); },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
       );
     });
   }
@@ -2662,6 +2676,7 @@
     screenAbsLog.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
+    if (currentUser) prefetchGeo_();
     checkShiftStatus();
     refreshTasksBadge();
     refreshAdminStatus();
@@ -7299,7 +7314,9 @@
     scanHandled = true;
     var trimmed = String(decodedText).trim();
     stopScanner_();
-    if (validObjectsLoaded && validObjects.indexOf(trimmed) === -1) {
+    var canon = validObjects.filter(function (o) { return objKey_(o) === objKey_(trimmed); })[0];
+    if (canon) trimmed = canon;
+    if (validObjectsLoaded && !canon) {
       setStatus('Этот QR-код не относится ни к одному известному объекту', 'error');
       document.getElementById('actionBtn').style.display = 'block';
       scannedObject = null;
@@ -7308,7 +7325,7 @@
     // Смена уже открыта, но на ДРУГОМ объекте — нельзя ни открыть новую,
     // ни закрыть эту (сервер тоже это проверит, но лучше сразу
     // предупредить, не тратя время на отправку).
-    if (currentShiftOpen && currentOpenObjectName !== trimmed) {
+    if (currentShiftOpen && objKey_(currentOpenObjectName) !== objKey_(trimmed)) {
       setStatus('Вы ещё не закончили работу на объекте «' + currentOpenObjectName + '». Сначала отметьте там уход.', 'error');
       document.getElementById('actionBtn').style.display = 'block';
       scannedObject = null;
@@ -7329,8 +7346,8 @@
   document.getElementById('actionBtn').addEventListener('click', function () {
     document.getElementById('actionBtn').style.display = 'none';
     setStatus('');
-    // Геолокацию запрашиваем сразу, параллельно со сканированием QR.
-    geoPositionPromise = getGeoPositionPromise();
+    // Геолокация — заранее запрошенная (или новая, если та устарела).
+    prefetchGeo_();
     startScanner_().catch(function (err) {
       stopScanner_();
       setStatus('Не удалось включить камеру: ' + err, 'error');
@@ -7524,7 +7541,7 @@
   // досылается сама при следующем открытии/появлении связи — с исходным
   // временем (сервер принимает его, если прошло не больше 12 часов).
   var PENDING_KEY = 'sevmod_pending_event_v1';
-  var pendingInFlight = false;
+  var pendingInFlight = false, geoWaiting = false;
   function loadPending_() {
     try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch (e) { return null; }
   }
@@ -7535,14 +7552,19 @@
   function sendEvent(eventType) {
     if (!scannedObject || !currentUser) return;
     document.getElementById('actionBtn').style.display = 'none';
-    var ev = { phone: currentUser.phone, name: currentUser.name, objectName: scannedObject, eventType: eventType, clientTime: Date.now() };
+    var ev = { id: 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10),
+      phone: currentUser.phone, name: currentUser.name, objectName: scannedObject, eventType: eventType, clientTime: Date.now() };
     document.getElementById('objectLabel').style.display = 'none';
     scannedObject = null;
     savePending_(ev);   // сохранили сразу — даже если страницу сейчас закроют, отметка не потеряется
     startWaitIndicator(statusEl, 'Отправляем отметку «' + eventType + '» — не закрывайте приложение');
-    // Геолокацию ждём недолго: её запрос начался ещё при открытии камеры.
-    var geoWait = new Promise(function (r) { setTimeout(function () { r(null); }, 6000); });
-    Promise.race([geoPositionPromise || getGeoPositionPromise(), geoWait]).then(function (geo) {
+    // Геолокация обычно уже готова (запрошена при открытии экрана); ждём не больше 8 с.
+    geoWaiting = true;
+    var geoWait = new Promise(function (r) { setTimeout(function () { r(null); }, 8000); });
+    Promise.race([prefetchGeo_(), geoWait]).then(function (geo) {
+      geoWaiting = false;
+      var cur = loadPending_();
+      if (!cur || cur.id !== ev.id) return;   // уже дослана другим путём
       ev.geo = geo || null;
       savePending_(ev);
       postPendingEvent_(ev, false);
@@ -7554,8 +7576,8 @@
     pendingInFlight = true;
     apiPost({
       action: 'log', name: ev.name, phone: ev.phone, objectName: ev.objectName,
-      eventType: ev.eventType, geo: ev.geo || null, clientTime: ev.clientTime
-    })
+      eventType: ev.eventType, geo: ev.geo || null, clientTime: ev.clientTime, eventId: ev.id
+    }, { keepalive: true })
       .then(function (res) {
         pendingInFlight = false;
         clearPending_();
@@ -7597,7 +7619,7 @@
   function flushPendingEvent_() {
     var ev = loadPending_();
     if (!ev || !currentUser || ev.phone !== currentUser.phone) return false;
-    if (pendingInFlight) return true;
+    if (pendingInFlight || geoWaiting) return true;
     document.getElementById('actionBtn').style.display = 'none';
     startWaitIndicator(statusEl, 'Досылаем отметку «' + ev.eventType + '» от ' + hhmm_(ev.clientTime));
     postPendingEvent_(ev, true);

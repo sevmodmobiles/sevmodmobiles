@@ -1,3 +1,9 @@
+// v60: надёжность отметок. eventId — повторная отправка той же отметки
+//      (досылка, повтор при обрыве связи) возвращает прежний результат и не
+//      создаёт дубль. Досылка — до 72 ч. Название объекта из QR сверяется
+//      без учёта пробелов/регистра/ё. GPS: учитывается точность телефона;
+//      если у объекта нет координат — в «Учет» пишется «нет координат
+//      объекта» (раньше проверка молча пропускалась).
 // v59: досылка отметок. logEvent принимает clientTime — время, когда
 //      сотрудник отметился на телефоне. Если отметка дошла позже (приложение
 //      закрыли до ответа, пропала связь), записывается исходное время, если
@@ -389,7 +395,7 @@ function doPost(e) {
       return jsonOutput(loginUser(data.phone));
     }
     if (data.action === 'log') {
-      return jsonOutput(logEvent(data.name, data.phone, data.objectName, data.eventType, data.geo, data.clientTime));
+      return jsonOutput(logEvent(data.name, data.phone, data.objectName, data.eventType, data.geo, data.clientTime, data.eventId));
     }
     if (data.action === 'stats') {
       return jsonOutput(getMyStats(data.phone));
@@ -2122,9 +2128,20 @@ function getOpenShift(phone) {
   return { open: false, objectName: null };
 }
 
-var LOG_MAX_DELAY_MS = 12 * 3600 * 1000;
-function logEvent(name, phone, objectName, eventType, geo, clientTime) {
+var LOG_MAX_DELAY_MS = 72 * 3600 * 1000;
+// Ключ для сравнения названий объектов: без лишних пробелов, регистра и «ё».
+function objKey_(s) {
+  return String(s || '').replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase().replace(/ё/g, 'е');
+}
+function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId) {
   phone = normalizePhone_(phone);
+  // Повтор той же отметки (досылка/повтор запроса) — отдаём прежний результат, без дубля.
+  var evKey = /^[A-Za-z0-9_-]{8,64}$/.test(String(eventId || '')) ? 'logev_' + eventId : '';
+  var cache = evKey ? CacheService.getScriptCache() : null;
+  if (cache) {
+    var prev = cache.get(evKey);
+    if (prev) { try { var o = JSON.parse(prev); o.duplicate = true; return o; } catch (e) { /* запишем заново */ } }
+  }
   // Время события: время отметки на телефоне, если отметка дошла с опозданием
   // (не больше 12 ч и не из будущего), иначе — время получения.
   var receivedAt = new Date();
@@ -2134,14 +2151,17 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime) {
     var lag = receivedAt.getTime() - ct;
     if (lag > LOG_MAX_DELAY_MS) {
       return { status: 'error', reason: 'stale',
-        message: 'Отметка сделана больше 12 часов назад и не может быть принята автоматически. Сообщите руководителю время прихода/ухода.' };
+        message: 'Отметка сделана больше 3 суток назад и не может быть принята автоматически. Сообщите руководителю время прихода/ухода.' };
     }
     if (lag > 2 * 60 * 1000) { eventTime = new Date(ct); delayed = true; }
   }
   var validObjects = getValidObjects();
-  var trimmedObject = String(objectName).trim();
+  var qrKey = objKey_(objectName);
+  // Каноническое название — как в листе «Объекты».
+  var trimmedObject = validObjects.filter(function (o) { return objKey_(o) === qrKey; })[0] || '';
+  objectName = trimmedObject;
 
-  if (validObjects.indexOf(trimmedObject) === -1) {
+  if (!trimmedObject) {
     return {
       status: 'error',
       message: 'Этот QR-код не относится ни к одному известному объекту'
@@ -2159,19 +2179,26 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime) {
   // не заполнен). Цель — не поймать человека в 20 метрах от входа, а отсечь
   // явную подделку (отметка за много километров от объекта).
   var objCoords = getObjectCoords_(trimmedObject);
-  var geoDistance = '';
-  if (objCoords) {
-    var hasGeo = geo && typeof geo.lat === 'number' && typeof geo.lng === 'number';
-    if (!hasGeo) {
+  var geoDistance = objCoords ? '' : 'нет координат объекта';
+  var hasGeo = !!(geo && typeof geo.lat === 'number' && typeof geo.lng === 'number');
+  if (objCoords && !hasGeo) {
+    if (!delayed) {
       return {
         status: 'error',
         reason: 'geo_required',
         message: 'Не удалось определить ваше местоположение. Разрешите доступ к геолокации в браузере и попробуйте ещё раз.'
       };
     }
+    // Телефон «уснул» раньше, чем получил координаты, и отметка дослана позже —
+    // принимаем, но помечаем для руководителя.
+    geoDistance = 'без GPS (досланная отметка)';
+  }
+  if (objCoords && hasGeo) {
     var distance = haversineMeters_(geo.lat, geo.lng, objCoords.lat, objCoords.lng);
     geoDistance = Math.round(distance);
-    if (distance > GEO_RADIUS_METERS) {
+    // Учитываем погрешность GPS телефона (в помещении бывает 50–300 м), но не больше 300 м.
+    var acc = Math.min(Math.max(Number(geo.accuracy) || 0, 0), 300);
+    if (distance - acc > GEO_RADIUS_METERS) {
       logGeoBlockedAttempt_(name, phone, trimmedObject, eventType, geo, geoDistance);
       return {
         status: 'error',
@@ -2203,7 +2230,7 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime) {
 
     if (eventType === 'Приход') {
       if (openShift.open) {
-        if (openShift.objectName === trimmedObject) {
+        if (objKey_(openShift.objectName) === qrKey) {
           return {
             status: 'error',
             message: 'Вы уже отметили приход на этом объекте. Сначала отметьте уход, прежде чем отмечать приход снова.'
@@ -2222,7 +2249,7 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime) {
           message: 'Вы ещё не отметили приход. Сначала отметьте приход, прежде чем отмечать уход.'
         };
       }
-      if (openShift.objectName !== trimmedObject) {
+      if (objKey_(openShift.objectName) !== qrKey) {
         return {
           status: 'error',
           message: 'Ваша смена открыта на объекте «' + openShift.objectName + '». ' +
@@ -2277,7 +2304,7 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime) {
     // Лист "Аналитика" обновляется по времени (см. setupAnalyticsTrigger)
     // либо вручную через меню "Учёт времени -> Обновить аналитику".
 
-    return {
+    var okRes = {
       status: 'ok',
       name: name,
       objectName: objectName,
@@ -2286,6 +2313,8 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime) {
       delayed: delayed,
       lateMinutes: lateMinutes
     };
+    if (cache) { try { cache.put(evKey, JSON.stringify(okRes), 21600); } catch (e) { /* не критично */ } }
+    return okRes;
   } finally {
     lock.releaseLock();
   }
