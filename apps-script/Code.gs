@@ -1,3 +1,4 @@
+// v65: первая версия, установленная самообновлением (проверка связки GitHub → Apps Script).
 // v64: самообновление находит основной файл проекта по содержимому
 //      (в русском интерфейсе он называется «Код», а не «Code»).
 // v63: номер версии сервера в панели администратора. CODE_VERSION —
@@ -4186,7 +4187,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v64';
+var CODE_VERSION = 'v65';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
