@@ -1,3 +1,7 @@
+// v68: открытая смена в «Кабинете». Карта открытых смен хранит время
+//      прихода (since); getShiftStatus отдаёт openSince, getMyStats — openShift
+//      { objectName, since } — приложение показывает «Сейчас на смене» с идущим
+//      временем.
 // v67: оклад. В «Сотрудники» колонки H «Тип оплаты» (Подневно / Оклад) и
 //      I «Оклад, ₽/мес». adminSetRate принимает payType и salary.
 //      У окладников в «Кабинете» нет денежных сумм (getMyStats отдаёт
@@ -2168,7 +2172,7 @@ function migrateOpenShiftsFromLog() {
       var eventType = data[i][4];
       if (!phone) continue;
       if (eventType === 'Приход') {
-        map[phone] = { objectName: objectName };
+        map[phone] = { objectName: objectName, since: data[i][0] instanceof Date ? data[i][0].getTime() : null };
       } else if (eventType === 'Уход') {
         delete map[phone];
       }
@@ -2185,7 +2189,7 @@ function getOpenShift(phone) {
   var trimmedPhone = normalizePhone_(phone);
   var entry = map[trimmedPhone];
   if (entry && entry.objectName) {
-    return { open: true, objectName: entry.objectName };
+    return { open: true, objectName: entry.objectName, since: entry.since || null };
   }
   return { open: false, objectName: null };
 }
@@ -2354,7 +2358,7 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId) 
     var map = getOpenShiftsMap_();
     var trimmedPhone = String(phone).trim();
     if (eventType === 'Приход') {
-      map[trimmedPhone] = { objectName: trimmedObject };
+      map[trimmedPhone] = { objectName: trimmedObject, since: now.getTime() };
     } else {
       delete map[trimmedPhone];
     }
@@ -2524,13 +2528,15 @@ function findEmployeeByPhone(phone) {
 // и наоборот — "Отметить приход", если смена уже идёт.
 function getShiftStatus(phone) {
   var openShift = getOpenShift(phone);
-  return { status: 'ok', shiftOpen: openShift.open, openObjectName: openShift.objectName };
+  return { status: 'ok', shiftOpen: openShift.open, openObjectName: openShift.objectName, openSince: openShift.since || null };
 }
 
 // v33: к статистике кабинета добавляются отгулы/больничные со статусом
 function getMyStats(phone) {
   var res = getMyStatsCore_(phone);
   if (res.status !== 'ok') return res;
+  var os = getOpenShift(phone);
+  res.openShift = os.open ? { objectName: os.objectName, since: os.since || null } : null;
   // Окладнику денежные суммы в кабинете не показываем.
   var emp = findEmployeeByPhone(phone);
   if (emp && emp.payType === PAY_SALARY) {
@@ -4218,7 +4224,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v67';
+var CODE_VERSION = 'v68';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',

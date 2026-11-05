@@ -459,6 +459,11 @@
   .lateBadge.onTime { color: var(--green); background: rgba(52, 168, 83, 0.12); }
   .dayRow .dayRight { text-align: right; }
   .dayRow .dayPay { font-weight: 600; }
+  .dayRow.dayOpen { background: rgba(52,168,83,.08); border-radius: 10px; padding-left: 10px; padding-right: 10px; }
+  .onShiftTag { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--green); }
+  .onShiftDot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: onShiftPulse 1.6s ease-in-out infinite; }
+  @keyframes onShiftPulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .onShiftDot { animation: none; } }
   .dayRow .dayHoursInline { font-weight: 600; color: var(--text); }
 
   /* ===== Свой выпадающий список подсказок (замена нативному <datalist>) =====
@@ -4642,6 +4647,14 @@
     });
   }
 
+  // Идущее время открытой смены: «0:35», обновляется раз в 30 секунд.
+  function liveDur_(since) {
+    var m = Math.max(0, Math.floor((Date.now() - Number(since)) / 60000));
+    return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0');
+  }
+  setInterval(function () {
+    document.querySelectorAll('.liveDur').forEach(function (el) { el.textContent = liveDur_(el.getAttribute('data-since')); });
+  }, 30000);
   function renderStats(data) {
     // Окладник: денежных сумм в кабинете нет (оклад — за месяц, считается отдельно).
     var noMoney = data.payType === 'Оклад';
@@ -4671,9 +4684,24 @@
     list.innerHTML = '';
     // Смены и заявки на отсутствие — одним списком, свежие сверху
     var entries = [];
+    // Открытая смена (сервер v68+): строка «Сейчас на смене» с идущим временем.
+    var os = data.openShift && data.openShift.since ? data.openShift : null;
+    var osDate = '', osTime = '';
+    if (os) {
+      var sd = new Date(os.since);
+      osDate = String(sd.getDate()).padStart(2, '0') + '.' + String(sd.getMonth() + 1).padStart(2, '0') + '.' + sd.getFullYear();
+      osTime = String(sd.getHours()).padStart(2, '0') + ':' + String(sd.getMinutes()).padStart(2, '0');
+    }
+    var osFound = false;
     (data.days || []).forEach(function (d) {
-      entries.push({ key: d.date.split('.').reverse().join('-'), day: d });
+      var isOpen = !!os && d.date === osDate && !d.departure;
+      if (isOpen) osFound = true;
+      entries.push({ key: d.date.split('.').reverse().join('-'), day: d, open: isOpen });
     });
+    if (os && !osFound) {
+      entries.push({ key: osDate.split('.').reverse().join('-'), open: true,
+        day: { date: osDate, arrival: osTime, departure: '', hours: '', pay: null, object: os.objectName || '', lateMinutes: null } });
+    }
     (data.absences || []).forEach(function (a) {
       entries.push({ key: a.dateFrom, abs: a });
     });
@@ -4682,6 +4710,8 @@
       list.innerHTML = '<div class="statsEmpty">Пока нет завершённых смен</div>';
       return;
     }
+    // Открытая смена — всегда первой.
+    entries.sort(function (x, y) { return (y.open ? 1 : 0) - (x.open ? 1 : 0); });
     entries.forEach(function (en) {
       var row = document.createElement('div');
       row.className = 'dayRow';
@@ -4701,6 +4731,20 @@
         return;
       }
       var d = en.day;
+      if (en.open) {
+        row.className = 'dayRow dayOpen';
+        row.innerHTML =
+          '<div class="dayRowTop">' +
+            '<div class="dayDate">' + shortYear_(d.date) + '</div>' +
+            '<div class="dayRight"><span class="onShiftTag"><span class="onShiftDot"></span>на смене</span></div>' +
+          '</div>' +
+          '<div class="dayRowBottom">' +
+            (d.object ? '<span class="dayObject">' + escapeHtml(d.object) + '</span>' : '<span></span>') +
+            '<div class="dayTimes right">' + (d.arrival || osTime) + ' – сейчас · <span class="dayHoursInline liveDur" data-since="' + os.since + '">' + liveDur_(os.since) + '</span></div>' +
+          '</div>';
+        list.appendChild(row);
+        return;
+      }
       var arrivalHtml = d.arrival || '—';
       var badgeHtml = '';
       if (d.lateMinutes !== null && d.lateMinutes !== undefined && d.arrival) {
@@ -8402,11 +8446,11 @@
           renderShiftBanner(open, open ? ev.objectName : null);
           setStatus('Записано: ' + res.name + ', ' + res.eventType + ', ' + res.time + (res.delayed ? ' (отправлено позже, время сохранено)' : ''), 'success');
           if (navigator.vibrate) { try { navigator.vibrate(80); } catch (e) {} }
-          if (ev.eventType === 'Уход') {
-            refreshStatsCache(ev.phone, function (fresh) {
-              if (screenStats.style.display === 'block') renderStats(fresh);
-            });
-          }
+          // Кабинет обновляем после любой отметки: после прихода там
+          // появится «Сейчас на смене», после ухода — закрытая смена.
+          refreshStatsCache(ev.phone, function (fresh) {
+            if (screenStats.style.display === 'block') renderStats(fresh);
+          });
         } else if (res.reason === 'geo_blocked') {
           showGeoBlockedAlert(res.message || 'Вы находитесь не на объекте.', ev.geo);
         } else {
