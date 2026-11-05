@@ -1297,6 +1297,24 @@
     padding: 0 10px env(safe-area-inset-bottom, 0px);
   }
   #bottomNav.visible { display: flex; }
+  /* Круглая кнопка «+» (поставить задачу) на экране задач — для админов,
+     справа внизу над нижней панелью. */
+  .fabAdd {
+    position: fixed;
+    right: 18px;
+    bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+    z-index: 61;
+    width: 58px;
+    height: 58px;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  }
+  .fabAdd svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+  .fabAdd:active { transform: scale(0.94); }
   #bottomNavInner {
     width: 100%;
     max-width: 440px;
@@ -1528,6 +1546,7 @@
     <div class="card">
       <div id="tasksList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
+    <button id="tasksAddFab" type="button" class="fabAdd" style="display:none;" aria-label="Поставить задачу" title="Поставить задачу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
   </div>
 
   <!-- Экран деталей одной задачи — текст, объект, фото задачи, и дальше
@@ -1602,7 +1621,7 @@
   <div id="screenTaskManage">
     <div class="card logo-card">
       <h1 style="margin-top:0;">Поставить задачу</h1>
-      <div class="switchUser"><a id="taskManageBackLink">← Главный экран</a></div>
+      <div class="switchUser"><a id="taskManageBackLink">← Мои задачи</a></div>
     </div>
 
     <div id="taskManageContent">
@@ -1799,7 +1818,6 @@
       <h2 style="margin-top:0;">Администрирование</h2>
       <button id="profileAdminPanelBtn" type="button" class="hasDot" style="background:var(--blue);">Админ-панель</button>
       <button id="profileAbsenceApproveBtn" type="button" class="hasDot">Согласовать отгулы</button>
-      <button id="profileTaskManageBtn" type="button">Поставить задачу</button>
     </div>
     <div class="card">
       <h2 style="margin-top:0;">Отсутствия</h2>
@@ -3503,8 +3521,8 @@
     // же на Главной экране.
     var profileCard = document.getElementById('profileAdminCard');
     if (profileCard) profileCard.style.display = isAdmin ? 'block' : 'none';
-    var profileTaskBtn = document.getElementById('profileTaskManageBtn');
-    if (profileTaskBtn) profileTaskBtn.style.display = isAdmin ? 'block' : 'none';
+    var tasksFab = document.getElementById('tasksAddFab');
+    if (tasksFab) tasksFab.style.display = isAdmin ? 'flex' : 'none';
     var navExp = document.getElementById('navExpBtn');
     if (navExp) navExp.classList.toggle('isAdmin', !!isAdmin);
   }
@@ -4284,7 +4302,7 @@
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
     showBottomNav();
-    setActiveNav('profile');
+    setActiveNav('tasks');
     pushScreenState('taskManage');
   }
 
@@ -5208,7 +5226,7 @@
     showTaskManageScreen();
   });
   document.getElementById('taskManageBackLink').addEventListener('click', function () {
-    showScanScreen();
+    showTasksScreen();
   });
   document.getElementById('goToAdminRatesBtn').addEventListener('click', function () {
     showAdminRatesScreen();
@@ -8003,7 +8021,7 @@
   document.getElementById('profileAdminPanelBtn').addEventListener('click', function () {
     showAdminScreen();
   });
-  document.getElementById('profileTaskManageBtn').addEventListener('click', function () {
+  document.getElementById('tasksAddFab').addEventListener('click', function () {
     showTaskManageScreen();
   });
 
