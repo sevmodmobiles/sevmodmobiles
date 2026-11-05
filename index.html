@@ -672,6 +672,17 @@
   }
 
   /* ===== Задачи (разовые работы) ===== */
+  .segCtl { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
+  .segCtl button {
+    flex: 1; margin: 0; padding: 9px 6px; font-size: 14px; font-weight: 600; border-radius: 9px;
+    background: transparent; color: var(--muted);
+  }
+  .segCtl button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  #tasksPersonSel { margin: 0 0 10px; }
+  .tasksSection { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin: 14px 0 2px; }
+  .tasksSection:first-child { margin-top: 2px; }
+  .taskCard.taskCardDone { opacity: .72; }
+  .taskCard .taskWho { font-weight: 600; margin-top: 4px; }
   .taskCard {
     padding: 12px 0;
     border-bottom: 1px solid var(--border);
@@ -1602,11 +1613,18 @@
        нет ни одной актуальной задачи, экран просто говорит об этом. -->
   <div id="screenTasks">
     <div class="card logo-card">
-      <h1 style="margin-top:0;">Мои задачи</h1>
+      <h1 style="margin-top:0;">Задачи</h1>
       <div class="whoami">Вы вошли как: <b id="tasksWhoamiName"></b></div>
       <div class="switchUser"><a id="tasksBackLink">← Главный экран</a></div>
     </div>
     <div class="card">
+      <!-- «Мои» / «Лента задач» (все сотрудники) — переключатель только у администраторов -->
+      <div id="tasksModeSeg" class="segCtl" style="display:none;">
+        <button type="button" data-m="my" class="on">Мои</button>
+        <button type="button" data-m="all">Лента задач</button>
+      </div>
+      <select id="tasksPersonSel" style="display:none;"></select>
+      <div id="tasksChips" class="expChips"></div>
       <div id="tasksList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
     </div>
     <button id="tasksAddFab" type="button" class="fabAdd" style="display:none;" aria-label="Поставить задачу" title="Поставить задачу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -1619,7 +1637,7 @@
   <div id="screenTaskDetail">
     <div class="card logo-card">
       <h1 style="margin-top:0;">Задача</h1>
-      <div class="switchUser"><a id="taskDetailBackLink">← Мои задачи</a></div>
+      <div class="switchUser"><a id="taskDetailBackLink">← Задачи</a></div>
     </div>
     <div class="card">
       <div id="taskDetailLoading" class="statsEmpty"><span class="spinner"></span> Загрузка…</div>
@@ -1684,7 +1702,7 @@
   <div id="screenTaskManage">
     <div class="card logo-card">
       <h1 style="margin-top:0;">Поставить задачу</h1>
-      <div class="switchUser"><a id="taskManageBackLink">← Мои задачи</a></div>
+      <div class="switchUser"><a id="taskManageBackLink">← Задачи</a></div>
     </div>
 
     <div id="taskManageContent">
@@ -4062,42 +4080,110 @@
     return { cls: 'stNew', label: 'Новая' };
   }
 
+  // ===== Экран «Задачи»: мои (все, включая выполненные) и, у администратора,
+  // «Лента задач» — задачи всех сотрудников. Фильтр: все / активные / выполненные.
+  var tasksMode = 'my', tasksFilter = 'all', tasksPerson = '';
+  try { tasksMode = localStorage.getItem('sevmod_tasks_mode') || 'my'; } catch (e) {}
+  var tasksLast = { my: null, all: null };
+  function isDoneTask_(t) { return t.status === 'Выполнена'; }
+  function taskCardHtml_(t, feed) {
+    var tag = taskStatusTag(t.status), done = isDoneTask_(t);
+    return '<div class="taskCard adminTaskCardClickable' + (done ? ' taskCardDone' : '') + '" data-id="' + escapeHtml(t.id) + '">' +
+      (feed ? '<div class="taskWho">' + escapeHtml(t.name || '') + '</div>' : '') +
+      '<div><span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
+      (t.objectName ? ' <b>' + escapeHtml(t.objectName) + '</b>' : '') + '</div>' +
+      '<div class="taskText">' + escapeHtml(t.text) + '</div>' +
+      '<div class="taskDate">Поставлена: ' + escapeHtml(shortYear_(t.createdAt)) +
+      (done && t.completedAt ? ' · выполнена: ' + escapeHtml(shortYear_(t.completedAt)) : '') + '</div>' +
+      (feed ? '<div class="adminTaskDetail" style="display:none;"></div>' : '') +
+    '</div>';
+  }
+  function renderTasks_() {
+    var listEl = document.getElementById('tasksList');
+    var feed = tasksMode === 'all', all = tasksLast[tasksMode];
+    var sel = document.getElementById('tasksPersonSel');
+    sel.style.display = feed && all ? 'block' : 'none';
+    if (!all) return;
+    if (feed) {
+      var names = {};
+      all.forEach(function (t) { if (t.name) names[t.name] = 1; });
+      var opts = ['<option value="">Все сотрудники</option>'].concat(Object.keys(names).sort().map(function (n) {
+        return '<option value="' + escapeHtml(n) + '"' + (n === tasksPerson ? ' selected' : '') + '>' + escapeHtml(n) + '</option>';
+      }));
+      sel.innerHTML = opts.join('');
+      if (tasksPerson && !names[tasksPerson]) tasksPerson = '';
+    }
+    var base = feed && tasksPerson ? all.filter(function (t) { return t.name === tasksPerson; }) : all;
+    var active = base.filter(function (t) { return !isDoneTask_(t); }), done = base.filter(isDoneTask_);
+    document.getElementById('tasksChips').innerHTML = [['all', 'Все', base.length], ['active', 'Активные', active.length], ['done', 'Выполненные', done.length]]
+      .map(function (c) { return '<button type="button" class="expChip' + (tasksFilter === c[0] ? ' on' : '') + '" data-f="' + c[0] + '">' + c[1] + ' ' + c[2] + '</button>'; }).join('');
+    var html = '';
+    if (tasksFilter !== 'done') {
+      if (tasksFilter === 'all' && active.length && done.length) html += '<div class="tasksSection">Активные</div>';
+      html += active.map(function (t) { return taskCardHtml_(t, feed); }).join('');
+    }
+    if (tasksFilter !== 'active' && done.length) {
+      if (tasksFilter === 'all' && active.length) html += '<div class="tasksSection">Выполненные</div>';
+      html += done.map(function (t) { return taskCardHtml_(t, feed); }).join('');
+    }
+    if (!html) html = '<div class="statsEmpty">' + (tasksFilter === 'active' ? 'Активных задач нет' : tasksFilter === 'done' ? 'Выполненных задач пока нет' : 'Задач пока нет') + '</div>';
+    listEl.innerHTML = html;
+  }
   function loadMyTasks() {
     var listEl = document.getElementById('tasksList');
     var phone = currentUser ? currentUser.phone : '';
-    var body = { action: 'getMyTasks', phone: phone };
-    if (!swrHas_(body)) listEl.innerHTML = skeletonHtml_(3);
+    var isAdmin = !!(currentUser && loadAdminStatusCache(currentUser.phone));
+    if (!isAdmin) tasksMode = 'my';
+    var seg = document.getElementById('tasksModeSeg');
+    seg.style.display = isAdmin ? 'flex' : 'none';
+    Array.prototype.forEach.call(seg.children, function (b) { b.classList.toggle('on', b.getAttribute('data-m') === tasksMode); });
+    var mode = tasksMode;
+    var body = mode === 'all' ? { action: 'adminGetTasks', phone: phone } : { action: 'getMyTasks', phone: phone, all: true };
+    if (!swrHas_(body)) { listEl.innerHTML = skeletonHtml_(3); document.getElementById('tasksChips').innerHTML = ''; }
+    else if (!tasksLast[mode]) listEl.innerHTML = '';
     swrLoad_(body, function (res) {
+        if (mode !== tasksMode) return;
         if (res.status !== 'ok') {
           listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.message || 'Ошибка загрузки') + '</div>';
           return;
         }
-        updateTasksBadge(res.tasks ? res.tasks.length : 0);
-        if (!res.tasks || !res.tasks.length) {
-          listEl.innerHTML = '<div class="statsEmpty">У вас нет актуальных задач</div>';
-          return;
-        }
-        listEl.innerHTML = res.tasks.map(function (t) {
-          var tag = taskStatusTag(t.status);
-          return (
-            '<div class="taskCard adminTaskCardClickable" data-id="' + escapeHtml(t.id) + '">' +
-              '<div><span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
-              (t.objectName ? ' <b>' + escapeHtml(t.objectName) + '</b>' : '') + '</div>' +
-              '<div class="taskText">' + escapeHtml(t.text) + '</div>' +
-              '<div class="taskDate">Поставлена: ' + escapeHtml(shortYear_(t.createdAt)) + '</div>' +
-            '</div>'
-          );
-        }).join('');
-
-        listEl.querySelectorAll('.taskCard').forEach(function (card) {
-          card.addEventListener('click', function () {
-            showTaskDetailScreen(card.getAttribute('data-id'));
-          });
-        });
+        tasksLast[mode] = res.tasks || [];
+        if (mode === 'my') updateTasksBadge(tasksLast.my.filter(function (t) { return !isDoneTask_(t); }).length);
+        renderTasks_();
       }, function (err) {
+        if (mode !== tasksMode) return;
         listEl.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
       });
   }
+  document.getElementById('tasksModeSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-m]'); if (!b) return;
+    tasksMode = b.getAttribute('data-m');
+    try { localStorage.setItem('sevmod_tasks_mode', tasksMode); } catch (err) {}
+    loadMyTasks();
+  });
+  document.getElementById('tasksChips').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-f]'); if (!b) return;
+    tasksFilter = b.getAttribute('data-f');
+    renderTasks_();
+  });
+  document.getElementById('tasksPersonSel').addEventListener('change', function () {
+    tasksPerson = this.value;
+    renderTasks_();
+  });
+  document.getElementById('tasksList').addEventListener('click', function (e) {
+    if (e.target.closest('.ph')) return;
+    var card = e.target.closest('.taskCard[data-id]'); if (!card) return;
+    var id = card.getAttribute('data-id');
+    var t = (tasksLast[tasksMode] || []).filter(function (x) { return String(x.id) === id; })[0];
+    // своя задача — экран задачи (с кнопками «Приступить» / «Выполнено»);
+    // чужая в ленте — подробности раскрываются прямо в карточке
+    if (!t || tasksMode === 'my' || (currentUser && t.phone === currentUser.phone)) { showTaskDetailScreen(id); return; }
+    var det = card.querySelector('.adminTaskDetail');
+    if (!det) return;
+    if (det.style.display !== 'none') { det.style.display = 'none'; return; }
+    det.innerHTML = adminTaskDetailHtml(t) || '<div class="taskDate">Фото и комментариев пока нет</div>';
+    det.style.display = 'block';
+  });
 
   // --- Экран деталей одной задачи (у сотрудника) ---
 

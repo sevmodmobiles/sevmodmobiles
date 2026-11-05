@@ -1,3 +1,4 @@
+// v76: getMyTasks(phone, all) — экран «Задачи» показывает и выполненные.
 // v75: уведомление о заявке: «Екатерина просит согласовать», тип и даты
 //      простыми словами, комментарий; в Android-приложении (сборка с
 //      кнопками) — «Согласовать» / «Отклонить» прямо в уведомлении
@@ -528,7 +529,7 @@ function doPost(e) {
       return jsonOutput(adminGetTasks(data.phone));
     }
     if (data.action === 'getMyTasks') {
-      return jsonOutput(getMyTasks(data.phone));
+      return jsonOutput(getMyTasks(data.phone, data.all === true));
     }
     if (data.action === 'getTaskById') {
       return jsonOutput(getTaskById(data.phone, data.taskId));
@@ -1940,7 +1941,9 @@ function adminGetTasks(phone) {
 // Незавершённые задачи конкретного сотрудника (и новые, и уже взятые в
 // работу — чтобы можно было продолжить) — не требует прав администратора,
 // только номер телефона, как getMyStats/getShiftStatus.
-function getMyTasks(phone) {
+// all=true — вместе с выполненными (экран «Задачи»); без него — только
+// незавершённые (число на значке).
+function getMyTasks(phone, all) {
   var sheet = getOrCreateTasksSheet_();
   if (sheet.getLastRow() < 2) return { status: 'ok', tasks: [] };
 
@@ -1949,7 +1952,7 @@ function getMyTasks(phone) {
   var tasks = data
     .filter(function (row) {
       return normalizePhone_(row[TASK_COL.PHONE - 1]) === normalizedPhone &&
-        row[TASK_COL.STATUS - 1] !== TASK_STATUS.DONE;
+        (all || row[TASK_COL.STATUS - 1] !== TASK_STATUS.DONE);
     })
     .map(taskRowToObject_)
     .reverse();
@@ -4326,7 +4329,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v75';
+var CODE_VERSION = 'v76';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
