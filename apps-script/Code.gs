@@ -1,3 +1,7 @@
+// v70: время открытой смены без отметки в карте — из последнего «Прихода»
+//      этого телефона в журнале «Учет» (а не из склеенного списка дней —
+//      v69 ошибался, если в тот же день смена уже открывалась и закрывалась);
+//      найденное время записывается в карту.
 // v69: для смен, открытых до v68 (в карте нет времени прихода), время
 //      берётся из последнего «Прихода» без «Ухода» в списке дней кабинета.
 // v68: открытая смена в «Кабинете». Карта открытых смен хранит время
@@ -2539,12 +2543,7 @@ function getMyStats(phone) {
   if (res.status !== 'ok') return res;
   var os = getOpenShift(phone);
   var since = os.since || null;
-  if (os.open && !since) {
-    // Смена открыта до v68 — время прихода из последнего дня без ухода.
-    var dd = (res.days || []).filter(function (d) { return d.arrival && !d.departure; })[0];
-    var m = dd && /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(dd.date), t = dd && /^(\d{2}):(\d{2})$/.exec(dd.arrival);
-    if (m && t) since = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(t[1]), Number(t[2])).getTime();
-  }
+  if (os.open && !since) since = openShiftSinceFromLog_(phone);
   res.openShift = os.open ? { objectName: os.objectName, since: since } : null;
   // Окладнику денежные суммы в кабинете не показываем.
   var emp = findEmployeeByPhone(phone);
@@ -4233,7 +4232,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v69';
+var CODE_VERSION = 'v70';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4626,4 +4625,27 @@ function adminSalaryReport(phone, month) {
     calendarExact: !!RU_HOLIDAYS[year],
     people: people, totals: totals
   };
+}
+
+// Время прихода открытой смены, если его нет в карте (смена открыта до v68):
+// последний «Приход» этого телефона в журнале «Учет». Найденное время
+// сохраняется в карту, чтобы больше не искать.
+function openShiftSinceFromLog_(phone) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  var p = normalizePhone_(phone);
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).getValues();
+  for (var i = data.length - 1; i >= 0; i--) {
+    if (normalizePhone_(data[i][2]) !== p) continue;
+    if (data[i][4] === 'Уход') return null;          // последняя отметка — уход: открытой смены по журналу нет
+    if (data[i][4] === 'Приход' && data[i][0] instanceof Date) {
+      var since = data[i][0].getTime();
+      try {
+        var map = getOpenShiftsMap_();
+        if (map[p] && !map[p].since) { map[p].since = since; saveOpenShiftsMap_(map); }
+      } catch (e) {}
+      return since;
+    }
+  }
+  return null;
 }
