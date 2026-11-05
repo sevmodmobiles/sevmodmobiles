@@ -1,3 +1,5 @@
+// v79: uploadPhoto — фото задач загружаются по одному сразу после выбора;
+//      savePhotos_ принимает и готовые ссылки на Диск.
 // v78: action «version» — номер сервера для строки версий в «Профиле».
 // v77: задачи с фотоотчётом и без: колонка N «Фотоотчёт» (Да/Нет) в «Задачи».
 // v76: getMyTasks(phone, all) — экран «Задачи» показывает и выполненные.
@@ -477,6 +479,9 @@ function doPost(e) {
     }
     if (data.action === 'status') {
       return jsonOutput(getShiftStatus(data.phone));
+    }
+    if (data.action === 'uploadPhoto') {
+      return jsonOutput(uploadPhoto(data.phone, data.photo, data.label));
     }
     if (data.action === 'version') {
       return jsonOutput({ status: 'ok', version: CODE_VERSION });
@@ -2175,6 +2180,26 @@ function savePhoto(base64Data, name, folderName) {
   return file.getUrl();
 }
 
+function isUploadedPhotoUrl_(s) {
+  return typeof s === 'string' && /^https:\/\/drive\.google\.com\/file\/d\/[\w-]{20,}\/view/.test(s);
+}
+
+// Одно фото задачи — приложение загружает фото сразу после выбора, по
+// одному (сжатыми), а в задачу потом передаёт готовые ссылки.
+function uploadPhoto(phone, photo, label) {
+  var emp = findEmployeeByPhone(normalizePhone_(phone));
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
+  if (typeof photo !== 'string' || photo.indexOf('data:image/') !== 0 || photo.length > 12000000) {
+    return { status: 'error', message: 'Неверный файл фото' };
+  }
+  var kind = { task: 'задача', before: 'до', after: 'после' }[label] || 'фото';
+  try {
+    return { status: 'ok', url: savePhoto(photo, emp.name + '_' + kind, 'Фото задач') };
+  } catch (e) {
+    return { status: 'error', message: 'Не удалось сохранить фото: ' + (e && e.message || e) };
+  }
+}
+
 // Сохраняет НЕСКОЛЬКО фото разом (для задач — фото самой задачи, "до" и
 // "после" могут быть не одной штукой). photosBase64 — массив строк
 // data:image/...;base64,.... Ошибка на одной фотографии не отменяет
@@ -2184,6 +2209,8 @@ function savePhotos_(photosBase64, namePrefix, folderName) {
   var urls = [];
   if (!photosBase64 || !photosBase64.length) return urls;
   for (var i = 0; i < photosBase64.length; i++) {
+    // фото, уже загруженное заранее (uploadPhoto), приходит готовой ссылкой
+    if (isUploadedPhotoUrl_(photosBase64[i])) { urls.push(String(photosBase64[i])); continue; }
     try {
       urls.push(savePhoto(photosBase64[i], namePrefix + '_' + (i + 1), folderName));
     } catch (e) {
@@ -4340,7 +4367,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v78';
+var CODE_VERSION = 'v79';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',

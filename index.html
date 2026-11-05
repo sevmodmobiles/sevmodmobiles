@@ -762,6 +762,24 @@
     border-radius: 8px;
     border: 1px solid var(--border);
   }
+  /* Фото, загружаемые сразу после выбора: состояние на каждой миниатюре */
+  .upTile { position: relative; width: 76px; height: 76px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--border); }
+  .upTile img { width: 100%; height: 100%; object-fit: cover; border: none; border-radius: 0; display: block; }
+  .upTile .upSt {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.38); color: #fff; transition: background .2s;
+  }
+  .upTile.ok .upSt { background: transparent; align-items: flex-end; justify-content: flex-end; padding: 4px; }
+  .upTile .upSt svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .upTile.ok .upSt svg { width: 18px; height: 18px; background: var(--green); border-radius: 50%; padding: 2px; }
+  .upTile.err .upSt { background: rgba(234,67,53,.6); cursor: pointer; }
+  .upTile .upSt .spinner { border-color: rgba(255,255,255,.35); border-top-color: #fff; }
+  .upTile .upDel {
+    position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; margin: 0; border-radius: 50%;
+    background: rgba(0,0,0,.55); color: #fff; font-size: 15px; line-height: 22px; display: flex; align-items: center; justify-content: center; z-index: 1;
+  }
+  .upInfo { width: 100%; font-size: 13px; color: var(--muted); }
+  .upInfo.bad { color: var(--red); }
 
   /* Уже загруженные фото: лента, листается пальцем вбок; нажатие —
      просмотр на весь экран (#photoViewer). */
@@ -2687,7 +2705,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: []
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: []
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -4271,6 +4289,125 @@
     });
   }
 
+  // ===== Загрузка фото сразу после выбора =====
+  // Фото сжимается на телефоне (до 1600 px по длинной стороне, JPEG) и сразу
+  // уходит на сервер (uploadPhoto) — по одному, в фоне, пока человек
+  // заполняет остальное. На миниатюре: кружок — загружается, галочка —
+  // готово, красный — не получилось (нажать — повторить). В задачу потом
+  // передаются готовые ссылки.
+  var UP_ICON_OK = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  var UP_ICON_RETRY = '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>';
+  function compressPhoto_(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        try {
+          var max = 1600, w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, max / Math.max(w, h));
+          var c = document.createElement('canvas');
+          c.width = Math.round(w * k); c.height = Math.round(h * k);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(url);
+          resolve(c.toDataURL('image/jpeg', 0.82));
+        } catch (e) { URL.revokeObjectURL(url); reject(e); }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        // не картинка для браузера (например, HEIC) — отправим как есть
+        var r = new FileReader();
+        r.onload = function () { resolve(r.result); };
+        r.onerror = function () { reject(new Error('read')); };
+        r.readAsDataURL(file);
+      };
+      img.src = url;
+    });
+  }
+  function photoUploader_(inputId, previewId, label) {
+    var input = document.getElementById(inputId), box = document.getElementById(previewId);
+    var items = [], seq = 0, active = 0, waiters = [];
+    function render() {
+      var ok = items.filter(function (x) { return x.st === 'ok'; }).length;
+      var bad = items.filter(function (x) { return x.st === 'err'; }).length;
+      box.innerHTML = items.map(function (x) {
+        var st = x.st === 'ok' ? UP_ICON_OK : x.st === 'err' ? UP_ICON_RETRY : '<span class="spinner"></span>';
+        return '<div class="upTile ' + x.st + '" data-k="' + x.k + '">' + (x.thumb ? '<img src="' + x.thumb + '" alt="">' : '') +
+          '<div class="upSt">' + st + '</div><button type="button" class="upDel" aria-label="Убрать фото">×</button></div>';
+      }).join('') + (items.length ? '<div class="upInfo' + (bad ? ' bad' : '') + '">' +
+        (bad ? 'Не загрузилось: ' + bad + ' — нажмите на фото, чтобы повторить' : ok === items.length ? 'Загружено ' + ok + ' из ' + items.length : 'Загружаю фото… ' + ok + ' из ' + items.length) + '</div>' : '');
+    }
+    function settle() {
+      if (items.some(function (x) { return x.st === 'wait' || x.st === 'up'; })) return;
+      var w = waiters; waiters = []; w.forEach(function (f) { f(); });
+    }
+    function pump() {
+      while (active < 2) {
+        var next = items.filter(function (x) { return x.st === 'wait'; })[0];
+        if (!next) break;
+        upload(next);
+      }
+      settle();
+    }
+    function upload(x) {
+      x.st = 'up'; active++; render();
+      (x.data ? Promise.resolve(x.data) : compressPhoto_(x.file).then(function (d) { x.data = d; return d; }))
+        .then(function (d) { return apiPost({ action: 'uploadPhoto', phone: currentUser && currentUser.phone, photo: d, label: label }); })
+        .then(function (res) {
+          if (items.indexOf(x) < 0) return;
+          if (res && res.status === 'ok' && res.url) { x.st = 'ok'; x.url = res.url; x.data = null; }
+          else { x.st = 'err'; x.msg = res && res.message; }
+        })
+        .catch(function () { if (items.indexOf(x) >= 0) x.st = 'err'; })
+        .then(function () { active--; render(); pump(); });
+    }
+    input.addEventListener('change', function () {
+      Array.prototype.forEach.call(input.files || [], function (f) {
+        var x = { k: ++seq, file: f, st: 'wait', thumb: '' };
+        try { x.thumb = URL.createObjectURL(f); } catch (e) {}
+        items.push(x);
+      });
+      input.value = '';
+      render(); pump();
+    });
+    box.addEventListener('click', function (e) {
+      var tile = e.target.closest('.upTile'); if (!tile) return;
+      var x = items.filter(function (i) { return String(i.k) === tile.getAttribute('data-k'); })[0];
+      if (!x) return;
+      if (e.target.closest('.upDel')) {
+        items.splice(items.indexOf(x), 1);
+        try { if (x.thumb) URL.revokeObjectURL(x.thumb); } catch (err) {}
+        render(); settle(); return;
+      }
+      if (x.st === 'err') { x.st = 'wait'; pump(); }
+    });
+    return {
+      count: function () { return items.length; },
+      failed: function () { return items.filter(function (x) { return x.st === 'err'; }).length; },
+      busy: function () { return items.some(function (x) { return x.st === 'wait' || x.st === 'up'; }); },
+      progress: function () { return items.filter(function (x) { return x.st === 'ok'; }).length + ' из ' + items.length; },
+      urls: function () { return items.filter(function (x) { return x.st === 'ok'; }).map(function (x) { return x.url; }); },
+      whenReady: function () { return new Promise(function (r) { waiters.push(r); settle(); }); },
+      reset: function () { items.forEach(function (x) { try { if (x.thumb) URL.revokeObjectURL(x.thumb); } catch (e) {} }); items = []; render(); }
+    };
+  }
+  // Перед отправкой: дождаться фото, которые ещё загружаются; не отправлять,
+  // если какое-то не загрузилось.
+  function withUploadedPhotos_(up, statusEl, btn, go) {
+    if (up.failed()) {
+      statusEl.textContent = 'Не все фото загрузились — нажмите на красные, чтобы повторить, или уберите их';
+      statusEl.className = 'error';
+      return;
+    }
+    if (!up.busy()) { go(up.urls()); return; }
+    btn.disabled = true;
+    statusEl.className = '';
+    statusEl.textContent = 'Догружаю фото… ' + up.progress();
+    var t = setInterval(function () { statusEl.textContent = 'Догружаю фото… ' + up.progress(); }, 400);
+    up.whenReady().then(function () {
+      clearInterval(t);
+      btn.disabled = false;
+      withUploadedPhotos_(up, statusEl, btn, go);
+    });
+  }
+
   function renderPhotoPreview(containerEl, base64List) {
     containerEl.innerHTML = (base64List || []).map(function (b64) {
       return '<img src="' + b64 + '" alt="">';
@@ -4533,34 +4670,30 @@
     document.getElementById('taskStartAction').style.display = 'none';
     document.getElementById('taskStartForm').style.display = 'block';
     // без фотоотчёта — приступаем сразу, без формы
-    if (currentTaskPhotoReport === 'no') { taskBeforePhotosBase64 = []; document.getElementById('taskStartSubmitBtn').click(); }
+    if (currentTaskPhotoReport === 'no') { taskBeforeUp.reset(); document.getElementById('taskStartSubmitBtn').click(); }
   });
 
-  document.getElementById('taskBeforePhotoInput').addEventListener('change', function (e) {
-    readFilesAsBase64(e.target.files, function (list) {
-      taskBeforePhotosBase64 = list;
-      renderPhotoPreview(document.getElementById('taskBeforePhotoPreview'), list);
-    });
-  });
+  var taskBeforeUp = photoUploader_('taskBeforePhotoInput', 'taskBeforePhotoPreview', 'before');
 
   document.getElementById('taskStartSubmitBtn').addEventListener('click', function () {
     var statusEl5 = document.getElementById('taskStartStatus');
     var btn = document.getElementById('taskStartSubmitBtn');
     var phone = currentUser ? currentUser.phone : '';
-    if (currentTaskPhotoReport === 'yes' && !taskBeforePhotosBase64.length) {
+    if (currentTaskPhotoReport === 'yes' && !taskBeforeUp.count()) {
       statusEl5.textContent = 'Добавьте хотя бы одно фото до начала работ';
       statusEl5.className = 'error';
       return;
     }
+    withUploadedPhotos_(taskBeforeUp, statusEl5, btn, function (urls) {
     btn.disabled = true;
     statusEl5.textContent = 'Отправка…';
     statusEl5.className = '';
-    apiPost({ action: 'startTask', phone: phone, taskId: currentTaskId, photos: taskBeforePhotosBase64 })
+    apiPost({ action: 'startTask', phone: phone, taskId: currentTaskId, photos: urls })
       .then(function (res) {
         btn.disabled = false;
         if (res.status === 'ok') {
-          taskBeforePhotosBase64 = [];
-          document.getElementById('taskBeforePhotoInput').value = '';
+          taskBeforeUp.reset();
+          statusEl5.textContent = '';
           loadTaskDetail();
           refreshTasksBadge();
         } else {
@@ -4572,7 +4705,7 @@
         btn.disabled = false;
         statusEl5.textContent = 'Ошибка соединения: ' + err;
         statusEl5.className = 'error';
-      });
+      });    });
   });
 
   document.getElementById('taskCompleteBtn').addEventListener('click', function () {
@@ -4580,32 +4713,28 @@
     document.getElementById('taskCompleteForm').style.display = 'block';
   });
 
-  document.getElementById('taskAfterPhotoInput').addEventListener('change', function (e) {
-    readFilesAsBase64(e.target.files, function (list) {
-      taskAfterPhotosBase64 = list;
-      renderPhotoPreview(document.getElementById('taskAfterPhotoPreview'), list);
-    });
-  });
+  var taskAfterUp = photoUploader_('taskAfterPhotoInput', 'taskAfterPhotoPreview', 'after');
 
   document.getElementById('taskCompleteSubmitBtn').addEventListener('click', function () {
     var statusEl6 = document.getElementById('taskCompleteStatus');
     var btn = document.getElementById('taskCompleteSubmitBtn');
     var phone = currentUser ? currentUser.phone : '';
     var comment = document.getElementById('taskCompleteCommentInput').value.trim();
-    if (currentTaskPhotoReport === 'yes' && !taskAfterPhotosBase64.length) {
+    if (currentTaskPhotoReport === 'yes' && !taskAfterUp.count()) {
       statusEl6.textContent = 'Добавьте хотя бы одно фото выполненной работы';
       statusEl6.className = 'error';
       return;
     }
+    withUploadedPhotos_(taskAfterUp, statusEl6, btn, function (urls) {
     btn.disabled = true;
     statusEl6.textContent = 'Отправка…';
     statusEl6.className = '';
-    apiPost({ action: 'completeTask', phone: phone, taskId: currentTaskId, photos: taskAfterPhotosBase64, comment: comment })
+    apiPost({ action: 'completeTask', phone: phone, taskId: currentTaskId, photos: urls, comment: comment })
       .then(function (res) {
         btn.disabled = false;
         if (res.status === 'ok') {
-          taskAfterPhotosBase64 = [];
-          document.getElementById('taskAfterPhotoInput').value = '';
+          taskAfterUp.reset();
+          statusEl6.textContent = '';
           document.getElementById('taskCompleteCommentInput').value = '';
           loadTaskDetail();
           refreshTasksBadge();
@@ -4618,7 +4747,7 @@
         btn.disabled = false;
         statusEl6.textContent = 'Ошибка соединения: ' + err;
         statusEl6.className = 'error';
-      });
+      });    });
   });
 
   // --- Панель администратора ---
@@ -5248,16 +5377,7 @@
       });
   }
 
-  var taskCreatePhotosBase64 = [];
-  var taskPhotoInputEl = document.getElementById('taskPhotoInput');
-  if (taskPhotoInputEl) {
-    taskPhotoInputEl.addEventListener('change', function (e) {
-      readFilesAsBase64(e.target.files, function (list) {
-        taskCreatePhotosBase64 = list;
-        renderPhotoPreview(document.getElementById('taskPhotoPreview'), list);
-      });
-    });
-  }
+  var taskCreateUp = photoUploader_('taskPhotoInput', 'taskPhotoPreview', 'task');
 
   var taskCreateBtnEl = document.getElementById('taskCreateBtn');
   if (taskCreateBtnEl) {
@@ -5286,6 +5406,7 @@
         return;
       }
 
+      withUploadedPhotos_(taskCreateUp, statusEl4, taskCreateBtnEl, function (urls) {
       statusEl4.textContent = 'Постановка задачи…';
       statusEl4.className = '';
       taskCreateBtnEl.disabled = true;
@@ -5296,7 +5417,7 @@
         name: assignee.name,
         objectName: objectName,
         text: text,
-        photos: taskCreatePhotosBase64,
+        photos: urls,
         photoReport: document.getElementById('taskPhotoReportInput').checked
       })
         .then(function (res) {
@@ -5308,9 +5429,7 @@
             objectInput.value = '';
             textInput.value = '';
             document.getElementById('taskPhotoReportInput').checked = false;
-            taskCreatePhotosBase64 = [];
-            taskPhotoInputEl.value = '';
-            document.getElementById('taskPhotoPreview').innerHTML = '';
+            taskCreateUp.reset();
             toast_('Задача поставлена — ' + assignee.name, 'ok');
             // к ленте задач: новая задача видна сверху
             tasksMode = 'all';
@@ -5326,6 +5445,7 @@
           statusEl4.textContent = 'Ошибка соединения: ' + err;
           statusEl4.className = 'error';
         });
+      });
     });
   }
 
