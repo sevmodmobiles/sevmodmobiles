@@ -1,3 +1,11 @@
+// v67: оклад. В «Сотрудники» колонки H «Тип оплаты» (Подневно / Оклад) и
+//      I «Оклад, ₽/мес». adminSetRate принимает payType и salary.
+//      У окладников в «Кабинете» нет денежных сумм (getMyStats отдаёт
+//      payType и не отдаёт оплату), в «Аналитике» оплата по дням не считается.
+//      adminSalaryReport(phone, 'yyyy-MM') — управленческий отчёт по
+//      окладникам: рабочие дни месяца по производственному календарю РФ,
+//      отработано, отгулы, больничные, дни без отметки, часы «приду позже /
+//      уйду раньше», опоздания — и во сколько это обошлось (оклад не уменьшается).
 // v66: рабочий день офиса 10:00–18:00 (было 9:00–18:00) — для «Приду позже» / «Уйду раньше».
 // v65: первая версия, установленная самообновлением (проверка связки GitHub → Apps Script).
 // v64: самообновление находит основной файл проекта по содержимому
@@ -444,7 +452,10 @@ function doPost(e) {
       return jsonOutput(adminGetEmployees(data.phone));
     }
     if (data.action === 'adminSetRate') {
-      return jsonOutput(adminSetRate(data.phone, data.targetPhone, data.rate));
+      return jsonOutput(adminSetRate(data.phone, data.targetPhone, data.rate, data.payType, data.salary));
+    }
+    if (data.action === 'adminSalaryReport') {
+      return jsonOutput(adminSalaryReport(data.phone, data.month));
     }
     if (data.action === 'adminGetAdminList') {
       return jsonOutput(adminGetAdminList(data.phone));
@@ -1241,11 +1252,13 @@ function getEmployeeRates() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
   var rates = {};
   if (!sheet || sheet.getLastRow() < 2) return rates;
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).getValues();
+  var width = Math.min(Math.max(sheet.getLastColumn(), 5), EMP_COL.SALARY);
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
   data.forEach(function (row) {
     var name = row[0];
     var rate = row[4];
-    if (name) rates[name] = Number(rate) || 0;
+    // Окладникам оплата по дням не считается (оклад — за месяц).
+    if (name) rates[name] = payTypeOf_(row[EMP_COL.PAY_TYPE - 1]) === PAY_SALARY ? 0 : (Number(rate) || 0);
   });
   return rates;
 }
@@ -1470,11 +1483,14 @@ function adminGetEmployees(phone) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
   if (!sheet || sheet.getLastRow() < 2) return { status: 'ok', employees: [] };
 
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
+  ensurePayColumns_(sheet);
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, EMP_COL.SALARY).getValues();
   var employees = data
     .filter(function (row) { return row[0]; })
     .map(function (row) {
       return {
+        payType: payTypeOf_(row[EMP_COL.PAY_TYPE - 1]),
+        salary: Number(row[EMP_COL.SALARY - 1]) || 0,
         name: row[0],
         // Нормализуем и здесь — чтобы в выпадающем списке "Исполнитель" и
         // при постановке задачи везде ходил чистый номер, без "красивого"
@@ -1488,9 +1504,12 @@ function adminGetEmployees(phone) {
   return { status: 'ok', employees: employees };
 }
 
-function adminSetRate(adminPhone, targetPhone, rate) {
+function adminSetRate(adminPhone, targetPhone, rate, payType, salary) {
   var auth = adminAuth_(adminPhone);
   if (!auth.ok) return { status: 'error', message: auth.error };
+  if (payType !== undefined && payType !== null && payType !== '') {
+    return adminSetPay_(targetPhone, rate, payType, salary);
+  }
 
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
   if (!sheet || sheet.getLastRow() < 2) {
@@ -2488,10 +2507,12 @@ function findEmployeeByPhone(phone) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
   if (!sheet || sheet.getLastRow() < 2) return null;
   var normalizedPhone = normalizePhone_(phone);
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).getValues();
+  var width = Math.min(Math.max(sheet.getLastColumn(), 5), EMP_COL.SALARY);
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
   for (var i = 0; i < data.length; i++) {
     if (normalizePhone_(data[i][1]) === normalizedPhone) {
-      return { name: data[i][0], rate: Number(data[i][4]) || 0 };
+      return { name: data[i][0], rate: Number(data[i][4]) || 0,
+        payType: payTypeOf_(data[i][EMP_COL.PAY_TYPE - 1]), salary: Number(data[i][EMP_COL.SALARY - 1]) || 0 };
     }
   }
   return null;
@@ -2510,6 +2531,15 @@ function getShiftStatus(phone) {
 function getMyStats(phone) {
   var res = getMyStatsCore_(phone);
   if (res.status !== 'ok') return res;
+  // Окладнику денежные суммы в кабинете не показываем.
+  var emp = findEmployeeByPhone(phone);
+  if (emp && emp.payType === PAY_SALARY) {
+    res.payType = PAY_SALARY;
+    delete res.rate; res.totalPay = null; res.monthPay = null;
+    (res.days || []).forEach(function (d) { d.pay = null; });
+  } else {
+    res.payType = PAY_DAILY;
+  }
   var y = new Date().getFullYear();
   var list = [];
   [y, y - 1].forEach(function (yr) {
@@ -4188,7 +4218,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v66';
+var CODE_VERSION = 'v67';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4388,4 +4418,197 @@ function setupAutoUpdate() {
   }
   Logger.log(msg);
   return msg;
+}
+
+// ===================== ОКЛАД (v67) =====================
+// Лист «Сотрудники»: E — ставка за 8-часовую смену (подневщики),
+// H — тип оплаты, I — оклад за полный рабочий месяц.
+var EMP_COL = { PAY_TYPE: 8, SALARY: 9 };
+var PAY_DAILY = 'Подневно', PAY_SALARY = 'Оклад';
+function payTypeOf_(v) { return String(v || '').trim().toLowerCase() === 'оклад' ? PAY_SALARY : PAY_DAILY; }
+function ensurePayColumns_(sheet) {
+  if (sheet.getMaxColumns() < EMP_COL.SALARY) sheet.insertColumnsAfter(sheet.getMaxColumns(), EMP_COL.SALARY - sheet.getMaxColumns());
+  if (String(sheet.getRange(1, EMP_COL.PAY_TYPE).getValue()).trim() !== 'Тип оплаты') {
+    sheet.getRange(1, EMP_COL.PAY_TYPE).setValue('Тип оплаты');
+  }
+  if (String(sheet.getRange(1, EMP_COL.SALARY).getValue()).trim() !== 'Оклад, ₽/мес') {
+    sheet.getRange(1, EMP_COL.SALARY).setValue('Оклад, ₽/мес');
+  }
+}
+function adminSetPay_(targetPhone, rate, payType, salary) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
+  if (!sheet || sheet.getLastRow() < 2) return { status: 'error', message: 'Сотрудник не найден' };
+  ensurePayColumns_(sheet);
+  var type = payTypeOf_(payType);
+  var normalizedPhone = normalizePhone_(targetPhone);
+  var data = sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (normalizePhone_(data[i][0]) !== normalizedPhone) continue;
+    var row = i + 2;
+    if (type === PAY_SALARY) {
+      var s = Number(salary);
+      if (!isFinite(s) || s < 0) return { status: 'error', message: 'Некорректный оклад' };
+      sheet.getRange(row, EMP_COL.SALARY).setValue(s);
+    } else if (rate !== undefined && rate !== null && rate !== '') {
+      var r = Number(rate);
+      if (!isFinite(r) || r < 0) return { status: 'error', message: 'Некорректная ставка' };
+      sheet.getRange(row, 5).setValue(r);
+    }
+    sheet.getRange(row, EMP_COL.PAY_TYPE).setValue(type);
+    return { status: 'ok', payType: type };
+  }
+  return { status: 'error', message: 'Сотрудник с таким номером не найден' };
+}
+
+// Производственный календарь РФ: нерабочие праздничные дни (с переносами)
+// и рабочие субботы. 2026 — по постановлению Правительства (247 рабочих дней).
+// Для лет без списка — фиксированные праздники с переносом с выходного на понедельник.
+var RU_HOLIDAYS = {
+  2026: ['2026-01-01', '2026-01-02', '2026-01-05', '2026-01-06', '2026-01-07', '2026-01-08', '2026-01-09',
+    '2026-02-23', '2026-03-09', '2026-05-01', '2026-05-11', '2026-06-12', '2026-11-04', '2026-12-31']
+};
+var RU_WORK_SATURDAYS = { 2026: [] };
+var ruCalCache_ = {};
+function ruCalendar_(year) {
+  if (ruCalCache_[year]) return ruCalCache_[year];
+  var off = {}, on = {};
+  if (RU_HOLIDAYS[year]) {
+    RU_HOLIDAYS[year].forEach(function (d) { off[d] = true; });
+    (RU_WORK_SATURDAYS[year] || []).forEach(function (d) { on[d] = true; });
+  } else {
+    var fixed = ['01-01', '01-02', '01-03', '01-04', '01-05', '01-06', '01-07', '01-08', '02-23', '03-08', '05-01', '05-09', '06-12', '11-04'];
+    fixed.forEach(function (md) {
+      var d = parseIsoDate_(year + '-' + md);
+      off[toIsoDate_(d)] = true;
+      if (md.indexOf('01-') === 0) return;
+      var w = d.getDay();
+      if (w === 6 || w === 0) { d.setDate(d.getDate() + (w === 6 ? 2 : 1)); off[toIsoDate_(d)] = true; }
+    });
+  }
+  return (ruCalCache_[year] = { off: off, on: on });
+}
+function isRuWorkday_(d) {
+  var iso = toIsoDate_(d), cal = ruCalendar_(d.getFullYear());
+  if (cal.on[iso]) return true;
+  var w = d.getDay();
+  return w !== 0 && w !== 6 && !cal.off[iso];
+}
+
+// Управленческий отчёт по окладникам за месяц month = 'yyyy-MM'.
+function adminSalaryReport(phone, month) {
+  var auth = adminAuth_(phone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  var tz = Session.getScriptTimeZone();
+  var m = /^(\d{4})-(\d{2})$/.exec(String(month || ''));
+  var now = new Date();
+  var year = m ? Number(m[1]) : now.getFullYear(), mon = m ? Number(m[2]) - 1 : now.getMonth();
+  var start = new Date(year, mon, 1), end = new Date(year, mon + 1, 0);
+  var today = parseIsoDate_(toIsoDate_(now));
+  var yesterday = new Date(today.getTime()); yesterday.setDate(yesterday.getDate() - 1);
+  var upTo = end < today ? end : today;          // учитываем дни по сегодня включительно
+  var missUpTo = end < yesterday ? end : yesterday; // «без отметки» — только прошедшие дни
+
+  function eachDay_(a, b, fn) { for (var d = new Date(a.getTime()); d <= b; d.setDate(d.getDate() + 1)) fn(new Date(d.getTime())); }
+  var monthWorkdays = 0, passedWorkdays = 0;
+  eachDay_(start, end, function (d) { if (isRuWorkday_(d)) { monthWorkdays++; if (d <= upTo) passedWorkdays++; } });
+
+  var empSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
+  if (!empSheet || empSheet.getLastRow() < 2) return { status: 'ok', month: year + '-' + ('0' + (mon + 1)).slice(-2), people: [] };
+  ensurePayColumns_(empSheet);
+  var emps = empSheet.getRange(2, 1, empSheet.getLastRow() - 1, EMP_COL.SALARY).getValues()
+    .filter(function (r) { return r[0] && payTypeOf_(r[EMP_COL.PAY_TYPE - 1]) === PAY_SALARY; })
+    .map(function (r) {
+      return { name: String(r[0]), phone: normalizePhone_(r[1]), reg: r[2] instanceof Date ? parseIsoDate_(toIsoDate_(r[2])) : null,
+        salary: Number(r[EMP_COL.SALARY - 1]) || 0 };
+    });
+  var byPhone = {};
+  emps.forEach(function (e) {
+    byPhone[e.phone] = e;
+    e.days = {}; e.lateMinutes = 0; e.hoursMs = 0; e.weekendDays = 0;
+    e.leave = {}; e.sick = {}; e.partialHours = 0; e.partialCount = 0;
+  });
+
+  // Отметки за месяц.
+  var log = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
+  if (log && log.getLastRow() >= 2 && emps.length) {
+    var rows = log.getRange(2, 1, log.getLastRow() - 1, 6).getValues();
+    var perDay = {};
+    rows.forEach(function (r) {
+      var ts = r[0]; if (!(ts instanceof Date) || ts < start || ts > new Date(year, mon + 1, 1)) return;
+      var e = byPhone[normalizePhone_(r[2])]; if (!e) return;
+      var iso = toIsoDate_(ts), key = e.phone + '|' + iso;
+      var pd = perDay[key] || (perDay[key] = { e: e, iso: iso, arr: null, dep: null, late: null });
+      if (r[4] === 'Приход') { if (!pd.arr || ts < pd.arr) { pd.arr = ts; pd.late = r[5] === '' ? null : Number(r[5]); } }
+      else if (r[4] === 'Уход') { if (!pd.dep || ts > pd.dep) pd.dep = ts; }
+    });
+    Object.keys(perDay).forEach(function (k) {
+      var pd = perDay[k], e = pd.e;
+      e.days[pd.iso] = true;
+      if (!isRuWorkday_(parseIsoDate_(pd.iso))) e.weekendDays++;
+      if (pd.late > 0) e.lateMinutes += pd.late;
+      if (pd.arr && pd.dep && pd.dep > pd.arr && pd.dep - pd.arr < 20 * 3600000) e.hoursMs += pd.dep - pd.arr;
+    });
+  }
+
+  // Согласованные отсутствия.
+  var abs = getExistingAbsenceSheet_();
+  if (abs && abs.getLastRow() >= 2 && emps.length) {
+    abs.getRange(2, 1, abs.getLastRow() - 1, ABSENCE_HEADERS.length).getValues().forEach(function (r) {
+      if (absStatusOf_(r[ABS_COL.STATUS - 1]) !== ABS_STATUS.APPROVED) return;
+      var e = byPhone[normalizePhone_(r[ABS_COL.PHONE - 1])]; if (!e) return;
+      var f = r[ABS_COL.FROM - 1], t = r[ABS_COL.TO - 1];
+      if (!(f instanceof Date)) return;
+      f = parseIsoDate_(toIsoDate_(f)); t = t instanceof Date ? parseIsoDate_(toIsoDate_(t)) : f;
+      var type = r[ABS_COL.TYPE - 1];
+      if (type === ABSENCE_KINDS.late || type === ABSENCE_KINDS.early) {
+        if (f >= start && f <= upTo) { e.partialHours += Number(r[ABS_COL.HOURS - 1]) || 0; e.partialCount++; }
+        return;
+      }
+      var a = f < start ? start : f, b = t > upTo ? upTo : t;
+      if (a > b) return;
+      eachDay_(a, b, function (d) {
+        if (!isRuWorkday_(d)) return;
+        var iso = toIsoDate_(d);
+        if (type === ABSENCE_KINDS.sick) e.sick[iso] = true; else e.leave[iso] = true;
+      });
+    });
+  }
+
+  function r0_(x) { return Math.round(x); }
+  var totals = { salary: 0, leave: 0, sick: 0, noMark: 0, partial: 0, late: 0, total: 0 };
+  var people = emps.map(function (e) {
+    var dayCost = monthWorkdays ? e.salary / monthWorkdays : 0;
+    var worked = 0, leaveDays = 0, sickDays = 0, noMarkDates = [];
+    eachDay_(start, upTo, function (d) {
+      if (!isRuWorkday_(d)) return;
+      var iso = toIsoDate_(d);
+      if (e.days[iso]) { worked++; return; }
+      if (e.sick[iso]) { sickDays++; return; }
+      if (e.leave[iso]) { leaveDays++; return; }
+      if (d > missUpTo) return;
+      if (e.reg && d < e.reg) return;
+      noMarkDates.push(iso);
+    });
+    var a = {
+      leave: r0_(leaveDays * dayCost), sick: r0_(sickDays * dayCost), noMark: r0_(noMarkDates.length * dayCost),
+      partial: r0_(e.partialHours / WORKDAY_HOURS * dayCost), late: r0_(e.lateMinutes / 60 / WORKDAY_HOURS * dayCost)
+    };
+    var total = a.leave + a.sick + a.noMark + a.partial + a.late;
+    totals.salary += e.salary; totals.leave += a.leave; totals.sick += a.sick; totals.noMark += a.noMark;
+    totals.partial += a.partial; totals.late += a.late; totals.total += total;
+    return {
+      name: e.name, phone: e.phone, salary: e.salary, dayCost: r0_(dayCost),
+      workedDays: worked, weekendDays: e.weekendDays, hours: Math.round(e.hoursMs / 360000) / 10,
+      leaveDays: leaveDays, sickDays: sickDays, noMarkDays: noMarkDates.length, noMarkDates: noMarkDates,
+      partialHours: round2_(e.partialHours), partialCount: e.partialCount, lateMinutes: e.lateMinutes,
+      amounts: a, total: total, totalPct: e.salary ? Math.round(total / e.salary * 1000) / 10 : 0
+    };
+  }).sort(function (x, y) { return y.total - x.total; });
+  return {
+    status: 'ok', month: year + '-' + ('0' + (mon + 1)).slice(-2),
+    monthWorkdays: monthWorkdays, passedWorkdays: passedWorkdays,
+    upTo: toIsoDate_(upTo), isCurrent: upTo < end, isFuture: start > today,
+    calendarExact: !!RU_HOLIDAYS[year],
+    people: people, totals: totals
+  };
 }

@@ -560,6 +560,23 @@
   .timingBox table { width: 100%; border-collapse: collapse; margin-top: 8px; }
   .timingBox td { padding: 4px 0; border-bottom: 1px solid var(--border); }
   .timingBox td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 8px; }
+  .salMonthNav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+  .salMonthNav button { width: 44px; height: 40px; margin: 0; padding: 0; background: transparent; color: var(--text); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; }
+  .salMonthNav button:disabled { opacity: .35; }
+  .salMonthTitle { font-weight: 700; font-size: 17px; text-align: center; }
+  .salSum { padding: 12px; border-radius: 12px; background: var(--bg); margin-bottom: 12px; font-size: 14px; line-height: 1.45; }
+  .salSum b { font-size: 18px; }
+  .salCard { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .salHead { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .salName { font-weight: 700; }
+  .salSalary { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .salMeta { font-size: 13px; color: var(--muted); margin: 4px 0 8px; }
+  .salRow { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; padding: 4px 0; border-top: 1px dashed var(--border); }
+  .salRow .num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .salDates { font-size: 12px; color: var(--muted); padding: 0 0 4px; }
+  .salTotal { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); font-weight: 700; }
+  .salTotal .num { color: var(--red); white-space: nowrap; }
+  .salClean { font-size: 14px; color: var(--green); font-weight: 600; }
   .serverVer { font-size: 14px; line-height: 1.45; margin-bottom: 10px; }
   .serverVer .verRow { display: flex; justify-content: space-between; gap: 10px; }
   .serverVer .verNum { font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -583,9 +600,10 @@
   .adminObjSaveStatus { font-size: 12px; }
   .adminEmpRow {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 6px 10px;
     padding: 10px 0;
     border-bottom: 1px solid var(--border);
   }
@@ -593,9 +611,10 @@
   .adminEmpInfo { min-width: 0; }
   .adminEmpName { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .adminEmpPhone { font-size: 12px; color: var(--muted); }
-  .adminEmpRateForm { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .adminEmpRateForm { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
+  .adminEmpRateForm select.adminPayType { width: auto; margin: 0; padding: 8px 6px; font-size: 13px; }
   .adminEmpRateForm input {
-    width: 84px;
+    width: 100px;
     margin: 0;
     padding: 8px 10px;
     text-align: right;
@@ -831,7 +850,7 @@
   .scanHelp .scanCancel { background: none; color: var(--muted); border: 1px solid var(--border); }
 
   /* ===== Отсутствия (отгулы / больничные) ===== */
-  #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog { display: none; }
+  #screenAbsence, #screenAdminAbsences, #screenAdminExpense, #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog, #screenSalary { display: none; }
   .absTotals { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
   .absTable { width: 100%; border-collapse: collapse; font-size: 13px; }
   .absTable th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--border); }
@@ -1046,7 +1065,7 @@
 
   /* ===== Расходы: сводка и просмотр ===== */
   /* Экраны — flex-дети body: без явной ширины их растягивала бы лента статусов. */
-  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog, #screenAbsence, #screenStats { width: 100%; max-width: 440px; }
+  #screenExpHub, #screenExpView, #screenExpContract, #screenExpPay, #screenAbsLog, #screenSalary, #screenAbsence, #screenStats { width: 100%; max-width: 440px; }
   .expSumList { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
   .expSumTile {
     display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 8px 14px;
@@ -1657,6 +1676,10 @@
         <button id="goToAbsLogBtn" type="button" style="background: var(--blue); margin-top: 10px;">Журнал отгулов</button>
       </div>
 
+      <div class="card">
+        <button id="goToSalaryBtn" type="button" style="background: var(--blue);">Окладники: отчёт</button>
+      </div>
+
       <!-- Сервер (Apps Script) обновляется сам после каждой выкладки на
            GitHub; кнопка — ручная проверка, если что-то пошло не так. -->
       <div class="card">
@@ -1772,6 +1795,25 @@
     </div>
     <div class="card">
       <div id="adminAbsencesList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- Окладники: управленческий отчёт — сколько стоили компании отгулы,
+       больничные, дни без отметки и опоздания (оклад при этом не уменьшается) -->
+  <div id="screenSalary">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Окладники</h1>
+      <div class="switchUser"><a id="salaryBackLink">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <div class="salMonthNav">
+        <button type="button" id="salPrev" aria-label="Предыдущий месяц"><svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <div id="salMonthTitle" class="salMonthTitle">—</div>
+        <button type="button" id="salNext" aria-label="Следующий месяц"><svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+      </div>
+      <div id="salSummary"></div>
+      <div id="salList"></div>
+      <div class="ctHint" style="margin-top:10px;">Оклад не уменьшается — суммы справочные: сколько компания заплатила за неотработанное время. Стоимость дня = оклад ÷ рабочие дни месяца по производственному календарю. «Без отметки» — прошедшие рабочие дни без отметки и без согласованной заявки (возможно, человек забыл отметиться).</div>
     </div>
   </div>
 
@@ -2464,22 +2506,22 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, adminGetAdminList: 1, login: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
   var SWR_AFTER_WRITE = {
-    log: [],
+    log: ['adminSalaryReport'],
     adminSetExpenseStatus: ['adminExpenseOverview'], adminDeleteExpenseRows: ['adminExpenseOverview'],
     adminSplitExpenseRow: ['adminExpenseOverview'], adminAddExpense: ['adminExpenseOverview', 'adminExpenseLookups'],
     adminAddContract: ['adminExpenseOverview', 'adminExpenseLookups', 'adminGetObjects'],
     adminAddCashMove: ['adminExpenseOverview'],
     adminAddExpenseWorker: ['adminExpenseLookups'], adminAddExpenseBank: ['adminExpenseLookups'],
     adminAddObject: ['adminGetObjects', 'adminExpenseLookups'], adminUpdateObjectShifts: ['adminGetObjects'],
-    adminSetRate: ['adminGetEmployees'],
+    adminSetRate: ['adminGetEmployees', 'adminSalaryReport'],
     adminCreateTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'],
     startTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'], completeTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'],
-    submitAbsence: ['getMyAbsences', 'adminGetAbsences'], adminDecideAbsence: ['adminGetAbsences', 'getMyAbsences'],
+    submitAbsence: ['getMyAbsences', 'adminGetAbsences', 'adminSalaryReport'], adminDecideAbsence: ['adminGetAbsences', 'getMyAbsences', 'adminSalaryReport'],
     adminSelfUpdate: ['adminServerVersion']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
@@ -2725,6 +2767,7 @@
   var screenExpContract = document.getElementById('screenExpContract');
   var screenExpPay = document.getElementById('screenExpPay');
   var screenAbsLog = document.getElementById('screenAbsLog');
+  var screenSalary = document.getElementById('screenSalary');
   var bottomNav = document.getElementById('bottomNav');
   var regStatus = document.getElementById('regStatus');
   function setRegStatus(text, kind) {
@@ -2817,6 +2860,7 @@
         case 'expContract': showExpContractScreen(); break;
         case 'expPay': showExpPayScreen(); break;
         case 'absLog': showAbsLogScreen(); break;
+        case 'salary': showSalaryScreen(); break;
         default: showScanScreen();
       }
   }
@@ -2975,7 +3019,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenScan.style.display = 'block';
     document.getElementById('whoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     if (currentUser) prefetchGeo_();
@@ -3069,7 +3113,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenLogin.style.display = 'block';
     hideBottomNav();
     pushScreenState('login');
@@ -3093,7 +3137,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenReg.style.display = 'block';
     updateGoogleGateVisibility();
     hideBottomNav();
@@ -3251,7 +3295,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyStats();
@@ -3279,7 +3323,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenTasks.style.display = 'block';
     document.getElementById('tasksWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     loadMyTasks();
@@ -3322,7 +3366,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenAbsence.style.display = 'block';
 
     var isPartial = absenceMode === 'partial';
@@ -3476,7 +3520,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     hideAdminPopup_();
     saveNotified_(adminPendingCount);
     loadAdminAbsences();
@@ -3576,7 +3620,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenProfile.style.display = 'block';
     document.getElementById('profileWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
     refreshAdminStatus();
@@ -3693,7 +3737,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenTaskDetail.style.display = 'block';
     document.getElementById('taskDetailLoading').style.display = 'block';
     document.getElementById('taskDetailBody').style.display = 'none';
@@ -3878,7 +3922,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenAdmin.style.display = 'block';
     showBottomNav();
     setActiveNav('profile');
@@ -3907,7 +3951,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenTaskManage.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Исполнитель"
     loadAdminTasks();
@@ -3935,7 +3979,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenAdminRates.style.display = 'block';
     loadAdminEmployees();
     showBottomNav();
@@ -3962,7 +4006,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenAdminObjects.style.display = 'block';
     loadAdminEmployees(); // наполняет даталист "Ответственный прораб"
     loadAdminObjects();
@@ -4283,8 +4327,10 @@
           adminAssigneeMap[label] = { phone: emp.phone, name: emp.name };
         });
 
+        // Тип оплаты: подневно (ставка за 8-часовую смену) или оклад (за полный месяц).
         listEl.innerHTML = res.employees.map(function (emp, idx) {
           var inputId = 'adminRateInput' + idx;
+          var isSalary = emp.payType === 'Оклад';
           return (
             '<div class="adminEmpRow">' +
               '<div class="adminEmpInfo">' +
@@ -4292,25 +4338,47 @@
                 '<div class="adminEmpPhone">' + escapeHtml(emp.phone) + '</div>' +
               '</div>' +
               '<div class="adminEmpRateForm">' +
-                '<input id="' + inputId + '" type="number" inputmode="numeric" min="0" step="1" value="' + (emp.rate || 0) + '" data-phone="' + escapeHtml(emp.phone) + '">' +
+                '<input id="' + inputId + '" type="number" inputmode="numeric" min="0" step="1" value="' + ((isSalary ? emp.salary : emp.rate) || 0) + '"' +
+                  ' data-rate="' + (emp.rate || 0) + '" data-salary="' + (emp.salary || 0) + '" data-phone="' + escapeHtml(emp.phone) + '">' +
+                '<select class="adminPayType" data-input="' + inputId + '" aria-label="Тип оплаты">' +
+                  '<option value="Подневно"' + (isSalary ? '' : ' selected') + '>₽ за день</option>' +
+                  '<option value="Оклад"' + (isSalary ? ' selected' : '') + '>₽ оклад/мес</option>' +
+                '</select>' +
                 '<button type="button" class="adminSaveRateBtn" data-input="' + inputId + '" data-phone="' + escapeHtml(emp.phone) + '">Сохранить</button>' +
               '</div>' +
             '</div>'
           );
         }).join('');
+        listEl.querySelectorAll('.adminPayType').forEach(function (sel) {
+          sel.addEventListener('change', function () {
+            var input = document.getElementById(sel.getAttribute('data-input'));
+            input.value = sel.value === 'Оклад' ? input.getAttribute('data-salary') : input.getAttribute('data-rate');
+          });
+        });
 
         listEl.querySelectorAll('.adminSaveRateBtn').forEach(function (btn) {
           btn.addEventListener('click', function () {
             var input = document.getElementById(btn.getAttribute('data-input'));
+            var sel = btn.parentNode.querySelector('.adminPayType');
             var phone = btn.getAttribute('data-phone');
-            var rate = input.value, prev = input.defaultValue;
-            // Сразу «Сохранено»; не сохранилось — вернём прежнюю ставку.
-            input.defaultValue = rate;
+            var type = sel.value, val = input.value;
+            var prev = { type: sel.getAttribute('data-saved') || (sel.querySelector('option[selected]') || sel.options[0]).value,
+              rate: input.getAttribute('data-rate'), salary: input.getAttribute('data-salary') };
+            // Сразу «Сохранено»; не сохранилось — вернём прежние значения.
+            input.setAttribute(type === 'Оклад' ? 'data-salary' : 'data-rate', val);
+            sel.setAttribute('data-saved', type);
             btn.textContent = 'Сохранено ✓';
             setTimeout(function () { btn.textContent = 'Сохранить'; }, 1500);
-            bgWrite_({ action: 'adminSetRate', phone: currentUser && currentUser.phone, targetPhone: phone, rate: rate }, {
-              failPrefix: 'Ставка не сохранилась',
-              rollback: function () { input.value = prev; input.defaultValue = prev; btn.textContent = 'Сохранить'; }
+            var body = { action: 'adminSetRate', phone: currentUser && currentUser.phone, targetPhone: phone, payType: type };
+            if (type === 'Оклад') body.salary = val; else body.rate = val;
+            bgWrite_(body, {
+              failPrefix: 'Оплата не сохранилась',
+              rollback: function () {
+                input.setAttribute('data-rate', prev.rate); input.setAttribute('data-salary', prev.salary);
+                sel.value = prev.type; sel.setAttribute('data-saved', prev.type);
+                input.value = prev.type === 'Оклад' ? prev.salary : prev.rate;
+                btn.textContent = 'Сохранить';
+              }
             });
           });
         });
@@ -4562,6 +4630,11 @@
   }
 
   function renderStats(data) {
+    // Окладник: денежных сумм в кабинете нет (оклад — за месяц, считается отдельно).
+    var noMoney = data.payType === 'Оклад';
+    ['statMonthPay', 'statTotalPay'].forEach(function (id) {
+      document.getElementById(id).parentNode.style.display = noMoney ? 'none' : '';
+    });
     document.getElementById('statMonthHours').textContent = data.monthHours;
     document.getElementById('statMonthPay').textContent = (data.monthPay || 0) + ' ₽';
     document.getElementById('statTotalHours').textContent = data.totalHours;
@@ -4635,7 +4708,7 @@
       row.innerHTML =
         '<div class="dayRowTop">' +
           '<div class="dayDate">' + shortYear_(d.date) + '</div>' +
-          '<div class="dayRight"><div class="dayPay">' + (d.pay ? d.pay + ' ₽' : '—') + '</div></div>' +
+          '<div class="dayRight">' + (data.payType === 'Оклад' ? '' : '<div class="dayPay">' + (d.pay ? d.pay + ' ₽' : '—') + '</div>') + '</div>' +
         '</div>' +
         '<div class="dayRowBottom">' +
           (d.object ? '<span class="dayObject">' + escapeHtml(d.object) + '</span>' : '<span></span>') +
@@ -4719,7 +4792,7 @@
     adminExpenseOverview: 'Сводка расходов', adminExpenseLookups: 'Справочники расходов',
     adminGetObjects: 'Объекты', adminGetEmployees: 'Сотрудники', adminGetTasks: 'Задачи (админ)',
     adminCheckAccess: 'Проверка прав', adminAbsencePending: 'Заявки на отгул', adminServerVersion: 'Версия сервера',
-    adminSetExpenseStatus: 'Смена статуса расхода', adminAddExpense: 'Добавление расхода'
+    adminSetExpenseStatus: 'Смена статуса расхода', adminAddExpense: 'Добавление расхода', adminSalaryReport: 'Отчёт по окладникам'
   };
   // Медиана и максимум последних запросов каждого вида (замер на этом телефоне).
   function renderTiming_() {
@@ -4858,7 +4931,7 @@
     screenExpView.style.display = 'none';
     screenExpContract.style.display = 'none';
     screenExpPay.style.display = 'none';
-    screenAbsLog.style.display = 'none';
+    screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenAdminExpense.style.display = 'block';
     if (!expRange.from) { expRange.from = isoToday_(); expRange.to = expRange.from; }
     renderExpDateField();
@@ -5363,7 +5436,7 @@
   function hideAllForExp_() {
     [screenLogin, screenReg, screenScan, screenAdmin, screenAdminRates, screenAdminObjects, screenTaskManage,
      screenStats, screenTasks, screenTaskDetail, screenProfile, screenAbsence, screenAdminAbsences,
-     screenAdminExpense, screenExpHub, screenExpView, screenExpContract, screenExpPay, screenAbsLog].forEach(function (el) { el.style.display = 'none'; });
+     screenAdminExpense, screenExpHub, screenExpView, screenExpContract, screenExpPay, screenAbsLog, screenSalary].forEach(function (el) { el.style.display = 'none'; });
   }
   // Цвет статуса — из цвета ячейки сводки в таблице (белый/пустой не используем).
   function expStatusColor_(status) {
@@ -7314,6 +7387,78 @@
       }, function (err) { if (!alItems) document.getElementById('alList').innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
   }
   document.getElementById('goToAbsLogBtn').addEventListener('click', showAbsLogScreen);
+
+  // ===== Окладники: управленческий отчёт =====
+  var SAL_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  var salMonth = '';
+  function salThisMonth_() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  function salShift_(ym, k) { var p = ym.split('-').map(Number), d = new Date(p[0], p[1] - 1 + k, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  function showSalaryScreen() {
+    hideAllForExp_();
+    screenSalary.style.display = 'block';
+    showBottomNav();
+    setActiveNav('profile');
+    pushScreenState('salary');
+    if (!salMonth) salMonth = salThisMonth_();
+    loadSalary_();
+  }
+  function loadSalary_() {
+    var p = salMonth.split('-');
+    document.getElementById('salMonthTitle').textContent = SAL_MONTHS[Number(p[1]) - 1] + ' ' + p[0];
+    document.getElementById('salNext').disabled = salMonth >= salThisMonth_();
+    var body = { action: 'adminSalaryReport', phone: currentUser && currentUser.phone, month: salMonth };
+    var forMonth = salMonth;
+    if (!swrHas_(body)) { document.getElementById('salSummary').innerHTML = ''; document.getElementById('salList').innerHTML = skeletonHtml_(3); }
+    swrLoad_(body, function (res) { if (forMonth === salMonth) renderSalary_(res); }, function (err) {
+      if (forMonth === salMonth) document.getElementById('salList').innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>';
+    });
+  }
+  function salDays_(n) { var m10 = n % 10, m100 = n % 100; return n + ' ' + (m10 === 1 && m100 !== 11 ? 'день' : (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'дня' : 'дней')); }
+  function salMin_(m) { var h = Math.floor(m / 60), r = m % 60; return (h ? h + ' ч ' : '') + (r || !h ? r + ' мин' : '').trim(); }
+  function renderSalary_(res) {
+    var sumEl = document.getElementById('salSummary'), listEl = document.getElementById('salList');
+    if (!res || res.status !== 'ok') {
+      sumEl.innerHTML = '';
+      listEl.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Не удалось загрузить — нужен сервер v67') + '</div>';
+      return;
+    }
+    if (!res.people.length) {
+      sumEl.innerHTML = '';
+      listEl.innerHTML = '<div class="statsEmpty">Окладников пока нет. Укажите тип оплаты «оклад» в «Ставках сотрудников».</div>';
+      return;
+    }
+    var t = res.totals;
+    var period = res.isFuture ? 'месяц ещё не начался' :
+      (res.isCurrent ? 'по ' + fmtIsoRu_(res.upTo) + ': прошло ' + res.passedWorkdays + ' из ' + res.monthWorkdays + ' рабочих дней' : res.monthWorkdays + ' рабочих дней в месяце');
+    sumEl.innerHTML = '<div class="salSum">Оплачено за неотработанное время: <b>' + money_(t.total) + '</b><br>' +
+      '<span class="ctHint">из фонда окладов ' + money_(t.salary) + ' · ' + escapeHtml(period) +
+      (res.calendarExact ? '' : ' · календарь года приблизительный') + '</span></div>';
+    listEl.innerHTML = res.people.map(function (p) {
+      var a = p.amounts, rows = '';
+      function row(label, n, qty, amt, extra) {
+        if (!n && !amt) return '';
+        return '<div class="salRow"><span>' + label + ' — ' + qty + '</span><span class="num">' + money_(amt) + '</span></div>' + (extra || '');
+      }
+      rows += row('Отгулы', p.leaveDays, salDays_(p.leaveDays), a.leave);
+      rows += row('Больничные', p.sickDays, salDays_(p.sickDays), a.sick);
+      rows += row('Без отметки', p.noMarkDays, salDays_(p.noMarkDays), a.noMark,
+        p.noMarkDays ? '<div class="salDates">' + p.noMarkDates.map(fmtIsoRu_).join(', ') + '</div>' : '');
+      rows += row('Приду позже / уйду раньше', p.partialHours, fmtNum_(p.partialHours) + ' ч', a.partial);
+      rows += row('Опоздания', p.lateMinutes, salMin_(p.lateMinutes), a.late);
+      var meta = 'Отработано ' + salDays_(p.workedDays) + (p.hours ? ' · ' + fmtNum_(p.hours) + ' ч' : '') +
+        (p.weekendDays ? ' · в выходные: ' + salDays_(p.weekendDays) : '');
+      return '<div class="salCard">' +
+        '<div class="salHead"><span class="salName">' + escapeHtml(p.name) + '</span><span class="salSalary">' + money_(p.salary) + ' · день ' + money_(p.dayCost) + '</span></div>' +
+        '<div class="salMeta">' + meta + '</div>' +
+        (rows ? rows + '<div class="salTotal"><span>Оплачено за неотработанное</span><span class="num">' + money_(p.total) + (p.totalPct ? ' · ' + String(p.totalPct).replace('.', ',') + '%' : '') + '</span></div>'
+          : '<div class="salClean">Без пропусков и опозданий</div>') +
+        '</div>';
+    }).join('');
+  }
+  document.getElementById('goToSalaryBtn').addEventListener('click', showSalaryScreen);
+  document.getElementById('salaryBackLink').addEventListener('click', function () { showAdminScreen(); });
+  document.getElementById('salPrev').addEventListener('click', function () { salMonth = salShift_(salMonth, -1); loadSalary_(); });
+  document.getElementById('salNext').addEventListener('click', function () { if (salMonth < salThisMonth_()) { salMonth = salShift_(salMonth, 1); loadSalary_(); } });
   document.getElementById('alModePeople').addEventListener('click', function () { alMode = 'people'; renderAbsLog(); });
   document.getElementById('alModeFeed').addEventListener('click', function () { alMode = 'feed'; renderAbsLog(); });
   document.getElementById('absLogBackLink').addEventListener('click', function () { showAdminScreen(); });
