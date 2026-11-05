@@ -748,22 +748,85 @@
     border: 1px solid var(--border);
   }
 
-  /* Уже загруженные фото (сетка побольше, для просмотра результата) */
+  /* Уже загруженные фото: лента, листается пальцем вбок; нажатие —
+     просмотр на весь экран (#photoViewer). */
   .photoGrid {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 8px;
-    margin: 8px 0;
+    margin: 8px -4px;
+    padding: 2px 4px 6px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    /* лента не должна расширять экран: своя ширина — 0, растягивается по карточке */
+    width: 0;
+    min-width: calc(100% + 8px);
+    box-sizing: border-box;
   }
-  .photoGrid a { display: block; }
-  .photoGrid img {
-    width: 110px;
-    height: 110px;
-    object-fit: cover;
-    border-radius: 10px;
+  .photoGrid::-webkit-scrollbar { display: none; }
+  .photoGrid .ph {
+    flex: 0 0 auto;
+    width: 148px;
+    height: 148px;
+    border-radius: 12px;
     border: 1px solid var(--border);
-    display: block;
+    background: var(--border);
+    overflow: hidden;
+    scroll-snap-align: start;
+    cursor: zoom-in;
+    position: relative;
   }
+  .photoGrid .ph img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity .25s; }
+  .photoGrid .ph img.ok { opacity: 1; }
+  .photoGrid .ph .phN {
+    position: absolute; right: 6px; bottom: 6px; font-size: 11px; font-weight: 600;
+    color: #fff; background: rgba(0,0,0,.45); border-radius: 8px; padding: 1px 6px;
+  }
+
+  /* Просмотр фото на весь экран: свайп влево/вправо — соседние фото,
+     вниз — закрыть, двойное касание — увеличить. */
+  #photoViewer {
+    position: fixed; inset: 0; z-index: 300; background: #000;
+    display: none; touch-action: pan-x;
+    transition: background-color .2s;
+  }
+  #photoViewer.open { display: block; }
+  #pvTrack {
+    position: absolute; inset: 0; display: flex; overflow-x: auto; overflow-y: hidden;
+    scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior: contain;
+    transition: transform .2s;
+  }
+  #pvTrack::-webkit-scrollbar { display: none; }
+  #pvTrack.zoomed { overflow-x: hidden; }
+  .pvSlide {
+    flex: 0 0 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always;
+    display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;
+  }
+  .pvSlide.zoom { overflow: auto; display: block; }
+  .pvSlide img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+  .pvSlide.zoom img { max-width: none; max-height: none; width: 250%; }
+  .pvSlide .spinner { position: absolute; left: 50%; top: 50%; margin: -10px 0 0 -10px; }
+  .pvBar {
+    position: absolute; left: 0; right: 0; top: 0; z-index: 2;
+    display: flex; align-items: center; gap: 8px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 18px;
+    background: linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,0));
+    color: #fff; font-weight: 600; font-size: 15px;
+  }
+  .pvBar span { flex: 1; }
+  .pvBar button {
+    width: 42px; height: 42px; padding: 0; margin: 0; border-radius: 50%;
+    background: rgba(255,255,255,.14); color: #fff; display: flex; align-items: center; justify-content: center;
+  }
+  .pvBar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .pvDots {
+    position: absolute; left: 0; right: 0; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 2;
+    display: flex; justify-content: center; gap: 6px; pointer-events: none;
+  }
+  .pvDots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.35); transition: background .2s, transform .2s; }
+  .pvDots i.on { background: #fff; transform: scale(1.3); }
 
   .taskStatusBadge {
     display: inline-block;
@@ -2176,6 +2239,16 @@
   </div>
 
   <!-- ===== Нижняя навигация ===== -->
+  <div id="photoViewer" aria-modal="true" role="dialog">
+    <div id="pvTrack"></div>
+    <div class="pvBar">
+      <span id="pvCount"></span>
+      <button id="pvOpenBtn" type="button" aria-label="Открыть оригинал" title="Открыть оригинал (скачать)"><svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M5 19h14"/></svg></button>
+      <button id="pvCloseBtn" type="button" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="pvDots" id="pvDots"></div>
+  </div>
+
   <div id="bottomNav">
     <div id="bottomNavInner">
       <button id="navTasksBtn" type="button" class="navItem">
@@ -2911,6 +2984,8 @@
   }
 
   window.addEventListener('popstate', function (e) {
+    if (pvEl && pvEl.classList.contains('open')) { closePhotoViewer_(true); return; }
+    if (e.state && e.state.pv) return; // вернулись на запись просмотра фото — экран тот же
     isBackNavigation = true;
     try {
       var state = e.state;
@@ -4048,6 +4123,36 @@
     }).join('');
   }
 
+  // ===== Фото: лента и просмотр на весь экран =====
+  // В таблице лежат ссылки на страницу файла Google Диска — сама картинка
+  // берётся по id (lh3 — быстрый адрес Google для публичных файлов, запасной —
+  // миниатюра Диска).
+  function driveId_(url) {
+    var m = /\/d\/([\w-]{20,})/.exec(url) || /[?&]id=([\w-]{20,})/.exec(url);
+    return m ? m[1] : '';
+  }
+  function photoSrc_(url, w) {
+    var id = driveId_(url);
+    return id ? 'https://lh3.googleusercontent.com/d/' + id + '=w' + w : url;
+  }
+  function photoFallback_(url, w) {
+    var id = driveId_(url);
+    return id ? 'https://drive.google.com/thumbnail?id=' + id + '&sz=w' + w : '';
+  }
+  function photoImgHtml_(url, w, extra) {
+    return '<img src="' + escapeHtml(photoSrc_(url, w)) + '" data-fb="' + escapeHtml(photoFallback_(url, w)) + '" alt=""' + (extra || '') +
+      ' onload="this.classList.add(\'ok\')" onerror="if(this.dataset.fb&&this.src!==this.dataset.fb){this.src=this.dataset.fb}else{this.classList.add(\'ok\')}">';
+  }
+  function photoStripInner_(urls) {
+    var list = escapeHtml(JSON.stringify(urls));
+    return urls.map(function (url, i) {
+      return '<div class="ph" data-pv="' + list + '" data-i="' + i + '">' + photoImgHtml_(url, 400, ' loading="lazy"') +
+        (urls.length > 1 ? '<span class="phN">' + (i + 1) + '/' + urls.length + '</span>' : '') + '</div>';
+    }).join('');
+  }
+  function photoStripHtml_(urls) {
+    return '<div class="photoGrid" style="display:flex;">' + photoStripInner_(urls) + '</div>';
+  }
   function renderPhotoGrid(containerEl, urls) {
     if (!urls || !urls.length) {
       containerEl.innerHTML = '';
@@ -4055,10 +4160,108 @@
       return;
     }
     containerEl.style.display = 'flex';
-    containerEl.innerHTML = urls.map(function (url) {
-      return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(url) + '" alt=""></a>';
-    }).join('');
+    containerEl.innerHTML = photoStripInner_(urls);
   }
+  document.addEventListener('click', function (e) {
+    var ph = e.target.closest && e.target.closest('.ph[data-pv]');
+    if (!ph) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { openPhotoViewer_(JSON.parse(ph.getAttribute('data-pv')), Number(ph.getAttribute('data-i')) || 0); } catch (err) {}
+  }, true);
+
+  var pvEl = document.getElementById('photoViewer'), pvTrack = document.getElementById('pvTrack');
+  var pvUrls = [], pvIndex = 0, pvHistory = false;
+  function pvUpdate_() {
+    var i = Math.round(pvTrack.scrollLeft / Math.max(1, pvTrack.clientWidth));
+    pvIndex = Math.max(0, Math.min(pvUrls.length - 1, i));
+    document.getElementById('pvCount').textContent = pvUrls.length > 1 ? (pvIndex + 1) + ' / ' + pvUrls.length : '';
+    var dots = document.getElementById('pvDots').children;
+    for (var k = 0; k < dots.length; k++) dots[k].classList.toggle('on', k === pvIndex);
+  }
+  function openPhotoViewer_(urls, index) {
+    pvUrls = urls || []; if (!pvUrls.length) return;
+    pvTrack.classList.remove('zoomed');
+    pvTrack.innerHTML = pvUrls.map(function (u) {
+      return '<div class="pvSlide"><span class="spinner"></span>' + photoImgHtml_(u, 1600, ' draggable="false"') + '</div>';
+    }).join('');
+    Array.prototype.forEach.call(pvTrack.querySelectorAll('img'), function (img) {
+      img.addEventListener('load', function () { var sp = img.parentNode.querySelector('.spinner'); if (sp) sp.remove(); });
+    });
+    document.getElementById('pvDots').innerHTML = pvUrls.length > 1 ? pvUrls.map(function () { return '<i></i>'; }).join('') : '';
+    pvEl.style.backgroundColor = '';
+    pvTrack.style.transform = '';
+    pvEl.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    pvTrack.style.scrollSnapType = 'none';
+    pvTrack.scrollLeft = (index || 0) * pvTrack.clientWidth;
+    pvTrack.style.scrollSnapType = '';
+    pvUpdate_();
+    // кнопка «назад» телефона закрывает просмотр, а не уводит с экрана
+    try { history.pushState(Object.assign({}, history.state || {}, { pv: 1 }), '', location.hash); pvHistory = true; } catch (e) { pvHistory = false; }
+  }
+  function closePhotoViewer_(fromPop) {
+    if (!pvEl.classList.contains('open')) return;
+    pvEl.classList.remove('open');
+    pvTrack.innerHTML = '';
+    document.body.style.overflow = '';
+    if (pvHistory && !fromPop) { pvHistory = false; history.back(); }
+    pvHistory = false;
+  }
+  var pvScrollT = null;
+  pvTrack.addEventListener('scroll', function () { clearTimeout(pvScrollT); pvScrollT = setTimeout(pvUpdate_, 60); pvUpdate_(); });
+  document.getElementById('pvCloseBtn').addEventListener('click', function () { closePhotoViewer_(false); });
+  document.getElementById('pvOpenBtn').addEventListener('click', function () {
+    var u = pvUrls[pvIndex]; if (!u) return;
+    var BR = nativePlugin_('Browser');
+    if (BR) BR.open({ url: u }); else window.open(u, '_blank');
+  });
+  // двойное касание — увеличить/уменьшить в точке касания
+  var pvLastTap = 0;
+  pvTrack.addEventListener('click', function (e) {
+    var now = Date.now(), slide = e.target.closest('.pvSlide');
+    if (!slide || now - pvLastTap > 300) { pvLastTap = now; return; }
+    pvLastTap = 0;
+    var img = slide.querySelector('img');
+    if (slide.classList.contains('zoom')) {
+      slide.classList.remove('zoom'); pvTrack.classList.remove('zoomed');
+    } else if (img) {
+      var r = img.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+      slide.classList.add('zoom'); pvTrack.classList.add('zoomed');
+      slide.scrollLeft = Math.max(0, img.offsetWidth * fx - slide.clientWidth / 2);
+      slide.scrollTop = Math.max(0, img.offsetHeight * fy - slide.clientHeight / 2);
+    }
+  });
+  // свайп вниз — закрыть
+  var pvY0 = null, pvX0 = 0, pvDy = 0, pvVertical = null;
+  pvTrack.addEventListener('touchstart', function (e) {
+    if (pvTrack.classList.contains('zoomed') || e.touches.length !== 1) { pvY0 = null; return; }
+    pvY0 = e.touches[0].clientY; pvX0 = e.touches[0].clientX; pvDy = 0; pvVertical = null;
+  }, { passive: true });
+  pvTrack.addEventListener('touchmove', function (e) {
+    if (pvY0 === null) return;
+    var dy = e.touches[0].clientY - pvY0, dx = e.touches[0].clientX - pvX0;
+    if (pvVertical === null && (Math.abs(dy) > 8 || Math.abs(dx) > 8)) pvVertical = Math.abs(dy) > Math.abs(dx);
+    if (!pvVertical) return;
+    pvDy = Math.max(0, dy);
+    pvTrack.style.transition = 'none';
+    pvTrack.style.transform = 'translateY(' + pvDy + 'px)';
+    pvEl.style.backgroundColor = 'rgba(0,0,0,' + Math.max(0.3, 1 - pvDy / 400) + ')';
+  }, { passive: true });
+  pvTrack.addEventListener('touchend', function () {
+    if (pvY0 === null) return;
+    pvY0 = null;
+    pvTrack.style.transition = '';
+    if (pvVertical && pvDy > 110) { closePhotoViewer_(false); return; }
+    pvTrack.style.transform = '';
+    pvEl.style.backgroundColor = '';
+  });
+  document.addEventListener('keydown', function (e) {
+    if (!pvEl.classList.contains('open')) return;
+    if (e.key === 'Escape') closePhotoViewer_(false);
+    if (e.key === 'ArrowRight') pvTrack.scrollBy({ left: pvTrack.clientWidth, behavior: 'smooth' });
+    if (e.key === 'ArrowLeft') pvTrack.scrollBy({ left: -pvTrack.clientWidth, behavior: 'smooth' });
+  });
 
   var taskBeforePhotosBase64 = [];
   var taskAfterPhotosBase64 = [];
@@ -4801,24 +5004,18 @@
   function adminTaskDetailHtml(t) {
     var html = '';
     if (t.taskPhotos && t.taskPhotos.length) {
-      html += '<div class="taskDate">Фото задачи:</div><div class="photoGrid" style="display:flex;">' +
-        t.taskPhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
-        '</div>';
+      html += '<div class="taskDate">Фото задачи:</div>' + photoStripHtml_(t.taskPhotos);
     }
     if (t.status !== 'Актуальна') {
       html += '<div class="taskDate" style="margin-top:6px;">Начато: ' + escapeHtml(t.startedAt || '—') + '</div>';
       if (t.beforePhotos && t.beforePhotos.length) {
-        html += '<div class="taskDate">Фото до:</div><div class="photoGrid" style="display:flex;">' +
-          t.beforePhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
-          '</div>';
+        html += '<div class="taskDate">Фото до:</div>' + photoStripHtml_(t.beforePhotos);
       }
     }
     if (t.status === 'Выполнена') {
       html += '<div class="taskDate" style="margin-top:6px;">Выполнено: ' + escapeHtml(t.completedAt || '—') + '</div>';
       if (t.afterPhotos && t.afterPhotos.length) {
-        html += '<div class="taskDate">Фото после:</div><div class="photoGrid" style="display:flex;">' +
-          t.afterPhotos.map(function (u) { return '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(u) + '" alt=""></a>'; }).join('') +
-          '</div>';
+        html += '<div class="taskDate">Фото после:</div>' + photoStripHtml_(t.afterPhotos);
       }
       if (t.comment) {
         html += '<div class="taskDate" style="margin-top:4px;">Комментарий сотрудника:</div><div class="adminTaskText">' + escapeHtml(t.comment) + '</div>';
