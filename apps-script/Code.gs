@@ -1,3 +1,8 @@
+// v61: точность GPS в журналах. В «Учет» (колонка K) и в «Попытки вне
+//      объекта» (колонка J) пишется точность, которую сообщил телефон (±м), в
+//      «Попытках» ещё и тип телефона (колонка K) — чтобы отличать «человек
+//      был не на месте» от «телефон неверно определил место» (типично для
+//      iPhone с выключенной «Точной геопозицией» или в помещении без GPS).
 // v60: надёжность отметок. eventId — повторная отправка той же отметки
 //      (досылка, повтор при обрыве связи) возвращает прежний результат и не
 //      создаёт дубль. Досылка — до 72 ч. Название объекта из QR сверяется
@@ -1081,6 +1086,12 @@ function reverseGeocodeOsm_(lat, lng) {
 // Лист для аудита заблокированных попыток (вне радиуса объекта) — чтобы
 // админ при желании мог посмотреть, кто и когда пытался отметиться не на
 // месте. Создаётся сам при первой такой попытке.
+// Точность, которую сообщил телефон (радиус в метрах), или '' если её нет.
+function geoAccuracy_(geo) {
+  var a = geo && Number(geo.accuracy);
+  return a && isFinite(a) && a > 0 ? Math.round(a) : '';
+}
+
 function logGeoBlockedAttempt_(name, phone, objectName, eventType, geo, distanceMeters) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1096,10 +1107,13 @@ function logGeoBlockedAttempt_(name, phone, objectName, eventType, geo, distance
     // Обратное геокодирование делается здесь же, синхронно — попытка уже
     // отклонена и эта запись лишь для последующего просмотра админом, так
     // что секунда-другая на запрос к геокодеру ни на что не влияет.
+    if (String(sheet.getRange(1, 10).getValue()).trim() === '') sheet.getRange(1, 10).setValue('Точность GPS (м)');
+    if (String(sheet.getRange(1, 11).getValue()).trim() === '') sheet.getRange(1, 11).setValue('Телефон');
     var nearestAddress = geo ? reverseGeocodeAddress_(geo.lat, geo.lng) : '';
     sheet.appendRow([
       new Date(), name, phone, objectName, eventType, distanceMeters,
-      geo ? geo.lat : '', geo ? geo.lng : '', nearestAddress
+      geo ? geo.lat : '', geo ? geo.lng : '', nearestAddress,
+      geoAccuracy_(geo), geo && geo.device ? String(geo.device).slice(0, 40) : ''
     ]);
   } catch (e) {
     // аудит не критичен — если не получилось записать, саму отметку это
@@ -2276,9 +2290,11 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId) 
       geo && typeof geo.lat === 'number' ? geo.lat : '',
       geo && typeof geo.lng === 'number' ? geo.lng : '',
       geoDistance,
-      delayed ? receivedAt : ''
+      delayed ? receivedAt : '',
+      geoAccuracy_(geo)
     ]);
     var newRow = sheet.getLastRow();
+    if (geoAccuracy_(geo) !== '' && String(sheet.getRange(1, 11).getValue()).trim() === '') sheet.getRange(1, 11).setValue('Точность GPS (м)');
     sheet.getRange(newRow, 3).setNumberFormat('@').setValue(String(phone));
     if (delayed) {
       if (String(sheet.getRange(1, 10).getValue()).trim() === '') sheet.getRange(1, 10).setValue('Получено сервером (досланная отметка)');

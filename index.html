@@ -318,7 +318,11 @@
     animation: geoAlertShake 0.5s;
     box-shadow: 0 0 0 4px rgba(234,67,53,0.12);
   }
-  .geoAlertIcon { font-size: 40px; line-height: 1; margin-bottom: 6px; }
+  .geoAlertIcon { line-height: 1; margin-bottom: 6px; }
+  .geoAlertHint { text-align: left; font-size: 13px; line-height: 1.45; margin: 10px 0 4px; color: var(--text); font-weight: 400; }
+  .geoAlertHint p { margin: 0 0 6px; }
+  .geoAlertHint ol { margin: 0; padding-left: 18px; }
+  .geoAlertHint li { margin-bottom: 4px; }
   .geoAlertTitle {
     font-weight: 800;
     font-size: 17px;
@@ -2415,16 +2419,43 @@
   }
   // Ключ для сравнения названий объектов из QR: без лишних пробелов, регистра и «ё».
   function objKey_(s) { return String(s || '').replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase().replace(/ё/g, 'е'); }
+  // Геолокация: не одна точка, а лучшая за несколько секунд. Первая точка
+  // у телефона часто грубая (по вышкам/Wi-Fi, погрешность сотни метров —
+  // километры), через пару секунд подключается GPS. Берём самую точную,
+  // заканчиваем раньше, как только точность стала хорошей (≤ 35 м).
+  var GEO_GOOD_ACCURACY = 35, GEO_COLLECT_MS = 12000;
+  var geoBestFix = null; // последняя лучшая точка — на случай, если ждать дольше нельзя
+  function geoDevice_() {
+    var ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPhone';
+    if (/Android/.test(ua)) return 'Android';
+    return 'другое';
+  }
   function getGeoPositionPromise() {
     return new Promise(function (resolve) {
       if (!navigator.geolocation) { resolve(null); return; }
-      navigator.geolocation.getCurrentPosition(
-        function (pos) {
-          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
-        },
-        function () { resolve(null); },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-      );
+      var best = null, done = false, watchId = null, timer = null;
+      function finish() {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (watchId !== null) { try { navigator.geolocation.clearWatch(watchId); } catch (e) {} }
+        resolve(best);
+      }
+      function onFix(pos) {
+        var fix = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, device: geoDevice_(), at: Date.now() };
+        if (!best || !(fix.accuracy >= best.accuracy)) best = fix;
+        geoBestFix = best;
+        if (best.accuracy <= GEO_GOOD_ACCURACY) finish();
+      }
+      timer = setTimeout(finish, GEO_COLLECT_MS);
+      try {
+        watchId = navigator.geolocation.watchPosition(onFix, function (err) {
+          // Нет разрешения — ждать бессмысленно; прочие ошибки (таймаут,
+          // временно нет сигнала) — продолжаем ждать до конца окна.
+          if (err && err.code === 1) finish();
+        }, { enableHighAccuracy: true, maximumAge: 0, timeout: GEO_COLLECT_MS });
+      } catch (e) { finish(); }
     });
   }
 
@@ -7756,7 +7787,17 @@
     startWaitIndicator(statusEl, 'Отправляем отметку «' + eventType + '» — не закрывайте приложение');
     // Геолокация обычно уже готова (запрошена при открытии экрана); ждём не больше 8 с.
     geoWaiting = true;
-    var geoWait = new Promise(function (r) { setTimeout(function () { r(null); }, 8000); });
+    // Достаточно точная точка (±100 м) уже есть — отправляем сразу, не дожидаясь
+    // идеальной. Иначе ждём до 8 с и берём лучшую из полученных (не старше минуты).
+    var geoWait = new Promise(function (r) {
+      var started = Date.now();
+      (function poll() {
+        var fresh = geoBestFix && Date.now() - geoBestFix.at < 60000 ? geoBestFix : null;
+        if (fresh && fresh.accuracy <= 100) return r(fresh);
+        if (Date.now() - started >= 8000) return r(fresh);
+        setTimeout(poll, 300);
+      })();
+    });
     Promise.race([prefetchGeo_(), geoWait]).then(function (geo) {
       geoWaiting = false;
       var cur = loadPending_();
@@ -7791,7 +7832,7 @@
             });
           }
         } else if (res.reason === 'geo_blocked') {
-          showGeoBlockedAlert(res.message || 'Вы находитесь не на объекте.');
+          showGeoBlockedAlert(res.message || 'Вы находитесь не на объекте.', ev.geo);
         } else {
           showSendFailure((isResend ? 'Отметка «' + ev.eventType + '» от ' + hhmm_(ev.clientTime) + ' не принята: ' : '') +
             (res.message || 'сервер отклонил отметку без пояснения'));
@@ -7830,7 +7871,28 @@
   // отметиться далеко от объекта (а не обычного сбоя сети/сервера, для
   // которого есть showSendFailure). Цель — чтобы человек, один раз увидев
   // это, больше не пытался отметиться по фото QR-кода из другого места.
-  function showGeoBlockedAlert(message) {
+  // Подсказка, как включить точную геолокацию, — по типу телефона.
+  function geoFixHintHtml_(geo) {
+    var dev = geoDevice_(), acc = geo && Number(geo.accuracy);
+    var accLine = '';
+    if (acc && isFinite(acc)) {
+      accLine = acc >= 1000
+        ? '<p><b>Телефон передал только приблизительное место (точность ±' + (acc / 1000).toFixed(1).replace('.', ',') + ' км).</b> Скорее всего, выключена точная геопозиция.</p>'
+        : '<p>Точность, которую сообщил телефон: ±' + Math.round(acc) + ' м.</p>';
+    }
+    var steps = dev === 'iPhone'
+      ? '<li>Настройки → Конфиденциальность и безопасность → Службы геолокации → <b>Сайты Safari</b> (и браузер, через который открыто приложение): «При использовании приложения», переключатель <b>«Точная геопозиция» — включён</b>.</li>' +
+        '<li>Включите <b>Wi-Fi</b>, даже если не подключены к сети: iPhone по нему точнее определяет место в помещении.</li>'
+      : dev === 'Android'
+        ? '<li>Настройки → Местоположение: включено, <b>«Точное определение местоположения»</b> (Google) — включено.</li>' +
+          '<li>Для браузера разрешение «Местоположение» — <b>точное</b>, а не приблизительное.</li>' +
+          '<li>Включите <b>Wi-Fi</b>, даже без подключения к сети.</li>'
+        : '<li>Разрешите сайту точное местоположение и включите Wi-Fi.</li>';
+    return '<div class="geoAlertHint">' + accLine +
+      '<p>Если вы на объекте, а отметка не проходит:</p><ol>' + steps +
+      '<li>Подойдите ближе к окну или выйдите на улицу и повторите через 10–20 секунд.</li></ol></div>';
+  }
+  function showGeoBlockedAlert(message, geo) {
     if (navigator.vibrate) {
       try { navigator.vibrate([250, 100, 250, 100, 400]); } catch (e) {}
     }
@@ -7838,12 +7900,15 @@
     statusEl.className = 'error geoBlockedAlert';
     statusEl.innerHTML =
       '<div class="geoAlertBox">' +
-        '<div class="geoAlertIcon">🚫</div>' +
+        '<div class="geoAlertIcon"><svg viewBox="0 0 24 24" width="40" height="40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><path d="M9.5 7.5l5 5M14.5 7.5l-5 5"/></svg></div>' +
         '<div class="geoAlertTitle">ОТМЕТКА НЕ ЗАСЧИТАНА</div>' +
         '<div class="geoAlertText">' + message + '</div>' +
+        geoFixHintHtml_(geo) +
         '<div class="geoAlertNote">Система фиксирует такие попытки. Отметиться можно только находясь непосредственно на объекте.</div>' +
         '<button id="geoAlertAckBtn" type="button">Понятно</button>' +
       '</div>';
+    // Следующая попытка — с новыми координатами, а не с этой неудачной точкой.
+    geoPositionPromise = null; geoBestFix = null;
     document.getElementById('geoAlertAckBtn').addEventListener('click', function () {
       setStatus('');
       checkShiftStatus();
