@@ -1623,6 +1623,13 @@
         <button id="goToAdminAbsencesBtn" type="button" class="hasDot">Согласовать отгулы</button>
         <button id="goToAbsLogBtn" type="button" style="background: var(--blue); margin-top: 10px;">Журнал отгулов</button>
       </div>
+
+      <!-- Сервер (Apps Script) обновляется сам после каждой выкладки на
+           GitHub; кнопка — ручная проверка, если что-то пошло не так. -->
+      <div class="card">
+        <button id="adminSelfUpdateBtn" type="button" style="background: var(--muted);">Обновить сервер</button>
+        <div id="adminSelfUpdateStatus" class="ctHint" style="margin-top:8px;">Обычно не нужно: сервер обновляется сам через минуту после выкладки.</div>
+      </div>
     </div>
   </div>
 
@@ -4454,6 +4461,22 @@
   });
   document.getElementById('adminRatesBackLink').addEventListener('click', function () {
     showAdminScreen();
+  });
+  document.getElementById('adminSelfUpdateBtn').addEventListener('click', function () {
+    var btn = this, st = document.getElementById('adminSelfUpdateStatus');
+    btn.disabled = true;
+    st.style.color = 'var(--muted)';
+    st.textContent = 'Проверяю обновление на GitHub… это может занять до минуты';
+    apiPost({ action: 'adminSelfUpdate', phone: currentUser && currentUser.phone }).then(function (res) {
+      btn.disabled = false;
+      var ok = res && res.status === 'ok';
+      st.style.color = ok ? 'var(--green)' : 'var(--red)';
+      st.textContent = (res && res.message) || (ok ? 'Готово' : 'Сервер не ответил — возможно, на нём ещё версия без самообновления (ниже v62)');
+    }).catch(function (err) {
+      btn.disabled = false;
+      st.style.color = 'var(--red)';
+      st.textContent = 'Ошибка соединения: ' + err;
+    });
   });
   document.getElementById('goToAdminObjectsBtn').addEventListener('click', function () {
     showAdminObjectsScreen();

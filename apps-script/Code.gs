@@ -1,3 +1,10 @@
+// v62: самообновление с GitHub. Скрипт сам берёт новый Code.gs из
+//      репозитория sevmodmobiles/sevmodmobiles (ветка main), подменяет свой
+//      файл Code и обновляет текущее развертывание веб-приложения (адрес не
+//      меняется). Запуск: GitHub после каждой выкладки дёргает
+//      ?action=selfUpdate&sha=<коммит>; кнопка «Обновить сервер» в панели
+//      администратора; резервная проверка раз в час. Журнал — лист
+//      «Обновления скрипта». Разовая настройка — функция setupAutoUpdate.
 // v61: точность GPS в журналах. В «Учет» (колонка K) и в «Попытки вне
 //      объекта» (колонка J) пишется точность, которую сообщил телефон (±м), в
 //      «Попытках» ещё и тип телефона (колонка K) — чтобы отличать «человек
@@ -382,6 +389,12 @@ function doGet(e) {
     return jsonOutput({ status: 'ok', objects: getValidObjects() });
   }
 
+  // Самообновление (v62): GitHub вызывает после каждой выкладки Code.gs.
+  // Секрет не нужен — код берётся только из нашего репозитория.
+  if (params.action === 'selfUpdate') {
+    return jsonOutput(selfUpdate_(params.src === 'github' ? 'GitHub (выкладка)' : 'запрос по адресу', params.sha));
+  }
+
   // Обычное открытие ссылки в браузере — отдаём саму страницу приложения.
   // Файл "App.html" должен быть добавлен в проект Apps Script (см. инструкцию).
   return HtmlService.createHtmlOutputFromFile('App')
@@ -407,6 +420,11 @@ function doPost(e) {
     }
     if (data.action === 'status') {
       return jsonOutput(getShiftStatus(data.phone));
+    }
+    if (data.action === 'adminSelfUpdate') {
+      var suAuth = adminAuth_(data.phone);
+      if (!suAuth.ok) return jsonOutput({ status: 'error', message: suAuth.error });
+      return jsonOutput(selfUpdate_('кнопка в приложении', ''));
     }
     if (data.action === 'adminCheckAccess') {
       return jsonOutput(adminCheckAccess(data.phone));
@@ -4147,4 +4165,180 @@ function adminExpenseLookups(phone) {
     banks: expenseRefColumn_(lists.ref, 4).length ? expenseRefColumn_(lists.ref, 4) : EXPENSE_DEFAULT_BANKS,
     refSheet: EXPENSE_REF_SHEET_NAME
   };
+}
+
+// ===================== САМООБНОВЛЕНИЕ С GITHUB (v62) =====================
+// Как работает: берём apps-script/Code.gs из репозитория (по конкретному
+// коммиту, если он известен — такой адрес никогда не отдаёт старую копию из
+// кеша), сравниваем с текущим файлом Code проекта и, если он другой,
+// через Apps Script API: подменяем файл → создаём версию → переводим на неё
+// текущее развертывание веб-приложения. Остальные файлы проекта (App.html,
+// манифест) не трогаются. Нужны: включённый «Google Apps Script API»
+// (script.google.com/home/usersettings) и права script.projects /
+// script.deployments в манифесте (см. setupAutoUpdate).
+var SELF_UPDATE = {
+  REPO: 'sevmodmobiles/sevmodmobiles',
+  BRANCH: 'main',
+  PATH: 'apps-script/Code.gs',
+  FILE: 'Code',
+  // Развертывание, через которое работает приложение (тот же ID, что в
+  // API_URL в index.html). Можно переопределить свойством скрипта
+  // SELF_UPDATE_DEPLOYMENT_ID.
+  DEPLOYMENT_ID: 'AKfycbzWDeFOuO9xkmHW9Q0xoAS6jBJpd-yhVGxE6hMts1FoPDnWUROKP4MaB9mx7NjbdDTA',
+  LOG_SHEET: 'Обновления скрипта'
+};
+
+function selfUpdateDeploymentId_() {
+  return PropertiesService.getScriptProperties().getProperty('SELF_UPDATE_DEPLOYMENT_ID') || SELF_UPDATE.DEPLOYMENT_ID;
+}
+
+function selfUpdateVersion_(code) {
+  var m = String(code || '').match(/^\s*\/\/\s*(v\d+)/);
+  return m ? m[1] : '?';
+}
+
+// Вызов Apps Script API от имени владельца скрипта.
+function scriptApi_(method, url, body) {
+  var opts = {
+    method: method,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  };
+  if (body) { opts.contentType = 'application/json'; opts.payload = JSON.stringify(body); }
+  var res = UrlFetchApp.fetch(url, opts);
+  var code = res.getResponseCode(), text = res.getContentText();
+  var json = {};
+  try { json = text ? JSON.parse(text) : {}; } catch (e) {}
+  if (code >= 300) {
+    var msg = (json.error && json.error.message) || text.slice(0, 300);
+    if (/Apps Script API|has not been used|is disabled|not enabled/i.test(msg)) {
+      msg = 'Не включён «Google Apps Script API»: откройте script.google.com/home/usersettings и включите его. (' + msg + ')';
+    } else if (code === 403 || code === 401) {
+      msg = 'Нет прав на изменение проекта — проверьте oauthScopes в appsscript.json и запустите setupAutoUpdate. (' + msg + ')';
+    }
+    throw new Error(msg);
+  }
+  return json;
+}
+
+// Код с GitHub. Без известного коммита узнаём последний коммит ветки, а если
+// GitHub не ответил — берём файл с ветки с параметром против кеша.
+function fetchGithubCode_(sha) {
+  if (!/^[0-9a-f]{40}$/.test(String(sha || ''))) {
+    sha = '';
+    try {
+      var r = UrlFetchApp.fetch('https://api.github.com/repos/' + SELF_UPDATE.REPO + '/commits/' + SELF_UPDATE.BRANCH, {
+        headers: { Accept: 'application/vnd.github.sha' }, muteHttpExceptions: true
+      });
+      var t = r.getContentText().trim();
+      if (r.getResponseCode() === 200 && /^[0-9a-f]{40}$/.test(t)) sha = t;
+    } catch (e) {}
+  }
+  var url = 'https://raw.githubusercontent.com/' + SELF_UPDATE.REPO + '/' + (sha || SELF_UPDATE.BRANCH) + '/' + SELF_UPDATE.PATH +
+    (sha ? '' : '?nocache=' + Date.now());
+  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) throw new Error('GitHub не отдал файл (код ' + res.getResponseCode() + ')');
+  return { code: res.getContentText('UTF-8'), sha: sha };
+}
+
+function selfUpdateLog_(source, fromVer, toVer, sha, result, message) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName(SELF_UPDATE.LOG_SHEET);
+    if (!sh) {
+      sh = ss.insertSheet(SELF_UPDATE.LOG_SHEET);
+      sh.appendRow(['Когда', 'Кто запустил', 'Было', 'Стало', 'Коммит', 'Результат', 'Подробности']);
+      sh.setFrozenRows(1);
+    }
+    sh.appendRow([new Date(), source, fromVer, toVer, sha ? String(sha).slice(0, 7) : '', result, message || '']);
+  } catch (e) {}
+}
+
+function selfUpdate_(source, sha) {
+  sha = String(sha || '').trim().toLowerCase();
+  var props = PropertiesService.getScriptProperties();
+  // Повторный вызов с уже применённым коммитом — ничего не делаем.
+  if (sha && sha === props.getProperty('SELF_UPDATE_SHA')) {
+    return { status: 'ok', result: 'same', message: 'Этот коммит уже применён' };
+  }
+  // Без коммита (кнопка, проверка по часам) — не чаще раза в 30 секунд.
+  var cache = CacheService.getScriptCache();
+  if (!sha) {
+    if (cache.get('selfupd_recent')) return { status: 'ok', result: 'skipped', message: 'Проверка уже была меньше 30 секунд назад' };
+    cache.put('selfupd_recent', '1', 30);
+  }
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return { status: 'error', message: 'Идёт другое обновление, попробуйте через минуту' };
+  var fromVer = '?', toVer = '?';
+  try {
+    var gh = fetchGithubCode_(sha);
+    var code = gh.code;
+    toVer = selfUpdateVersion_(code);
+    if (toVer === '?' || code.length < 20000 || code.indexOf('function doPost') < 0 || code.indexOf('function selfUpdate_') < 0) {
+      throw new Error('Файл на GitHub не похож на рабочий Code.gs — обновление отменено');
+    }
+    var sid = ScriptApp.getScriptId();
+    var base = 'https://script.googleapis.com/v1/projects/' + sid;
+    var content = scriptApi_('get', base + '/content');
+    var files = (content.files || []).map(function (f) { return { name: f.name, type: f.type, source: f.source }; });
+    var target = files.filter(function (f) { return f.name === SELF_UPDATE.FILE && f.type === 'SERVER_JS'; })[0];
+    if (!target) throw new Error('В проекте нет файла «' + SELF_UPDATE.FILE + '.gs»');
+    fromVer = selfUpdateVersion_(target.source);
+    if (target.source === code) {
+      if (gh.sha) props.setProperty('SELF_UPDATE_SHA', gh.sha);
+      return { status: 'ok', result: 'same', version: fromVer, message: 'Уже установлена последняя версия (' + fromVer + ')' };
+    }
+    target.source = code;
+    scriptApi_('put', base + '/content', { files: files });
+    var ver = scriptApi_('post', base + '/versions', { description: toVer + ' (авто, ' + (gh.sha ? gh.sha.slice(0, 7) : 'main') + ')' });
+    var depId = selfUpdateDeploymentId_();
+    scriptApi_('put', base + '/deployments/' + depId, {
+      deploymentConfig: {
+        scriptId: sid,
+        versionNumber: ver.versionNumber,
+        manifestFileName: 'appsscript',
+        description: toVer + ' (авто)'
+      }
+    });
+    if (gh.sha) props.setProperty('SELF_UPDATE_SHA', gh.sha);
+    var note = 'версия проекта №' + ver.versionNumber;
+    if (ver.versionNumber >= 180) note += ' — версий много, при необходимости удалите старые в «Истории проекта»';
+    selfUpdateLog_(source, fromVer, toVer, gh.sha, 'обновлено', note);
+    return { status: 'ok', result: 'updated', from: fromVer, version: toVer, message: 'Сервер обновлён: ' + fromVer + ' → ' + toVer };
+  } catch (err) {
+    var msg = String(err && err.message || err);
+    selfUpdateLog_(source, fromVer, toVer, sha, 'ошибка', msg);
+    return { status: 'error', message: 'Не удалось обновить сервер: ' + msg };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Резервная проверка раз в час (на случай, если вызов от GitHub не дошёл).
+function autoUpdateHourly() {
+  selfUpdate_('проверка раз в час', '');
+}
+
+// РАЗОВАЯ НАСТРОЙКА: запустите эту функцию в редакторе (кнопка «Выполнить»)
+// и разрешите доступ. Создаёт ежечасную проверку и проверяет, что у скрипта
+// есть права менять свой код и развертывание.
+function setupAutoUpdate() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'autoUpdateHourly') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('autoUpdateHourly').timeBased().everyHours(1).create();
+  var sid = ScriptApp.getScriptId(), base = 'https://script.googleapis.com/v1/projects/' + sid;
+  var msg;
+  try {
+    scriptApi_('get', base + '/content');
+    var dep = scriptApi_('get', base + '/deployments/' + selfUpdateDeploymentId_());
+    var v = dep.deploymentConfig && dep.deploymentConfig.versionNumber;
+    msg = 'Готово: автообновление включено. Развертывание найдено (сейчас версия проекта №' + v + ').';
+    selfUpdateLog_('setupAutoUpdate', '', '', '', 'настроено', msg);
+  } catch (e) {
+    msg = 'Проверка не прошла: ' + (e && e.message || e);
+    selfUpdateLog_('setupAutoUpdate', '', '', '', 'ошибка', msg);
+  }
+  Logger.log(msg);
+  return msg;
 }

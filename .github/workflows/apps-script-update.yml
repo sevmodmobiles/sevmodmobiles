@@ -1,0 +1,29 @@
+# После каждой выкладки apps-script/Code.gs в main просим скрипт в Google
+# обновиться (Code.gs v62+, функция selfUpdate_). Скрипт сам заберёт этот
+# коммит с GitHub — никаких ключей здесь не нужно.
+name: Apps Script — обновить сервер
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps-script/Code.gs']
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Запросить обновление у скрипта
+        env:
+          EXEC_URL: https://script.google.com/macros/s/AKfycbzWDeFOuO9xkmHW9Q0xoAS6jBJpd-yhVGxE6hMts1FoPDnWUROKP4MaB9mx7NjbdDTA/exec
+        run: |
+          for i in 1 2 3; do
+            body=$(curl -sSL --max-time 120 "$EXEC_URL?action=selfUpdate&src=github&sha=$GITHUB_SHA" || true)
+            echo "Ответ: $body"
+            if echo "$body" | grep -q '"status":"ok"'; then exit 0; fi
+            # До разовой настройки (версия ниже v62) скрипт отдаёт страницу, а не JSON.
+            if echo "$body" | grep -qi '<html'; then echo "Скрипт ещё не умеет самообновляться (нужна разовая установка v62)"; exit 0; fi
+            sleep 20
+          done
+          echo "Скрипт не подтвердил обновление — см. лист «Обновления скрипта»"
+          exit 1
