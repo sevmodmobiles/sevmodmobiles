@@ -1,3 +1,10 @@
+// v71: незакрытые смены. Раз в час (тот же триггер, что автообновление)
+//      смены, открытые в прошлые дни, закрываются автоматически по концу
+//      смены объекта (нет графика — 18:00), с пометкой в «Учет» (колонка I)
+//      «автозакрытие (уход не отмечен)». getShiftStatus отдаёт missed —
+//      приложение утром спрашивает «во сколько ушли?», closeMissedShift
+//      ставит названное время (пометка «уход со слов сотрудника»). В кабинете
+//      у таких дней — значок.
 // v70: время открытой смены без отметки в карте — из последнего «Прихода»
 //      этого телефона в журнале «Учет» (а не из склеенного списка дней —
 //      v69 ошибался, если в тот же день смена уже открывалась и закрывалась);
@@ -446,6 +453,9 @@ function doPost(e) {
     }
     if (data.action === 'status') {
       return jsonOutput(getShiftStatus(data.phone));
+    }
+    if (data.action === 'closeMissedShift') {
+      return jsonOutput(closeMissedShift(data.phone, data.time));
     }
     if (data.action === 'adminServerVersion') {
       return jsonOutput(adminServerVersion(data.phone));
@@ -2315,6 +2325,17 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId) 
         };
       }
     } else { // 'Уход'
+      // Уход по смене с прошлого дня, когда смена давно должна была
+      // закончиться: не закрываем текущим временем (получились бы сутки),
+      // а просим назвать время ухода (приложение покажет окно).
+      if (openShift.open && !delayed) {
+        var osSince = openShift.since || openShiftSinceFromLog_(phone);
+        if (osSince && new Date(osSince) < startOfDay_(new Date()) &&
+            new Date().getTime() - expectedShiftEnd_(openShift.objectName, osSince).getTime() > 2 * 3600000) {
+          return { status: 'error', reason: 'missed_checkout', missed: missedCheckoutFor_(phone, openShift),
+            message: 'Вы не отметили уход ' + Utilities.formatDate(new Date(osSince), 'Europe/Moscow', 'dd.MM') + '. Укажите, во сколько закончили работу.' };
+        }
+      }
       if (!openShift.open) {
         return {
           status: 'error',
@@ -2534,7 +2555,9 @@ function findEmployeeByPhone(phone) {
 // и наоборот — "Отметить приход", если смена уже идёт.
 function getShiftStatus(phone) {
   var openShift = getOpenShift(phone);
-  return { status: 'ok', shiftOpen: openShift.open, openObjectName: openShift.objectName, openSince: openShift.since || null };
+  var res = { status: 'ok', shiftOpen: openShift.open, openObjectName: openShift.objectName, openSince: openShift.since || null };
+  try { res.missed = missedCheckoutFor_(phone, openShift); } catch (e) { res.missed = null; }
+  return res;
 }
 
 // v33: к статистике кабинета добавляются отгулы/больничные со статусом
@@ -2606,7 +2629,11 @@ function getMyStatsCore_(phone) {
         shifts[dateStr].lateMinutes = (lateVal === '' || lateVal === null || lateVal === undefined) ? '' : Number(lateVal);
       }
     } else if (eventType === 'Уход') {
-      if (!shifts[dateStr].departure || ts > shifts[dateStr].departure) shifts[dateStr].departure = ts;
+      if (!shifts[dateStr].departure || ts > shifts[dateStr].departure) {
+        shifts[dateStr].departure = ts;
+        var note = String(data[i][8] || '');
+        shifts[dateStr].closeNote = note.indexOf('автозакрытие') === 0 ? 'auto' : (note.indexOf('уход со слов') === 0 ? 'manual' : '');
+      }
       if (!shifts[dateStr].arrival && !shifts[dateStr].object && rowObject) shifts[dateStr].object = rowObject;
     }
   }
@@ -2663,6 +2690,7 @@ function getMyStatsCore_(phone) {
       hours: hoursStr,
       pay: payForDay,
       object: s.object || '',
+      closeNote: s.closeNote || '',
       lateMinutes: lateMinutes // null - нет данных (например старая запись до внедрения смен), 0 - вовремя/раньше, >0 - опоздание в минутах
     });
   });
@@ -4232,7 +4260,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v70';
+var CODE_VERSION = 'v71';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4405,6 +4433,7 @@ function adminServerVersion(adminPhone) {
 
 // Резервная проверка раз в час (на случай, если вызов от GitHub не дошёл).
 function autoUpdateHourly() {
+  try { autoCloseStaleShifts_(); } catch (e) { /* не мешаем автообновлению */ }
   selfUpdate_('проверка раз в час', '');
 }
 
@@ -4648,4 +4677,129 @@ function openShiftSinceFromLog_(phone) {
     }
   }
   return null;
+}
+
+// ===================== НЕЗАКРЫТЫЕ СМЕНЫ (v71) =====================
+var MISSED_PROP_KEY = 'missedCheckouts_v1';
+var AUTO_CLOSE_NOTE = 'автозакрытие (уход не отмечен)';
+var DEFAULT_DAY_END = '18:00';
+function clockStr_(d) { return Utilities.formatDate(d, 'Europe/Moscow', 'HH:mm'); }
+function startOfDay_(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function atTime_(day, hhmm) { var p = String(hhmm).split(':'); return new Date(day.getFullYear(), day.getMonth(), day.getDate(), Number(p[0]), Number(p[1])); }
+function loadMissed_() { try { return JSON.parse(PropertiesService.getScriptProperties().getProperty(MISSED_PROP_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function saveMissed_(m) { PropertiesService.getScriptProperties().setProperty(MISSED_PROP_KEY, JSON.stringify(m)); }
+
+// Когда должна была закончиться смена, начатая в since на объекте objectName:
+// конец ближайшей по началу смены графика объекта (через полночь — на
+// следующий день), иначе 18:00 того же дня, а для прихода после 18:00 — +8 ч.
+function expectedShiftEnd_(objectName, since) {
+  var arr = new Date(since);
+  var shifts = (getObjectShifts()[objectName] || []);
+  var nearest = findNearestShift(arr, shifts);
+  if (nearest) {
+    var sh = shifts.filter(function (x) { return x.start === nearest.shiftStart; })[0];
+    if (sh && sh.end) {
+      var end = atTime_(arr, sh.end);
+      if (timeStrToMinutes(sh.end) <= timeStrToMinutes(sh.start) || end <= arr) end.setDate(end.getDate() + 1);
+      if (end > arr) return end;
+    }
+  }
+  var e = atTime_(arr, DEFAULT_DAY_END);
+  return e > arr ? e : new Date(arr.getTime() + 8 * 3600000);
+}
+
+// Незакрытая смена сотрудника для утреннего вопроса: ещё открытая с
+// прошлого дня или закрытая автоматически, но не подтверждённая.
+function missedCheckoutFor_(phone, openShift) {
+  var p = normalizePhone_(phone);
+  var today = startOfDay_(new Date());
+  if (openShift && openShift.open) {
+    var since = openShift.since || openShiftSinceFromLog_(p);
+    if (since && new Date(since) < today) {
+      var end = expectedShiftEnd_(openShift.objectName, since);
+      if (end < new Date()) {
+        return { kind: 'open', date: toIsoDate_(new Date(since)), objectName: openShift.objectName,
+          arrival: clockStr_(new Date(since)), suggest: clockStr_(end) };
+      }
+    }
+    return null;
+  }
+  var m = loadMissed_()[p];
+  return m ? { kind: 'auto', date: m.date, objectName: m.objectName, arrival: m.arrival, suggest: m.autoTime } : null;
+}
+
+// Раз в час: закрывает смены, открытые в прошлые дни, если ожидаемый конец
+// смены прошёл больше 2 часов назад.
+function autoCloseStaleShifts_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return 0;
+  try {
+    var map = getOpenShiftsMap_(), missed = loadMissed_(), now = new Date(), today = startOfDay_(now), closed = 0;
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
+    if (!sheet) return 0;
+    Object.keys(map).forEach(function (p) {
+      var e = map[p];
+      var since = e.since || openShiftSinceFromLog_(p);
+      if (!since || new Date(since) >= today) return;
+      var end = expectedShiftEnd_(e.objectName, since);
+      if (now.getTime() - end.getTime() < 2 * 3600000) return;
+      var emp = findEmployeeByPhone(p);
+      sheet.appendRow([end, emp ? emp.name : '', p, e.objectName, 'Уход', '', '', '', AUTO_CLOSE_NOTE, now]);
+      var row = sheet.getLastRow();
+      sheet.getRange(row, 3).setNumberFormat('@').setValue(String(p));
+      sheet.getRange(row, 10).setNumberFormat('dd.MM.yyyy HH:mm:ss');
+      missed[p] = { row: row, date: toIsoDate_(new Date(since)), objectName: e.objectName, arrival: clockStr_(new Date(since)),
+        since: since, autoTime: clockStr_(end), autoDate: toIsoDate_(end) };
+      delete map[p];
+      closed++;
+    });
+    if (closed) { saveOpenShiftsMap_(map); saveMissed_(missed); }
+    return closed;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Сотрудник назвал время ухода (HH:mm) для незакрытой смены.
+function closeMissedShift(phone, time) {
+  var p = normalizePhone_(phone);
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(time || ''))) return { status: 'error', message: 'Укажите время в формате ЧЧ:ММ' };
+  var emp = findEmployeeByPhone(p);
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
+    var map = getOpenShiftsMap_(), missed = loadMissed_(), today = startOfDay_(new Date());
+    var entry = map[p];
+    if (entry) {
+      var since = entry.since || openShiftSinceFromLog_(p);
+      if (!since || new Date(since) >= today) return { status: 'error', message: 'Сегодняшняя смена ещё идёт — отметьте уход, отсканировав QR-код' };
+      var t = atTime_(new Date(since), time);
+      if (t <= new Date(since)) t.setDate(t.getDate() + 1); // смена через полночь
+      if (t > new Date() || t - since > 20 * 3600000) return { status: 'error', message: 'Проверьте время: смена получается длиннее 20 часов' };
+      sheet.appendRow([t, emp.name, p, entry.objectName, 'Уход', '', '', '', 'уход со слов сотрудника (не отметил)', new Date()]);
+      var row = sheet.getLastRow();
+      sheet.getRange(row, 3).setNumberFormat('@').setValue(String(p));
+      sheet.getRange(row, 10).setNumberFormat('dd.MM.yyyy HH:mm:ss');
+      delete map[p]; saveOpenShiftsMap_(map);
+      return { status: 'ok', closed: toIsoDate_(t), time: time };
+    }
+    var m = missed[p];
+    if (!m) return { status: 'error', message: 'Незакрытых смен нет' };
+    var r = sheet.getRange(m.row, 1, 1, 9).getValues()[0];
+    if (normalizePhone_(r[2]) !== p || r[4] !== 'Уход' || String(r[8]).indexOf('автозакрытие') !== 0) {
+      delete missed[p]; saveMissed_(missed);
+      return { status: 'error', message: 'Запись автозакрытия не найдена — сообщите руководителю время ухода' };
+    }
+    var t2 = atTime_(new Date(m.since), time);
+    if (t2 <= new Date(m.since)) t2.setDate(t2.getDate() + 1);
+    if (t2 - m.since > 20 * 3600000) return { status: 'error', message: 'Проверьте время: смена получается длиннее 20 часов' };
+    sheet.getRange(m.row, 1).setValue(t2);
+    sheet.getRange(m.row, 9).setValue('уход со слов сотрудника (автозакрытие исправлено)');
+    delete missed[p]; saveMissed_(missed);
+    return { status: 'ok', closed: toIsoDate_(t2), time: time };
+  } finally {
+    lock.releaseLock();
+  }
 }

@@ -447,6 +447,8 @@
   .dayRow .arrivalTime { font-weight: 600; }
   .dayRow .arrivalTime.late { color: var(--red); }
   .dayRow .arrivalTime.onTime { color: var(--green); }
+  .lateBadge.closeAuto { background: rgba(234,67,53,.12); color: var(--red); }
+  .lateBadge.closeManual { background: rgba(107,114,128,.15); color: var(--muted); }
   .lateBadge {
     flex-shrink: 0;
     font-size: 11px;
@@ -2229,6 +2231,21 @@
   </div>
 
   <!-- Подтверждение опасных действий (удаление) -->
+  <!-- Утренний вопрос: вчера не отметил уход — во сколько закончил работу? -->
+  <div id="missedModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="msTitle">
+    <div class="modalBox">
+      <h2 id="msTitle" style="margin-top:0; color: var(--text);">Вы не отметили уход</h2>
+      <div id="msText" class="modalText" style="font-size:15px; margin-bottom:12px;"></div>
+      <label for="msTime">Во сколько закончили работу?</label>
+      <input id="msTime" type="time" step="300">
+      <div id="msStatus"></div>
+      <div class="calBtns">
+        <button id="msLater" type="button" class="calCancel">Позже</button>
+        <button id="msSave" type="button">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
   <div id="confirmModal" class="modalOverlay" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle">
     <div class="modalBox">
       <h2 id="cfTitle" style="margin-top:0; color: var(--text);">Удалить?</h2>
@@ -4760,6 +4777,8 @@
       // а наверху справа, на месте часов, — сумма к оплате за эту смену.
       var timesText = arrivalHtml + ' – ' + (d.departure || '—') +
         ' · <span class="dayHoursInline">' + (d.hours || '—') + '</span>';
+      if (d.closeNote === 'auto') badgeHtml += ' <span class="lateBadge closeAuto" title="Уход не отмечен — смена закрыта автоматически">уход не отмечен</span>';
+      else if (d.closeNote === 'manual') badgeHtml += ' <span class="lateBadge closeManual" title="Время ухода указано сотрудником">уход со слов</span>';
 
       // Под датой — объект (зелёная плашка), время смены — справа.
       row.innerHTML =
@@ -8305,6 +8324,44 @@
     } catch (e) {}
     return null;
   }
+  // ===== Утренний вопрос: незакрытая смена прошлого дня =====
+  // Сервер (v71+) сообщает о смене, открытой в прошлый день и не закрытой
+  // (или закрытой ночью автоматически). Спрашиваем реальное время ухода.
+  var missedShown = null;
+  function showMissedModal_(m, force) {
+    var key = 'sevmod_missed_later_' + m.date;
+    try { if (!force && sessionStorage.getItem(key)) return; } catch (e) {}
+    missedShown = m;
+    var d = m.date.split('-');
+    document.getElementById('msText').innerHTML =
+      '<b>' + d[2] + '.' + d[1] + '</b> · ' + escapeHtml(m.objectName || '') + ' · приход в ' + escapeHtml(m.arrival || '—') +
+      (m.kind === 'auto' ? '<br><span class="ctHint">Смена закрыта автоматически в ' + escapeHtml(m.suggest) + '. Если ушли в другое время — исправьте.</span>' : '');
+    document.getElementById('msTime').value = m.suggest || '18:00';
+    var st = document.getElementById('msStatus'); st.textContent = ''; st.className = '';
+    document.getElementById('msSave').disabled = false;
+    document.getElementById('missedModal').classList.add('open');
+  }
+  document.getElementById('msLater').addEventListener('click', function () {
+    if (missedShown) { try { sessionStorage.setItem('sevmod_missed_later_' + missedShown.date, '1'); } catch (e) {} }
+    document.getElementById('missedModal').classList.remove('open');
+  });
+  document.getElementById('msSave').addEventListener('click', function () {
+    var btn = this, st = document.getElementById('msStatus'), t = document.getElementById('msTime').value;
+    if (!/^\d{2}:\d{2}$/.test(t)) { st.textContent = 'Укажите время'; st.className = 'error'; return; }
+    btn.disabled = true; st.textContent = 'Сохраняю…'; st.className = '';
+    apiPost({ action: 'closeMissedShift', phone: currentUser && currentUser.phone, time: t }).then(function (res) {
+      btn.disabled = false;
+      if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не удалось сохранить'; st.className = 'error'; return; }
+      document.getElementById('missedModal').classList.remove('open');
+      var d = (res.closed || missedShown.date).split('-');
+      toast_('✓ Уход за ' + d[2] + '.' + d[1] + ' записан: ' + t, 'ok');
+      missedShown = null;
+      shiftStatusKnown = false;
+      checkShiftStatus();
+      refreshStatsCache(currentUser.phone, function (fresh) { if (screenStats.style.display === 'block') renderStats(fresh); });
+    }).catch(function (err) { btn.disabled = false; st.textContent = 'Нет связи: ' + err; st.className = 'error'; });
+  });
+
   function checkShiftStatus() {
     if (!currentUser || !currentUser.phone) {
       applyActionButtonState(false, null);
@@ -8343,6 +8400,7 @@
         if (res.status === 'ok' || typeof res.shiftOpen === 'boolean') saveShiftCache_(shiftOpen, openObjectName);
         applyActionButtonState(shiftOpen, openObjectName);
         renderShiftBanner(shiftOpen, openObjectName);
+        if (res.missed) showMissedModal_(res.missed, false);
       })
       .catch(function () {
         if (!shiftStatusKnown) {
@@ -8451,6 +8509,12 @@
           refreshStatsCache(ev.phone, function (fresh) {
             if (screenStats.style.display === 'block') renderStats(fresh);
           });
+        } else if (res.reason === 'missed_checkout') {
+          // Уход по смене с прошлого дня — просим назвать время, а не закрываем «сейчас».
+          setStatus('');
+          applyActionButtonState(currentShiftOpen, currentOpenObjectName);
+          if (res.missed) showMissedModal_(res.missed, true);
+          else showSendFailure(res.message || 'Укажите время ухода за прошлый день');
         } else if (res.reason === 'geo_blocked') {
           showGeoBlockedAlert(res.message || 'Вы находитесь не на объекте.', ev.geo);
         } else {
