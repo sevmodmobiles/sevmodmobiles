@@ -567,6 +567,9 @@
   .timingBox table { width: 100%; border-collapse: collapse; margin-top: 8px; }
   .timingBox td { padding: 4px 0; border-bottom: 1px solid var(--border); }
   .timingBox td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 8px; }
+  .nativeGoogleBtn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: 100%; max-width: 300px; margin: 0;
+    background: #fff; color: #1f1f1f; border: 1px solid #dadce0; font-weight: 600; }
+  .nativeGoogleBtn svg { width: 20px; height: 20px; flex: none; }
   .salMonthNav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
   .salMonthNav button { width: 44px; height: 40px; margin: 0; padding: 0; background: transparent; color: var(--text); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; }
   .salMonthNav button:disabled { opacity: .35; }
@@ -2941,6 +2944,10 @@
   function isNativeApp_() {
     try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); } catch (e) { return false; }
   }
+  // Нативный модуль приложения (Capacitor) или null в браузере.
+  function nativePlugin_(name) {
+    try { return isNativeApp_() && window.Capacitor.Plugins && window.Capacitor.Plugins[name] || null; } catch (e) { return null; }
+  }
   function isStandalone_() {
     return isNativeApp_() || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
   }
@@ -3119,6 +3126,37 @@
 
   // Красная точка-счётчик на кнопке "Мои задачи" — показывает, сколько
   // сейчас невыполненных задач, и сама исчезает, когда их не осталось.
+  // ===== Обновление Android-приложения (оболочки) =====
+  // Экраны и логика обновляются сами (берутся с сайта). Сама оболочка —
+  // только новой сборкой: раз в сутки сверяем номер установленной сборки с
+  // последней на GitHub и предлагаем обновить.
+  var APK_URL = 'https://github.com/sevmodmobiles/sevmodmobiles/releases/latest/download/sevmod.apk';
+  function checkAppUpdate_() {
+    var APP = nativePlugin_('App');
+    if (!APP) return;
+    var last = 0;
+    try { last = Number(localStorage.getItem('sevmod_apk_check') || 0); } catch (e) {}
+    if (Date.now() - last < 20 * 3600 * 1000) return;
+    try { localStorage.setItem('sevmod_apk_check', String(Date.now())); } catch (e) {}
+    Promise.all([APP.getInfo(), fetch('https://api.github.com/repos/sevmodmobiles/sevmodmobiles/releases/latest', { cache: 'no-store' }).then(function (r) { return r.json(); })])
+      .then(function (v) {
+        var mine = Number(v[0] && v[0].build) || 0;
+        var m = /android-v(\d+)/.exec((v[1] && v[1].tag_name) || '');
+        var latest = m ? Number(m[1]) : 0;
+        if (latest > mine) showAppUpdate_(latest);
+      }).catch(function () {});
+  }
+  function showAppUpdate_(build) {
+    askConfirm('Новая версия приложения', 'Доступна новая версия SEVMOD для Android (сборка ' + build + '). Нажмите «Обновить», скачайте файл и подтвердите установку — все данные сохранятся.',
+      'Обновить', function () {
+        closeConfirm();
+        var BR = nativePlugin_('Browser');
+        if (BR) BR.open({ url: APK_URL }); else window.open(APK_URL, '_blank');
+      });
+    document.getElementById('cfOk').style.background = '';
+  }
+  setTimeout(checkAppUpdate_, 4000);
+
   // ===== Число на иконке приложения (Badging API) =====
   // Новые задачи + (для администратора) заявки на отгул на согласовании.
   // Работает у установленного приложения: iPhone (iOS 16.4+, после разрешения
@@ -3359,7 +3397,40 @@
     updateGoogleGateVisibility();
   }
 
+  // В Android-приложении вход Google внутри встроенного браузера запрещён —
+  // используем системное окно выбора аккаунта (Credential Manager). Токен
+  // выпускается для того же веб-клиента, сервер проверяет его как обычно.
+  var nativeGoogleReady = null;
+  function initNativeGoogleSignIn_() {
+    var SL = nativePlugin_('SocialLogin');
+    var box = document.getElementById('googleSignInButton');
+    if (!SL || !box) return false;
+    box.innerHTML = '<button type="button" class="nativeGoogleBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.5l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 13.9a6 6 0 0 1 0-3.8V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg>Зарегистрироваться через Google</button>';
+    box.querySelector('button').addEventListener('click', function () {
+      var btn = this, errEl = document.getElementById('googleSignInError');
+      btn.disabled = true; if (errEl) errEl.textContent = '';
+      if (!nativeGoogleReady) {
+        nativeGoogleReady = SL.initialize({ google: { webClientId: GOOGLE_CLIENT_ID, mode: 'online', skipAuthOnlyAuthorizationAfterSignIn: true } });
+      }
+      nativeGoogleReady.then(function () {
+        return SL.login({ provider: 'google', options: {} });
+      }).then(function (res) {
+        btn.disabled = false;
+        var token = res && res.result && res.result.idToken;
+        if (!token) throw new Error('Google не вернул подтверждение');
+        handleGoogleCredential({ credential: token });
+      }).catch(function (err) {
+        btn.disabled = false;
+        nativeGoogleReady = null;
+        var m = String(err && err.message || err);
+        if (/cancel/i.test(m)) return;
+        if (errEl) errEl.textContent = 'Не удалось войти через Google: ' + m;
+      });
+    });
+    return true;
+  }
   function initGoogleSignIn() {
+    if (initNativeGoogleSignIn_()) return;
     if (!window.google || !google.accounts || !google.accounts.id) {
       var errEl = document.getElementById('googleSignInError');
       if (errEl) {
@@ -4276,19 +4347,37 @@
   }
   document.getElementById('qrClose').addEventListener('click', closeObjectQr_);
   document.getElementById('qrModal').addEventListener('click', function (e) { if (e.target === this) closeObjectQr_(); });
+  // В приложении «Скачать» и «Печать» — через системное «Поделиться»
+  // (сохранить в файлы/галерею, отправить, распечатать через сервис печати).
+  function nativeShareQr_() {
+    var FS = nativePlugin_('Filesystem'), SH = nativePlugin_('Share');
+    if (!FS || !SH || !qrCurrent) return false;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var b64 = String(reader.result).split(',')[1];
+      FS.writeFile({ path: qrFileName_(qrCurrent.name), data: b64, directory: 'CACHE' })
+        .then(function (w) { return SH.share({ title: 'QR-код: ' + qrCurrent.name, files: [w.uri], dialogTitle: 'Сохранить или отправить QR-код' }); })
+        .catch(function (e) { if (!/cancel/i.test(String(e && e.message || e))) toast_('Не удалось открыть «Поделиться»: ' + (e && e.message || e), 'error'); });
+    };
+    reader.readAsDataURL(qrCurrent.blob);
+    return true;
+  }
   document.getElementById('qrDownload').addEventListener('click', function () {
     if (!qrCurrent) return;
+    if (nativeShareQr_()) return;
     var a = document.createElement('a');
     a.href = qrCurrent.url; a.download = qrFileName_(qrCurrent.name);
     document.body.appendChild(a); a.click(); a.remove();
   });
   document.getElementById('qrShare').addEventListener('click', function () {
     if (!qrCurrent) return;
+    if (nativeShareQr_()) return;
     var file = new File([qrCurrent.blob], qrFileName_(qrCurrent.name), { type: 'image/png' });
     navigator.share({ files: [file], title: 'QR-код: ' + qrCurrent.name }).catch(function () {});
   });
   document.getElementById('qrPrint').addEventListener('click', function () {
     if (!qrCurrent) return;
+    if (nativeShareQr_()) { toast_('Для печати выберите в списке «Печать» или приложение принтера', 'info'); return; }
     var area = document.getElementById('qrPrintArea');
     area.innerHTML = '';
     var pimg = new Image();
