@@ -1,3 +1,9 @@
+// v73: push-уведомления в Android-приложении (Firebase Cloud Messaging).
+//      Лист «Push-токены», registerPush/unregisterPush, sendPush_. Пуши:
+//      новая задача → исполнителю; задача выполнена → админам; заявка на
+//      отгул → админам; решение → сотруднику; напоминание «вы не отметили
+//      уход» через 15 мин после конца смены (триггер pushTick); автозакрытие
+//      смены → сотруднику. Разовая настройка — setupPush (см. ниже).
 // v72: Wi-Fi офиса. В «Объекты» колонка K «Wi-Fi офиса (IP)» — внешние
 //      IP офисной сети (через запятую), задаются из приложения кнопкой
 //      «Запомнить Wi-Fi» (adminSetObjectWifi). Телефон присылает свой
@@ -462,6 +468,15 @@ function doPost(e) {
     }
     if (data.action === 'status') {
       return jsonOutput(getShiftStatus(data.phone));
+    }
+    if (data.action === 'registerPush') {
+      return jsonOutput(registerPush(data.phone, data.token, data.platform, data.oldToken));
+    }
+    if (data.action === 'unregisterPush') {
+      return jsonOutput(unregisterPush(data.phone, data.token));
+    }
+    if (data.action === 'adminTestPush') {
+      return jsonOutput(adminTestPush(data.phone));
     }
     if (data.action === 'closeMissedShift') {
       return jsonOutput(closeMissedShift(data.phone, data.time));
@@ -1878,6 +1893,7 @@ function adminCreateTask(adminPhone, targetPhone, name, objectName, text, photos
   row[TASK_COL.COMPLETED - 1] = '';
   sheet.appendRow(row);
 
+  sendPush_([phone], 'Новая задача — ' + trimmedObject, taskText.slice(0, 200), { screen: 'taskDetail', taskId: id, tag: 'task-' + id });
   return { status: 'ok', id: id };
 }
 
@@ -2009,6 +2025,10 @@ function completeTask(phone, taskId, afterPhotosBase64, comment) {
       sheet.getRange(rowNum, TASK_COL.PHOTOS_AFTER).setValue(photoUrls.join(', '));
       sheet.getRange(rowNum, TASK_COL.COMMENT).setValue(String(comment || '').trim());
       sheet.getRange(rowNum, TASK_COL.COMPLETED).setValue(new Date());
+      sendPush_(adminPhones_().filter(function (a) { return a !== normalizedPhone; }),
+        'Задача выполнена — ' + (data[i][TASK_COL.NAME - 1] || ''),
+        (data[i][TASK_COL.OBJECT - 1] ? data[i][TASK_COL.OBJECT - 1] + ': ' : '') + String(data[i][TASK_COL.TEXT - 1] || '').slice(0, 150),
+        { screen: 'taskManage', tag: 'task-' + taskId });
       return { status: 'ok' };
     }
   }
@@ -2890,6 +2910,9 @@ function submitAbsence(phone, kind, dateFrom, dateTo, timeFrom, timeTo, comment)
   } finally {
     lock.releaseLock();
   }
+  sendPush_(adminPhones_().filter(function (a) { return a !== normalizePhone_(emp.phone); }),
+    'Заявка на согласование', emp.name + ': ' + typeLabel.toLowerCase() + ' ' + absPeriodText_(from, isPartial ? null : to, tFrom, tTo),
+    { screen: 'adminAbsences', tag: 'abs-pending' });
   return getMyAbsences(phone, year);
 }
 
@@ -2986,13 +3009,14 @@ function adminDecideAbsence(phone, id, decision) {
   var newStatus = decision === 'approve' ? ABS_STATUS.APPROVED
     : (decision === 'reject' ? ABS_STATUS.REJECTED : null);
   if (!newStatus) return { status: 'error', message: 'Неизвестное решение' };
-  var row = Number(id);
+  var row = Number(id), req = null;
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
     var sheet = getAbsenceSheet_();
     if (!(row >= 2 && row <= sheet.getLastRow())) return { status: 'error', message: 'Заявка не найдена' };
     var admin = findEmployeeByPhone_(auth.phone);
+    req = sheet.getRange(row, 1, 1, ABS_COL.TIME_TO).getValues()[0];
     sheet.getRange(row, ABS_COL.STATUS, 1, 3).setValues([[
       newStatus, admin ? admin.name : auth.phone, new Date()
     ]]);
@@ -3000,6 +3024,11 @@ function adminDecideAbsence(phone, id, decision) {
     recomputeAbsenceCumulative_(sheet);
   } finally {
     lock.releaseLock();
+  }
+  if (req) {
+    sendPush_([req[ABS_COL.PHONE - 1]], newStatus === ABS_STATUS.APPROVED ? 'Заявка согласована' : 'Заявка не согласована',
+      String(req[ABS_COL.TYPE - 1] || 'Заявка') + ' ' + absPeriodText_(req[ABS_COL.FROM - 1], req[ABS_COL.TO - 1], req[ABS_COL.TIME_FROM - 1], req[ABS_COL.TIME_TO - 1]),
+      { screen: 'absence', tag: 'abs-' + row });
   }
   return adminGetAbsences(phone);
 }
@@ -4280,7 +4309,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v72';
+var CODE_VERSION = 'v73';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4398,6 +4427,12 @@ function selfUpdate_(source, sha) {
     var target = findMainFile_(files);
     if (!target) throw new Error('Не нашёл в проекте основной файл скрипта (Код.gs / Code.gs)');
     fromVer = selfUpdateVersion_(target.source);
+    // appsscript.json уже требует право на уведомления, но владелец его ещё не
+    // подтвердил (setupPush, шаг 2) — новая версия с ним сломала бы приложение.
+    var manFile = files.filter(function (f) { return f.name === 'appsscript'; })[0];
+    if (manFile && manFile.source.indexOf(PUSH_SCOPE) >= 0 && props.getProperty('PUSH_SCOPE_OK') !== '1') {
+      throw new Error('ждёт завершения setupPush: запустите setupPush в редакторе ещё раз и выдайте разрешение');
+    }
     if (target.source === code) {
       if (gh.sha) props.setProperty('SELF_UPDATE_SHA', gh.sha);
       return { status: 'ok', result: 'same', version: fromVer, message: 'Уже установлена последняя версия (' + fromVer + ')' };
@@ -4754,7 +4789,7 @@ function autoCloseStaleShifts_() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) return 0;
   try {
-    var map = getOpenShiftsMap_(), missed = loadMissed_(), now = new Date(), today = startOfDay_(now), closed = 0;
+    var map = getOpenShiftsMap_(), missed = loadMissed_(), now = new Date(), today = startOfDay_(now), closed = 0, notify = [];
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
     if (!sheet) return 0;
     Object.keys(map).forEach(function (p) {
@@ -4770,14 +4805,19 @@ function autoCloseStaleShifts_() {
       sheet.getRange(row, 10).setNumberFormat('dd.MM.yyyy HH:mm:ss');
       missed[p] = { row: row, date: toIsoDate_(new Date(since)), objectName: e.objectName, arrival: clockStr_(new Date(since)),
         since: since, autoTime: clockStr_(end), autoDate: toIsoDate_(end) };
+      notify.push([p, e.objectName, Utilities.formatDate(new Date(since), 'Europe/Moscow', 'dd.MM'), clockStr_(end)]);
       delete map[p];
       closed++;
     });
     if (closed) { saveOpenShiftsMap_(map); saveMissed_(missed); }
-    return closed;
   } finally {
     lock.releaseLock();
   }
+  notify.forEach(function (n) {
+    sendPush_([n[0]], 'Смена закрыта автоматически', 'Вы не отметили уход ' + n[2] + ' («' + n[1] + '»), поставили ' + n[3] +
+      '. Если ушли в другое время — откройте приложение и укажите.', { screen: 'scan', tag: 'shift' });
+  });
+  return closed;
 }
 
 // Сотрудник назвал время ухода (HH:mm) для незакрытой смены.
@@ -4860,4 +4900,259 @@ function adminSetObjectWifi(adminPhone, objectName, ip, mode) {
     return { status: 'ok', wifiIps: list };
   }
   return { status: 'error', message: 'Объект с таким названием не найден' };
+}
+
+// ===================== PUSH-УВЕДОМЛЕНИЯ (v73) =====================
+// Android-приложение присылает свой FCM-токен (registerPush), токены лежат в
+// листе «Push-токены». Отправка — Firebase Cloud Messaging HTTP v1 от имени
+// владельца скрипта (нужна область firebase.messaging — её добавляет и
+// подтверждает setupPush). Любая ошибка отправки только записывается в
+// свойство PUSH_LAST_ERROR и никогда не ломает основное действие.
+var PUSH_SHEET_NAME = 'Push-токены';
+var PUSH_HEADERS = ['Телефон', 'ФИО', 'Токен', 'Платформа', 'Обновлено'];
+var PUSH_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
+var PUSH_REMIND_KEY = 'pushReminded_v1';
+
+function pushSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(PUSH_SHEET_NAME);
+  if (!sh) {
+    sh = ss.insertSheet(PUSH_SHEET_NAME);
+    sh.getRange(1, 1, 1, PUSH_HEADERS.length).setValues([PUSH_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.getRange('A:A').setNumberFormat('@');
+  }
+  return sh;
+}
+
+function pushRows_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PUSH_SHEET_NAME);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().map(function (r, i) {
+    return { row: i + 2, phone: normalizePhone_(r[0]), token: String(r[2] || '') };
+  });
+}
+
+function deletePushRows_(rows) {
+  if (!rows.length) return;
+  var sh = pushSheet_();
+  rows.sort(function (a, b) { return b - a; }).forEach(function (r) { sh.deleteRow(r); });
+}
+
+function registerPush(phone, token, platform, oldToken) {
+  var p = normalizePhone_(phone);
+  var emp = p && findEmployeeByPhone(p);
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
+  token = String(token || '').trim();
+  if (token.length < 20 || token.length > 4096) return { status: 'error', message: 'Неверный токен' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var sh = pushSheet_(), rows = pushRows_(), found = 0, drop = [];
+    rows.forEach(function (r) {
+      if (r.token === token) {
+        if (found) { drop.push(r.row); return; }
+        found = r.row;
+      } else if (oldToken && r.token === String(oldToken)) drop.push(r.row);
+    });
+    var vals = [[String(p), emp.name, token, String(platform || 'android').slice(0, 20), new Date()]];
+    if (found) sh.getRange(found, 1, 1, 5).setValues(vals);
+    else { sh.appendRow(vals[0]); sh.getRange(sh.getLastRow(), 1).setNumberFormat('@').setValue(String(p)); }
+    deletePushRows_(drop);
+  } finally {
+    lock.releaseLock();
+  }
+  return { status: 'ok' };
+}
+
+// Выход из аккаунта на телефоне — уведомления на него больше не идут.
+function unregisterPush(phone, token) {
+  token = String(token || '');
+  if (!token) return { status: 'ok' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    deletePushRows_(pushRows_().filter(function (r) { return r.token === token; }).map(function (r) { return r.row; }));
+  } finally {
+    lock.releaseLock();
+  }
+  return { status: 'ok' };
+}
+
+function adminPhones_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 2, sh.getLastRow() - 1, 6).getValues().filter(function (r) {
+    return r[5] === true || String(r[5]).trim().toUpperCase() === 'TRUE';
+  }).map(function (r) { return normalizePhone_(r[0]); }).filter(String);
+}
+
+function fcmProjectId_() {
+  return PropertiesService.getScriptProperties().getProperty('FCM_PROJECT_ID') || '540820593622';
+}
+
+function fcmMessage_(token, title, body, data, validateOnly) {
+  var d = {};
+  Object.keys(data || {}).forEach(function (k) { if (data[k] !== undefined && data[k] !== null) d[k] = String(data[k]); });
+  var msg = {
+    token: token,
+    notification: { title: String(title || '').slice(0, 120), body: String(body || '').slice(0, 400) },
+    data: d,
+    android: {
+      priority: 'HIGH',
+      notification: { channel_id: 'sevmod', icon: 'ic_stat_sevmod', color: '#070453', default_sound: true }
+    }
+  };
+  if (d.tag) msg.android.notification.tag = d.tag;
+  return {
+    url: 'https://fcm.googleapis.com/v1/projects/' + fcmProjectId_() + '/messages:send',
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    payload: JSON.stringify(validateOnly ? { validate_only: true, message: msg } : { message: msg })
+  };
+}
+
+// Отправляет уведомление на все телефоны сотрудников из phones.
+// data.screen — какой экран открыть по нажатию.
+function sendPush_(phones, title, body, data) {
+  var res = { sent: 0, failed: 0, tokens: 0, error: '' };
+  try {
+    var want = {};
+    (phones || []).forEach(function (p) { p = normalizePhone_(p); if (p) want[p] = 1; });
+    var targets = pushRows_().filter(function (r) { return want[r.phone] && r.token; });
+    res.tokens = targets.length;
+    if (!targets.length) return res;
+    var answers = UrlFetchApp.fetchAll(targets.map(function (t) { return fcmMessage_(t.token, title, body, data); }));
+    var dead = [];
+    answers.forEach(function (a, i) {
+      var code = a.getResponseCode(), txt = a.getContentText();
+      if (code === 200) { res.sent++; return; }
+      res.failed++;
+      if (code === 404 || /UNREGISTERED|registration token is not a valid/i.test(txt)) dead.push(targets[i].row);
+      else res.error = 'FCM ' + code + ': ' + txt.slice(0, 300);
+    });
+    if (dead.length) {
+      var lock = LockService.getScriptLock();
+      if (lock.tryLock(10000)) {
+        try {
+          // строки могли сдвинуться — удаляем по токенам, а не по старым номерам строк
+          var deadTok = {};
+          dead.forEach(function (row) { targets.forEach(function (t) { if (t.row === row) deadTok[t.token] = 1; }); });
+          deletePushRows_(pushRows_().filter(function (r) { return deadTok[r.token]; }).map(function (r) { return r.row; }));
+        } finally { lock.releaseLock(); }
+      }
+    }
+  } catch (e) {
+    res.error = String(e && e.message || e);
+  }
+  if (res.error) {
+    try { PropertiesService.getScriptProperties().setProperty('PUSH_LAST_ERROR', new Date().toISOString() + ' ' + res.error); } catch (e2) {}
+  }
+  return res;
+}
+
+function absPeriodText_(from, to, tFrom, tTo) {
+  var f = function (d) { return d ? Utilities.formatDate(new Date(d), 'Europe/Moscow', 'dd.MM') : ''; };
+  var s = f(from);
+  if (to && f(to) !== s) s += '–' + f(to);
+  if (tFrom && tTo) s += ' ' + tFrom + '–' + tTo;
+  return s;
+}
+
+// Каждые 15 минут (pushTick): напоминание тем, у кого смена закончилась
+// 15+ минут назад, а уход не отмечен. Не больше одного раза за смену.
+function remindOpenShifts_() {
+  var map = getOpenShiftsMap_(), keys = Object.keys(map);
+  if (!keys.length) return 0;
+  var props = PropertiesService.getScriptProperties(), done = {};
+  try { done = JSON.parse(props.getProperty(PUSH_REMIND_KEY) || '{}') || {}; } catch (e) { done = {}; }
+  var now = new Date(), sent = 0, changed = false;
+  keys.forEach(function (p) {
+    var e = map[p];
+    var since = e.since || openShiftSinceFromLog_(p);
+    if (!since) return;
+    var key = String(since);
+    if (done[p] === key) return;
+    var end = expectedShiftEnd_(e.objectName, since);
+    var late = now.getTime() - end.getTime();
+    if (late < 15 * 60000 || late > 2 * 3600000) return;
+    sendPush_([p], 'Вы не отметили уход',
+      'Смена на объекте «' + e.objectName + '» закончилась в ' + clockStr_(end) + '. Если вы уже ушли — отсканируйте QR-код или откройте приложение.',
+      { screen: 'scan', tag: 'shift' });
+    done[p] = key; changed = true; sent++;
+  });
+  Object.keys(done).forEach(function (p) { if (!map[p]) { delete done[p]; changed = true; } });
+  if (changed) props.setProperty(PUSH_REMIND_KEY, JSON.stringify(done));
+  return sent;
+}
+
+function pushTick() {
+  try { remindOpenShifts_(); } catch (e) {
+    try { PropertiesService.getScriptProperties().setProperty('PUSH_LAST_ERROR', new Date().toISOString() + ' remind: ' + (e && e.message || e)); } catch (e2) {}
+  }
+}
+
+// Кнопка в панели администратора: тестовое уведомление себе.
+function adminTestPush(adminPhone) {
+  var auth = adminAuth_(adminPhone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  var r = sendPush_([auth.phone], 'Проверка уведомлений SEVMOD', 'Уведомления работают.', { screen: 'admin' });
+  var props = PropertiesService.getScriptProperties();
+  var all = pushRows_(), people = {};
+  all.forEach(function (x) { people[x.phone] = 1; });
+  return { status: 'ok', sent: r.sent, failed: r.failed, tokens: r.tokens, error: r.error,
+    lastError: props.getProperty('PUSH_LAST_ERROR') || '', ready: props.getProperty('PUSH_SCOPE_OK') === '1',
+    devices: all.length, people: Object.keys(people).length };
+}
+
+// РАЗОВАЯ НАСТРОЙКА (запустить в редакторе дважды):
+// 1-й запуск добавляет в appsscript.json право на отправку уведомлений;
+// после него обновите страницу редактора (F5) и запустите setupPush ещё раз —
+// Google попросит разрешение, затем функция проверит связь с Firebase,
+// включит напоминания (каждые 15 минут) и обновит развертывание.
+function setupPush() {
+  var props = PropertiesService.getScriptProperties();
+  var sid = ScriptApp.getScriptId(), base = 'https://script.googleapis.com/v1/projects/' + sid;
+  var content = scriptApi_('get', base + '/content');
+  var files = (content.files || []).map(function (f) { return { name: f.name, type: f.type, source: f.source }; });
+  var man = files.filter(function (f) { return f.name === 'appsscript'; })[0];
+  if (!man) throw new Error('Не нашёл appsscript.json');
+  var j = JSON.parse(man.source);
+  if (!j.oauthScopes || !j.oauthScopes.length) throw new Error('В appsscript.json нет списка oauthScopes');
+  var msg;
+  if (j.oauthScopes.indexOf(PUSH_SCOPE) < 0) {
+    j.oauthScopes.push(PUSH_SCOPE);
+    man.source = JSON.stringify(j, null, 2);
+    props.deleteProperty('PUSH_SCOPE_OK');
+    scriptApi_('put', base + '/content', { files: files });
+    msg = 'Шаг 1 из 2 готов. Обновите страницу редактора (F5), выберите setupPush и снова нажмите «Выполнить» — Google попросит разрешение «отправлять сообщения Firebase Cloud Messaging».';
+    selfUpdateLog_('setupPush', '', '', '', 'шаг 1', msg);
+    Logger.log(msg);
+    return msg;
+  }
+  // Проверка: пробная отправка (validate_only) на заведомо неверный токен.
+  // 400 «not a valid FCM registration token» = права и проект в порядке.
+  var a = UrlFetchApp.fetchAll([fcmMessage_('test-token-0000000000000000000000', 't', 'b', {}, true)])[0];
+  var code = a.getResponseCode(), txt = a.getContentText();
+  var fcmOk = code === 200 || (code === 400 && /INVALID_ARGUMENT|registration token/i.test(txt));
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'pushTick') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('pushTick').timeBased().everyMinutes(15).create();
+  props.setProperty('PUSH_SCOPE_OK', '1');
+  var ver = scriptApi_('post', base + '/versions', { description: CODE_VERSION + ' (setupPush)' });
+  scriptApi_('put', base + '/deployments/' + selfUpdateDeploymentId_(), {
+    deploymentConfig: { scriptId: sid, versionNumber: ver.versionNumber, manifestFileName: 'appsscript', description: CODE_VERSION + ' (setupPush)' }
+  });
+  pushSheet_();
+  if (fcmOk) {
+    msg = 'Готово: уведомления включены (проект Firebase ' + fcmProjectId_() + '), напоминания каждые 15 минут, развертывание обновлено (версия №' + ver.versionNumber + ').';
+  } else {
+    msg = 'Права выданы и развертывание обновлено, но Firebase ответил ошибкой ' + code + ': ' + txt.slice(0, 400) +
+      (code === 403 ? ' — включите «Firebase Cloud Messaging API» в Google Cloud для проекта ' + fcmProjectId_() + '.' : '') +
+      (code === 404 ? ' — проверьте свойство скрипта FCM_PROJECT_ID (ID проекта Firebase).' : '');
+  }
+  selfUpdateLog_('setupPush', '', CODE_VERSION, '', fcmOk ? 'настроено' : 'ошибка', msg);
+  Logger.log(msg);
+  return msg;
 }

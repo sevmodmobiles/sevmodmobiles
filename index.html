@@ -1701,6 +1701,11 @@
         <button id="goToSalaryBtn" type="button" style="background: var(--blue);">Окладники: отчёт</button>
       </div>
 
+      <div class="card" id="pushAdminCard">
+        <button id="adminTestPushBtn" type="button" style="background: var(--blue);">Проверить уведомления</button>
+        <div id="adminTestPushStatus" class="ctHint" style="margin-top:8px;">Отправит тестовое уведомление на ваш телефон (в Android-приложении SEVMOD).</div>
+      </div>
+
       <!-- Сервер (Apps Script) обновляется сам после каждой выкладки на
            GitHub; кнопка — ручная проверка, если что-то пошло не так. -->
       <div class="card">
@@ -2558,7 +2563,10 @@
     adminCreateTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'],
     startTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'], completeTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'],
     submitAbsence: ['getMyAbsences', 'adminGetAbsences', 'adminSalaryReport'], adminDecideAbsence: ['adminGetAbsences', 'getMyAbsences', 'adminSalaryReport'],
-    adminSelfUpdate: ['adminServerVersion']
+    adminSelfUpdate: ['adminServerVersion'],
+    // пришло уведомление: задачи и заявки могли измениться
+    pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
+    registerPush: [], unregisterPush: [], adminTestPush: []
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -3156,6 +3164,74 @@
     document.getElementById('cfOk').style.background = '';
   }
   setTimeout(checkAppUpdate_, 4000);
+
+  // ===== Push-уведомления (Android-приложение) =====
+  // Только в сборке с Firebase (метка SEVMOD-Push в User-Agent). Разрешение
+  // спрашивается один раз; токен телефона уходит на сервер (registerPush) и
+  // повторно — если поменялся, сменился сотрудник или раз в неделю.
+  var PUSH_TOKEN_KEY = 'sevmod_push_token_v1';
+  var pushInited = false, pushPendingData = null;
+  function pushPlugin_() {
+    return /SEVMOD-Push/.test(navigator.userAgent || '') ? nativePlugin_('PushNotifications') : null;
+  }
+  function pushSaved_() {
+    try { return JSON.parse(localStorage.getItem(PUSH_TOKEN_KEY) || 'null') || {}; } catch (e) { return {}; }
+  }
+  function pushOpen_(d) {
+    if (!d || !d.screen) return;
+    if (!currentUser || !currentUser.phone) { pushPendingData = d; return; }
+    var st = { screen: d.screen };
+    if (d.screen === 'taskDetail') { if (d.taskId) st.taskId = d.taskId; else st.screen = 'tasks'; }
+    try { history.pushState(st, '', '#' + st.screen); } catch (e) {}
+    openScreenFromState(st);
+  }
+  function initPush_() {
+    var PN = pushPlugin_();
+    if (!PN || !currentUser || !currentUser.phone) return;
+    if (!pushInited) {
+      pushInited = true;
+      try { PN.createChannel({ id: 'sevmod', name: 'SEVMOD', description: 'Задачи, заявки, напоминания об уходе', importance: 4, visibility: 1, vibration: true }); } catch (e) {}
+      PN.addListener('registration', function (t) {
+        var token = t && t.value, saved = pushSaved_();
+        if (!token || !currentUser || !currentUser.phone) return;
+        if (saved.token === token && saved.phone === currentUser.phone && Date.now() - (saved.at || 0) < 7 * 86400000) return;
+        apiPost({ action: 'registerPush', phone: currentUser.phone, token: token, platform: 'android', oldToken: saved.token && saved.token !== token ? saved.token : '' })
+          .then(function (res) {
+            if (res && res.status === 'ok') {
+              try { localStorage.setItem(PUSH_TOKEN_KEY, JSON.stringify({ token: token, phone: currentUser.phone, at: Date.now() })); } catch (e) {}
+            }
+          }).catch(function () {});
+      });
+      PN.addListener('registrationError', function () {});
+      // Пришло, когда приложение открыто: система покажет его сама, а мы
+      // обновим счётчики.
+      PN.addListener('pushNotificationReceived', function () {
+        swrInvalidateAfterWrite_('pushReceived');
+        refreshTasksBadge();
+        pollAdminPending();
+      });
+      PN.addListener('pushNotificationActionPerformed', function (a) {
+        swrInvalidateAfterWrite_('pushReceived');
+        pushOpen_(a && a.notification && a.notification.data);
+      });
+    }
+    PN.checkPermissions().then(function (p) {
+      if (p.receive === 'granted') return 'granted';
+      if (p.receive === 'denied') return 'denied';
+      return PN.requestPermissions().then(function (r) { return r.receive; });
+    }).then(function (state) {
+      if (state === 'granted') PN.register();
+    }).catch(function () {});
+  }
+  function pushForget_() {
+    var saved = pushSaved_();
+    if (saved.token) apiPost({ action: 'unregisterPush', phone: saved.phone, token: saved.token }).catch(function () {});
+    try { localStorage.removeItem(PUSH_TOKEN_KEY); } catch (e) {}
+  }
+  setTimeout(function () {
+    initPush_();
+    if (pushPendingData && currentUser) { var d = pushPendingData; pushPendingData = null; pushOpen_(d); }
+  }, 2500);
 
   // ===== Число на иконке приложения (Badging API) =====
   // Новые задачи + (для администратора) заявки на отгул на согласовании.
@@ -5129,6 +5205,27 @@
       st.style.color = ok ? 'var(--green)' : 'var(--red)';
       st.textContent = (res && res.message) || (ok ? 'Готово' : 'Сервер не ответил — возможно, на нём ещё версия без самообновления (ниже v62)');
       setTimeout(loadServerVersion_, 2000);
+    }).catch(function (err) {
+      btn.disabled = false;
+      st.style.color = 'var(--red)';
+      st.textContent = 'Ошибка соединения: ' + err;
+    });
+  });
+  document.getElementById('adminTestPushBtn').addEventListener('click', function () {
+    var btn = this, st = document.getElementById('adminTestPushStatus');
+    btn.disabled = true;
+    st.style.color = 'var(--muted)';
+    st.textContent = 'Отправляю…';
+    initPush_();
+    apiPost({ action: 'adminTestPush', phone: currentUser && currentUser.phone }).then(function (res) {
+      btn.disabled = false;
+      var ok = res && res.status === 'ok' && res.sent > 0;
+      st.style.color = ok ? 'var(--green)' : 'var(--red)';
+      if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Сервер не ответил'; return; }
+      var info = ' Телефонов с уведомлениями: ' + res.devices + ' (сотрудников: ' + res.people + ').';
+      if (ok) st.textContent = 'Отправлено — уведомление придёт через несколько секунд.' + info;
+      else if (!res.tokens) st.textContent = (pushPlugin_() ? 'Этот телефон ещё не подключён к уведомлениям — разрешите их приложению SEVMOD и нажмите ещё раз.' : 'Уведомления работают в Android-приложении SEVMOD — откройте его на телефоне.') + info;
+      else st.textContent = 'Не отправилось: ' + (res.error || res.lastError || 'неизвестная ошибка') + (res.ready ? '' : ' (на сервере не завершена настройка setupPush)') + info;
     }).catch(function (err) {
       btn.disabled = false;
       st.style.color = 'var(--red)';
@@ -8100,6 +8197,7 @@
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentUser)); } catch (e) {}
           stopWaitIndicator(loginStatus);
           showScanScreen();
+          setTimeout(initPush_, 1500);
         } else {
           // Номер не найден — скорее всего, человек ещё не регистрировался.
           setLoginStatus((res.message || 'Номер не найден') + ' Если вы здесь впервые — нажмите «Зарегистрироваться» ниже.', 'error');
@@ -8171,6 +8269,7 @@
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentUser)); } catch (e) {}
           stopWaitIndicator(regStatus);
           showScanScreen();
+          setTimeout(initPush_, 1500);
         } else {
           setRegStatus('Ошибка: ' + (res.message || 'неизвестная'), 'error');
         }
@@ -8191,6 +8290,7 @@
         // случай подчищаем за уходящим пользователем.
         try { localStorage.removeItem(adminStatusCacheKey(currentUser.phone)); } catch (e) {}
       }
+      pushForget_();
       currentUser = null;
       badgeTasks = 0; badgeAdmin = 0; updateAppBadge_();
       shiftStatusKnown = false;
