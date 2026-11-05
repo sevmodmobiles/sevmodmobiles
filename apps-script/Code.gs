@@ -1,3 +1,8 @@
+// v75: уведомление о заявке: «Екатерина просит согласовать», тип и даты
+//      простыми словами, комментарий; в Android-приложении (сборка с
+//      кнопками) — «Согласовать» / «Отклонить» прямо в уведомлении
+//      (adminDecideAbsence c fromPush), после решения уведомление у всех
+//      администраторов убирается.
 // v74: ID проекта Firebase — «sevmod» (из google-services.json).
 // v73: push-уведомления в Android-приложении (Firebase Cloud Messaging).
 //      Лист «Push-токены», registerPush/unregisterPush, sendPush_. Пуши:
@@ -576,7 +581,7 @@ function doPost(e) {
       return jsonOutput(adminExpenseLookups(data.phone));
     }
     if (data.action === 'adminDecideAbsence') {
-      return jsonOutput(adminDecideAbsence(data.phone, data.id, data.decision));
+      return jsonOutput(adminDecideAbsence(data.phone, data.id, data.decision, data.fromPush === true));
     }
     if (data.action === 'getMyAbsences') {
       return jsonOutput(getMyAbsences(data.phone, data.year));
@@ -2912,8 +2917,8 @@ function submitAbsence(phone, kind, dateFrom, dateTo, timeFrom, timeTo, comment)
     lock.releaseLock();
   }
   sendPush_(adminPhones_().filter(function (a) { return a !== normalizePhone_(emp.phone); }),
-    'Заявка на согласование', emp.name + ': ' + typeLabel.toLowerCase() + ' ' + absPeriodText_(from, isPartial ? null : to, tFrom, tTo),
-    { screen: 'adminAbsences', tag: 'abs-pending' });
+    firstName_(emp.name) + ' просит согласовать', absRequestText_(kind, from, isPartial ? null : to, tFrom, tTo, comment),
+    { kind: 'absReq', absId: String(row), screen: 'adminAbsences', tag: 'absreq-' + row }, { actions: true });
   return getMyAbsences(phone, year);
 }
 
@@ -3004,7 +3009,9 @@ function adminGetAbsences(phone) {
   return { status: 'ok', items: items, pendingCount: pending };
 }
 
-function adminDecideAbsence(phone, id, decision) {
+// fromPush — решение кнопкой в уведомлении: только для заявок «На
+// согласовании» (её мог уже решить другой администратор), короткий ответ.
+function adminDecideAbsence(phone, id, decision, fromPush) {
   var auth = adminAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   var newStatus = decision === 'approve' ? ABS_STATUS.APPROVED
@@ -3017,7 +3024,13 @@ function adminDecideAbsence(phone, id, decision) {
     var sheet = getAbsenceSheet_();
     if (!(row >= 2 && row <= sheet.getLastRow())) return { status: 'error', message: 'Заявка не найдена' };
     var admin = findEmployeeByPhone_(auth.phone);
-    req = sheet.getRange(row, 1, 1, ABS_COL.TIME_TO).getValues()[0];
+    req = sheet.getRange(row, 1, 1, ABS_COL.DECIDED_BY).getValues()[0];
+    if (fromPush && absStatusOf_(req[ABS_COL.STATUS - 1]) !== ABS_STATUS.PENDING) {
+      var already = 'Заявка уже рассмотрена: ' + absStatusOf_(req[ABS_COL.STATUS - 1]).toLowerCase() +
+        (req[ABS_COL.DECIDED_BY - 1] ? ' (' + firstName_(req[ABS_COL.DECIDED_BY - 1]) + ')' : '');
+      req = null;
+      return { status: 'error', already: true, message: already };
+    }
     sheet.getRange(row, ABS_COL.STATUS, 1, 3).setValues([[
       newStatus, admin ? admin.name : auth.phone, new Date()
     ]]);
@@ -3030,7 +3043,10 @@ function adminDecideAbsence(phone, id, decision) {
     sendPush_([req[ABS_COL.PHONE - 1]], newStatus === ABS_STATUS.APPROVED ? 'Заявка согласована' : 'Заявка не согласована',
       String(req[ABS_COL.TYPE - 1] || 'Заявка') + ' ' + absPeriodText_(req[ABS_COL.FROM - 1], req[ABS_COL.TO - 1], req[ABS_COL.TIME_FROM - 1], req[ABS_COL.TIME_TO - 1]),
       { screen: 'absence', tag: 'abs-' + row });
+    // у всех администраторов убираем уведомление с кнопками по этой заявке
+    sendPush_(adminPhones_(), '', '', { kind: 'cancel', tag: 'absreq-' + row }, { actionsOnly: true });
   }
+  if (fromPush) return { status: 'ok', decided: newStatus };
   return adminGetAbsences(phone);
 }
 
@@ -4310,7 +4326,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v74';
+var CODE_VERSION = 'v75';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4929,8 +4945,8 @@ function pushSheet_() {
 function pushRows_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PUSH_SHEET_NAME);
   if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().map(function (r, i) {
-    return { row: i + 2, phone: normalizePhone_(r[0]), token: String(r[2] || '') };
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues().map(function (r, i) {
+    return { row: i + 2, phone: normalizePhone_(r[0]), token: String(r[2] || ''), platform: String(r[3] || '') };
   });
 }
 
@@ -4956,7 +4972,7 @@ function registerPush(phone, token, platform, oldToken) {
         found = r.row;
       } else if (oldToken && r.token === String(oldToken)) drop.push(r.row);
     });
-    var vals = [[String(p), emp.name, token, String(platform || 'android').slice(0, 20), new Date()]];
+    var vals = [[String(p), emp.name, token, String(platform || 'android').slice(0, 40), new Date()]];
     if (found) sh.getRange(found, 1, 1, 5).setValues(vals);
     else { sh.appendRow(vals[0]); sh.getRange(sh.getLastRow(), 1).setNumberFormat('@').setValue(String(p)); }
     deletePushRows_(drop);
@@ -4992,9 +5008,20 @@ function fcmProjectId_() {
   return PropertiesService.getScriptProperties().getProperty('FCM_PROJECT_ID') || 'sevmod';
 }
 
-function fcmMessage_(token, title, body, data, validateOnly) {
+function fcmMessage_(token, title, body, data, validateOnly, dataOnly) {
   var d = {};
   Object.keys(data || {}).forEach(function (k) { if (data[k] !== undefined && data[k] !== null) d[k] = String(data[k]); });
+  if (dataOnly) {
+    // Приложение само рисует уведомление (с кнопками) — всё в data.
+    d.title = String(title || '').slice(0, 120);
+    d.body = String(body || '').slice(0, 600);
+    return {
+      url: 'https://fcm.googleapis.com/v1/projects/' + fcmProjectId_() + '/messages:send',
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      payload: JSON.stringify({ message: { token: token, data: d, android: { priority: 'HIGH' } } })
+    };
+  }
   var msg = {
     token: token,
     notification: { title: String(title || '').slice(0, 120), body: String(body || '').slice(0, 400) },
@@ -5015,15 +5042,25 @@ function fcmMessage_(token, title, body, data, validateOnly) {
 
 // Отправляет уведомление на все телефоны сотрудников из phones.
 // data.screen — какой экран открыть по нажатию.
-function sendPush_(phones, title, body, data) {
+// opts.actions — телефонам с новой сборкой (platform содержит "+actions")
+// уходит сообщение, которое приложение показывает с кнопками;
+// opts.actionsOnly — только таким телефонам (служебные, например «убрать
+// уведомление»).
+function sendPush_(phones, title, body, data, opts) {
   var res = { sent: 0, failed: 0, tokens: 0, error: '' };
+  opts = opts || {};
   try {
     var want = {};
     (phones || []).forEach(function (p) { p = normalizePhone_(p); if (p) want[p] = 1; });
-    var targets = pushRows_().filter(function (r) { return want[r.phone] && r.token; });
+    var targets = pushRows_().filter(function (r) {
+      return want[r.phone] && r.token && (!opts.actionsOnly || r.platform.indexOf('+actions') >= 0);
+    });
     res.tokens = targets.length;
     if (!targets.length) return res;
-    var answers = UrlFetchApp.fetchAll(targets.map(function (t) { return fcmMessage_(t.token, title, body, data); }));
+    var answers = UrlFetchApp.fetchAll(targets.map(function (t) {
+      var rich = (opts.actions || opts.actionsOnly) && t.platform.indexOf('+actions') >= 0;
+      return fcmMessage_(t.token, title, body, data, false, rich);
+    }));
     var dead = [];
     answers.forEach(function (a, i) {
       var code = a.getResponseCode(), txt = a.getContentText();
@@ -5050,6 +5087,25 @@ function sendPush_(phones, title, body, data) {
     try { PropertiesService.getScriptProperties().setProperty('PUSH_LAST_ERROR', new Date().toISOString() + ' ' + res.error); } catch (e2) {}
   }
   return res;
+}
+
+function firstName_(fullName) {
+  var parts = String(fullName || '').trim().split(/\s+/);
+  return parts.length >= 2 ? parts[1] : parts[0];
+}
+
+// «Отгул 06.11–08.11», «Прийти позже — 06.11, к 12:00» + комментарий.
+function absRequestText_(kind, from, to, tFrom, tTo, comment) {
+  var f = function (d) { return Utilities.formatDate(new Date(d), 'Europe/Moscow', 'dd.MM'); };
+  var period = f(from) + (to && f(to) !== f(from) ? '–' + f(to) : '');
+  var t;
+  if (kind === 'late') t = 'Прийти позже — ' + f(from) + ', к ' + tTo;
+  else if (kind === 'early') t = 'Уйти пораньше — ' + f(from) + ', в ' + tFrom;
+  else if (kind === 'sick') t = 'Больничный ' + period;
+  else t = 'Отгул ' + period;
+  comment = String(comment || '').trim();
+  if (comment) t += '\nКомментарий: ' + comment.slice(0, 300);
+  return t;
 }
 
 function absPeriodText_(from, to, tFrom, tTo) {

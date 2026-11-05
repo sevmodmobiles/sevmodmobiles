@@ -3229,20 +3229,25 @@
     try { history.pushState(st, '', '#' + st.screen); } catch (e) {}
     openScreenFromState(st);
   }
+  // Сборки с кнопками в уведомлениях («Согласовать» / «Отклонить»).
+  function pushPlatform_() { return 'android' + (nativePlugin_('SevmodSession') ? '+actions' : ''); }
   function initPush_() {
     var PN = pushPlugin_();
     if (!PN || !currentUser || !currentUser.phone) return;
+    var SS = nativePlugin_('SevmodSession');
+    if (SS) SS.setSession({ phone: currentUser.phone, apiUrl: API_URL }).catch(function () {});
     if (!pushInited) {
       pushInited = true;
       try { PN.createChannel({ id: 'sevmod', name: 'SEVMOD', description: 'Задачи, заявки, напоминания об уходе', importance: 4, visibility: 1, vibration: true }); } catch (e) {}
       PN.addListener('registration', function (t) {
         var token = t && t.value, saved = pushSaved_();
         if (!token || !currentUser || !currentUser.phone) return;
-        if (saved.token === token && saved.phone === currentUser.phone && Date.now() - (saved.at || 0) < 7 * 86400000) return;
-        apiPost({ action: 'registerPush', phone: currentUser.phone, token: token, platform: 'android', oldToken: saved.token && saved.token !== token ? saved.token : '' })
+        var platform = pushPlatform_();
+        if (saved.token === token && saved.phone === currentUser.phone && saved.platform === platform && Date.now() - (saved.at || 0) < 7 * 86400000) return;
+        apiPost({ action: 'registerPush', phone: currentUser.phone, token: token, platform: platform, oldToken: saved.token && saved.token !== token ? saved.token : '' })
           .then(function (res) {
             if (res && res.status === 'ok') {
-              try { localStorage.setItem(PUSH_TOKEN_KEY, JSON.stringify({ token: token, phone: currentUser.phone, at: Date.now() })); } catch (e) {}
+              try { localStorage.setItem(PUSH_TOKEN_KEY, JSON.stringify({ token: token, phone: currentUser.phone, platform: platform, at: Date.now() })); } catch (e) {}
             }
           }).catch(function () {});
       });
@@ -3271,6 +3276,8 @@
     var saved = pushSaved_();
     if (saved.token) apiPost({ action: 'unregisterPush', phone: saved.phone, token: saved.token }).catch(function () {});
     try { localStorage.removeItem(PUSH_TOKEN_KEY); } catch (e) {}
+    var SS = nativePlugin_('SevmodSession');
+    if (SS) SS.clear().catch(function () {});
   }
   setTimeout(function () {
     initPush_();
