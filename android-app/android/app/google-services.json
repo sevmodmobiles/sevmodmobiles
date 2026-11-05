@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "540820593622",
+    "project_id": "sevmod",
+    "storage_bucket": "sevmod.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:540820593622:android:8a3585df5792a6a5c6a277",
+        "android_client_info": {
+          "package_name": "ru.sevmod.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "540820593622-782iqaj43ksklngqmlgr2r0vigrae7m0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCvOf-hFZV5WOb330_fbTamkF9iM2dldys"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "540820593622-782iqaj43ksklngqmlgr2r0vigrae7m0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

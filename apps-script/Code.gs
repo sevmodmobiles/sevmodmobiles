@@ -1,3 +1,4 @@
+// v74: ID проекта Firebase — «sevmod» (из google-services.json).
 // v73: push-уведомления в Android-приложении (Firebase Cloud Messaging).
 //      Лист «Push-токены», registerPush/unregisterPush, sendPush_. Пуши:
 //      новая задача → исполнителю; задача выполнена → админам; заявка на
@@ -4309,7 +4310,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v73';
+var CODE_VERSION = 'v74';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4988,7 +4989,7 @@ function adminPhones_() {
 }
 
 function fcmProjectId_() {
-  return PropertiesService.getScriptProperties().getProperty('FCM_PROJECT_ID') || '540820593622';
+  return PropertiesService.getScriptProperties().getProperty('FCM_PROJECT_ID') || 'sevmod';
 }
 
 function fcmMessage_(token, title, body, data, validateOnly) {
