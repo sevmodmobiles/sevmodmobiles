@@ -1,3 +1,5 @@
+// v69: для смен, открытых до v68 (в карте нет времени прихода), время
+//      берётся из последнего «Прихода» без «Ухода» в списке дней кабинета.
 // v68: открытая смена в «Кабинете». Карта открытых смен хранит время
 //      прихода (since); getShiftStatus отдаёт openSince, getMyStats — openShift
 //      { objectName, since } — приложение показывает «Сейчас на смене» с идущим
@@ -2536,7 +2538,14 @@ function getMyStats(phone) {
   var res = getMyStatsCore_(phone);
   if (res.status !== 'ok') return res;
   var os = getOpenShift(phone);
-  res.openShift = os.open ? { objectName: os.objectName, since: os.since || null } : null;
+  var since = os.since || null;
+  if (os.open && !since) {
+    // Смена открыта до v68 — время прихода из последнего дня без ухода.
+    var dd = (res.days || []).filter(function (d) { return d.arrival && !d.departure; })[0];
+    var m = dd && /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(dd.date), t = dd && /^(\d{2}):(\d{2})$/.exec(dd.arrival);
+    if (m && t) since = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(t[1]), Number(t[2])).getTime();
+  }
+  res.openShift = os.open ? { objectName: os.objectName, since: since } : null;
   // Окладнику денежные суммы в кабинете не показываем.
   var emp = findEmployeeByPhone(phone);
   if (emp && emp.payType === PAY_SALARY) {
@@ -4224,7 +4233,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v68';
+var CODE_VERSION = 'v69';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
