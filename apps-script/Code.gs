@@ -1,3 +1,9 @@
+// v72: Wi-Fi офиса. В «Объекты» колонка K «Wi-Fi офиса (IP)» — внешние
+//      IP офисной сети (через запятую), задаются из приложения кнопкой
+//      «Запомнить Wi-Fi» (adminSetObjectWifi). Телефон присылает свой
+//      внешний IP (ip); если GPS далеко или его нет, но IP — офисный, отметка
+//      принимается с пометкой «принято по Wi-Fi офиса». IP пишется в «Учет»
+//      (колонка L) и в «Попытки вне объекта» (колонка L).
 // v71: незакрытые смены. Раз в час (тот же триггер, что автообновление)
 //      смены, открытые в прошлые дни, закрываются автоматически по концу
 //      смены объекта (нет графика — 18:00), с пометкой в «Учет» (колонка I)
@@ -446,7 +452,10 @@ function doPost(e) {
       return jsonOutput(loginUser(data.phone));
     }
     if (data.action === 'log') {
-      return jsonOutput(logEvent(data.name, data.phone, data.objectName, data.eventType, data.geo, data.clientTime, data.eventId));
+      return jsonOutput(logEvent(data.name, data.phone, data.objectName, data.eventType, data.geo, data.clientTime, data.eventId, data.ip));
+    }
+    if (data.action === 'adminSetObjectWifi') {
+      return jsonOutput(adminSetObjectWifi(data.phone, data.objectName, data.ip, data.mode));
     }
     if (data.action === 'stats') {
       return jsonOutput(getMyStats(data.phone));
@@ -661,7 +670,7 @@ function getValidObjects() {
 // сотрудников в проекте; имя подтягивается из листа "Сотрудники").
 var OBJ_COL = {
   NAME: 1, SHIFT1_START: 2, SHIFT1_END: 3, SHIFT2_START: 4, SHIFT2_END: 5,
-  ADDRESS: 6, LAT: 7, LNG: 8, GEO_STATUS: 9, FOREMAN: 10
+  ADDRESS: 6, LAT: 7, LNG: 8, GEO_STATUS: 9, FOREMAN: 10, WIFI: 11
 };
 
 // Радиус (в метрах), в пределах которого отметка о приходе/уходе считается
@@ -1152,7 +1161,7 @@ function geoAccuracy_(geo) {
   return a && isFinite(a) && a > 0 ? Math.round(a) : '';
 }
 
-function logGeoBlockedAttempt_(name, phone, objectName, eventType, geo, distanceMeters) {
+function logGeoBlockedAttempt_(name, phone, objectName, eventType, geo, distanceMeters, ip) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName('Попытки вне объекта');
@@ -1169,11 +1178,12 @@ function logGeoBlockedAttempt_(name, phone, objectName, eventType, geo, distance
     // что секунда-другая на запрос к геокодеру ни на что не влияет.
     if (String(sheet.getRange(1, 10).getValue()).trim() === '') sheet.getRange(1, 10).setValue('Точность GPS (м)');
     if (String(sheet.getRange(1, 11).getValue()).trim() === '') sheet.getRange(1, 11).setValue('Телефон');
+    if (String(sheet.getRange(1, 12).getValue()).trim() === '') sheet.getRange(1, 12).setValue('IP телефона');
     var nearestAddress = geo ? reverseGeocodeAddress_(geo.lat, geo.lng) : '';
     sheet.appendRow([
       new Date(), name, phone, objectName, eventType, distanceMeters,
       geo ? geo.lat : '', geo ? geo.lng : '', nearestAddress,
-      geoAccuracy_(geo), geo && geo.device ? String(geo.device).slice(0, 40) : ''
+      geoAccuracy_(geo), geo && geo.device ? String(geo.device).slice(0, 40) : '', ip || ''
     ]);
   } catch (e) {
     // аудит не критичен — если не получилось записать, саму отметку это
@@ -1618,7 +1628,7 @@ function adminGetObjects(phone) {
   ensureObjectGeoColumns_(sheet);
 
   var lastRow = sheet.getLastRow();
-  var data = sheet.getRange(2, 1, lastRow - 1, OBJ_COL.FOREMAN).getValues();
+  var data = sheet.getRange(2, 1, lastRow - 1, OBJ_COL.WIFI).getValues();
   var objects = data
     .filter(function (row) { return String(row[OBJ_COL.NAME - 1]).trim(); })
     .map(function (row) {
@@ -1635,7 +1645,8 @@ function adminGetObjects(phone) {
         lng: row[OBJ_COL.LNG - 1] || '',
         geoStatus: String(row[OBJ_COL.GEO_STATUS - 1] || '').trim(),
         foremanPhone: foremanPhone || '',
-        foremanName: foreman ? foreman.name : ''
+        foremanName: foreman ? foreman.name : '',
+        wifiIps: splitIps_(row[OBJ_COL.WIFI - 1])
       };
     });
   return { status: 'ok', objects: objects };
@@ -2215,7 +2226,7 @@ var LOG_MAX_DELAY_MS = 72 * 3600 * 1000;
 function objKey_(s) {
   return String(s || '').replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase().replace(/ё/g, 'е');
 }
-function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId) {
+function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId, ip) {
   phone = normalizePhone_(phone);
   // Повтор той же отметки (досылка/повтор запроса) — отдаём прежний результат, без дубля.
   var evKey = /^[A-Za-z0-9_-]{8,64}$/.test(String(eventId || '')) ? 'logev_' + eventId : '';
@@ -2263,7 +2274,11 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId) 
   var objCoords = getObjectCoords_(trimmedObject);
   var geoDistance = objCoords ? '' : 'нет координат объекта';
   var hasGeo = !!(geo && typeof geo.lat === 'number' && typeof geo.lng === 'number');
-  if (objCoords && !hasGeo) {
+  var clientIp = cleanIp_(ip);
+  var onOfficeWifi = !!(clientIp && objectWifiIps_(trimmedObject).indexOf(clientIp) >= 0);
+  if (objCoords && !hasGeo && onOfficeWifi) {
+    geoDistance = 'без GPS, принято по Wi-Fi офиса';
+  } else if (objCoords && !hasGeo) {
     if (!delayed) {
       return {
         status: 'error',
@@ -2280,8 +2295,11 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId) 
     geoDistance = Math.round(distance);
     // Учитываем погрешность GPS телефона (в помещении бывает 50–300 м), но не больше 300 м.
     var acc = Math.min(Math.max(Number(geo.accuracy) || 0, 0), 300);
-    if (distance - acc > GEO_RADIUS_METERS) {
-      logGeoBlockedAttempt_(name, phone, trimmedObject, eventType, geo, geoDistance);
+    if (distance - acc > GEO_RADIUS_METERS && onOfficeWifi) {
+      // GPS «улетел», но телефон в офисной сети — принимаем.
+      geoDistance = geoDistance + ' (принято по Wi-Fi офиса)';
+    } else if (distance - acc > GEO_RADIUS_METERS) {
+      logGeoBlockedAttempt_(name, phone, trimmedObject, eventType, geo, geoDistance, clientIp);
       return {
         status: 'error',
         reason: 'geo_blocked',
@@ -2370,10 +2388,12 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId) 
       geo && typeof geo.lng === 'number' ? geo.lng : '',
       geoDistance,
       delayed ? receivedAt : '',
-      geoAccuracy_(geo)
+      geoAccuracy_(geo),
+      clientIp
     ]);
     var newRow = sheet.getLastRow();
     if (geoAccuracy_(geo) !== '' && String(sheet.getRange(1, 11).getValue()).trim() === '') sheet.getRange(1, 11).setValue('Точность GPS (м)');
+    if (clientIp && String(sheet.getRange(1, 12).getValue()).trim() === '') sheet.getRange(1, 12).setValue('IP телефона');
     sheet.getRange(newRow, 3).setNumberFormat('@').setValue(String(phone));
     if (delayed) {
       if (String(sheet.getRange(1, 10).getValue()).trim() === '') sheet.getRange(1, 10).setValue('Получено сервером (досланная отметка)');
@@ -4260,7 +4280,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v71';
+var CODE_VERSION = 'v72';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4802,4 +4822,42 @@ function closeMissedShift(phone, time) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ===================== Wi-Fi ОФИСА (v72) =====================
+function cleanIp_(ip) {
+  var s = String(ip || '').trim();
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(s) || /^[0-9a-f:]{3,45}$/i.test(s) ? s.toLowerCase() : '';
+}
+function splitIps_(v) { return String(v || '').split(/[\s,;]+/).map(cleanIp_).filter(String); }
+function objectWifiIps_(objectName) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
+  if (!sheet || sheet.getLastRow() < 2 || sheet.getLastColumn() < OBJ_COL.WIFI) return [];
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, OBJ_COL.WIFI).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]).trim() === objectName) return splitIps_(data[i][OBJ_COL.WIFI - 1]);
+  }
+  return [];
+}
+// mode: 'add' — добавить ip; 'remove' — убрать ip; 'clear' — очистить.
+function adminSetObjectWifi(adminPhone, objectName, ip, mode) {
+  var auth = adminAuth_(adminPhone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
+  if (!sheet || sheet.getLastRow() < 2) return { status: 'error', message: 'Объект не найден' };
+  if (String(sheet.getRange(1, OBJ_COL.WIFI).getValue()).trim() !== 'Wi-Fi офиса (IP)') sheet.getRange(1, OBJ_COL.WIFI).setValue('Wi-Fi офиса (IP)');
+  var name = String(objectName || '').trim(), addr = cleanIp_(ip);
+  if (mode !== 'clear' && !addr) return { status: 'error', message: 'Не удалось определить IP сети' };
+  var names = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < names.length; i++) {
+    if (String(names[i][0]).trim() !== name) continue;
+    var cell = sheet.getRange(i + 2, OBJ_COL.WIFI);
+    var list = splitIps_(cell.getValue());
+    if (mode === 'clear') list = [];
+    else if (mode === 'remove') list = list.filter(function (x) { return x !== addr; });
+    else if (list.indexOf(addr) < 0) list.push(addr);
+    cell.setNumberFormat('@').setValue(list.join(', '));
+    return { status: 'ok', wifiIps: list };
+  }
+  return { status: 'error', message: 'Объект с таким названием не найден' };
 }

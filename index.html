@@ -584,6 +584,14 @@
   .salTotal { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); font-weight: 700; }
   .salTotal .num { color: var(--red); white-space: nowrap; }
   .salClean { font-size: 14px; color: var(--green); font-weight: 600; }
+  .objWifi { margin: 10px 0 4px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; }
+  .objWifiHead { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .objWifiHead svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; }
+  .objWifiList { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .objWifiChip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--bg); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .objWifiChip button { width: 24px; height: 24px; margin: 0; padding: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+  .objWifi .objWifiAdd { margin: 0; padding: 9px 10px; font-size: 13px; background: transparent; color: var(--blue); border: 1px solid var(--border); }
+  .objWifiHint { margin-top: 6px; }
   .serverVer { font-size: 14px; line-height: 1.45; margin-bottom: 10px; }
   .serverVer .verRow { display: flex; justify-content: space-between; gap: 10px; }
   .serverVer .verNum { font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -2542,7 +2550,7 @@
     adminAddContract: ['adminExpenseOverview', 'adminExpenseLookups', 'adminGetObjects'],
     adminAddCashMove: ['adminExpenseOverview'],
     adminAddExpenseWorker: ['adminExpenseLookups'], adminAddExpenseBank: ['adminExpenseLookups'],
-    adminAddObject: ['adminGetObjects', 'adminExpenseLookups'], adminUpdateObjectShifts: ['adminGetObjects'],
+    adminAddObject: ['adminGetObjects', 'adminExpenseLookups'], adminUpdateObjectShifts: ['adminGetObjects'], adminSetObjectWifi: ['adminGetObjects'],
     adminSetRate: ['adminGetEmployees', 'adminSalaryReport'],
     adminCreateTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'],
     startTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'], completeTask: ['adminGetTasks', 'getMyTasks', 'getTaskById'],
@@ -2715,11 +2723,42 @@
   // Свежая геолокация: запрашивается заранее (при открытии главного экрана),
   // чтобы к моменту скана координаты уже были и отметка уходила сразу.
   function prefetchGeo_() {
+    getPublicIp_(false);
     if (!geoPositionPromise || Date.now() - geoPositionAt > 45000) {
       geoPositionAt = Date.now();
       geoPositionPromise = getGeoPositionPromise();
     }
     return geoPositionPromise;
+  }
+  // Внешний IP телефона: по нему сервер узнаёт Wi-Fi офиса (если GPS ошибается).
+  // Название сети браузеру недоступно, а внешний IP офисной сети — общий для
+  // всех телефонов, подключённых к ней.
+  var ipCache = null, ipPromise = null;
+  function fetchIpFrom_(url) {
+    var ctl = window.AbortController ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctl) ctl.abort(); }, 4000);
+    return fetch(url, ctl ? { signal: ctl.signal, cache: 'no-store' } : { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { clearTimeout(t); return j && j.ip ? String(j.ip) : ''; })
+      .catch(function () { clearTimeout(t); return ''; });
+  }
+  function getPublicIp_(fresh) {
+    if (!fresh && ipCache && Date.now() - ipCache.at < 90000) return Promise.resolve(ipCache.ip);
+    if (ipPromise) return ipPromise;
+    ipPromise = fetchIpFrom_('https://api.ipify.org?format=json').then(function (ip) {
+      return ip || fetchIpFrom_('https://ipinfo.io/json');
+    }).then(function (ip) {
+      ipPromise = null;
+      if (ip) ipCache = { ip: ip, at: Date.now() };
+      return ip;
+    });
+    return ipPromise;
+  }
+  function objWifiListHtml_(ips) {
+    if (!ips.length) return '<div class="ctHint">Сеть не задана</div>';
+    return ips.map(function (ip) {
+      return '<span class="objWifiChip">' + escapeHtml(ip) + '<button type="button" class="objWifiRemove" data-ip="' + escapeHtml(ip) + '" aria-label="Удалить">×</button></span>';
+    }).join('');
   }
   // Ключ для сравнения названий объектов из QR: без лишних пробелов, регистра и «ё».
   function objKey_(s) { return String(s || '').replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase().replace(/ё/g, 'е'); }
@@ -4272,6 +4311,12 @@
             '</div>' +
             '<label for="' + fId + '" style="margin-top:8px;">Ответственный прораб</label>' +
             '<input id="' + fId + '" type="text" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
+            '<div class="objWifi" data-name="' + escapeHtml(obj.name) + '">' +
+              '<div class="objWifiHead"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.2" r="1"/></svg><span>Wi-Fi офиса</span></div>' +
+              '<div class="objWifiList">' + objWifiListHtml_(obj.wifiIps || []) + '</div>' +
+              '<button type="button" class="objWifiAdd">Запомнить текущую сеть телефона</button>' +
+              '<div class="ctHint objWifiHint">Нажмите, находясь на объекте и подключившись к его Wi-Fi. Тогда отметка пройдёт по сети, даже если GPS телефона ошибается.</div>' +
+            '</div>' +
             '<div class="adminObjSaveRow">' +
               '<button type="button" class="adminObjSaveBtn" data-name="' + escapeHtml(obj.name) + '" data-idx="' + idx + '">Сохранить</button>' +
               '<button type="button" class="adminObjQrBtn" data-name="' + escapeHtml(obj.name) + '" data-address="' + escapeHtml(obj.address || '') + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h2v2h-2zM18 14h2M14 18v2h2M18 18h2v2"/></svg>QR-код</button>' +
@@ -4284,6 +4329,33 @@
 
     listEl.querySelectorAll('input[id^="objForeman"]').forEach(function (input) {
       initAutocomplete(input, function () { return Object.keys(adminAssigneeMap); });
+    });
+
+    listEl.querySelectorAll('.objWifi').forEach(function (box) {
+      var name = box.getAttribute('data-name');
+      function setList(ips) { box.querySelector('.objWifiList').innerHTML = objWifiListHtml_(ips); }
+      box.addEventListener('click', function (e) {
+        var rm = e.target.closest('.objWifiRemove');
+        if (rm) {
+          var ip = rm.getAttribute('data-ip');
+          rm.parentNode.remove();
+          bgWrite_({ action: 'adminSetObjectWifi', phone: currentUser && currentUser.phone, objectName: name, ip: ip, mode: 'remove' }, {
+            ok: 'Сеть ' + ip + ' удалена', failPrefix: 'Не удалилось', done: function (res) { if (res.wifiIps) setList(res.wifiIps); }
+          });
+          return;
+        }
+        var add = e.target.closest('.objWifiAdd');
+        if (!add) return;
+        add.disabled = true; add.textContent = 'Определяю сеть…';
+        getPublicIp_(true).then(function (ip) {
+          add.disabled = false; add.textContent = 'Запомнить текущую сеть телефона';
+          if (!ip) { toast_('Не удалось определить сеть — проверьте интернет', 'error'); return; }
+          bgWrite_({ action: 'adminSetObjectWifi', phone: currentUser && currentUser.phone, objectName: name, ip: ip, mode: 'add' }, {
+            ok: '✓ Сеть ' + ip + ' запомнена для «' + name + '»', failPrefix: 'Не сохранилось',
+            done: function (res) { if (res.wifiIps) setList(res.wifiIps); }
+          });
+        });
+      });
     });
 
     listEl.querySelectorAll('.adminObjQrBtn').forEach(function (btn) {
@@ -8480,8 +8552,14 @@
       var cur = loadPending_();
       if (!cur || cur.id !== ev.id) return;   // уже дослана другим путём
       ev.geo = geo || null;
-      savePending_(ev);
-      postPendingEvent_(ev, false);
+      // IP сети (для Wi-Fi офиса) — обычно уже известен; ждём не больше 1,5 с.
+      Promise.race([getPublicIp_(false), new Promise(function (r) { setTimeout(function () { r(''); }, 1500); })]).then(function (ip) {
+        var cur2 = loadPending_();
+        if (!cur2 || cur2.id !== ev.id) return;
+        ev.ip = ip || '';
+        savePending_(ev);
+        postPendingEvent_(ev, false);
+      });
     });
   }
 
@@ -8490,7 +8568,7 @@
     pendingInFlight = true;
     apiPost({
       action: 'log', name: ev.name, phone: ev.phone, objectName: ev.objectName,
-      eventType: ev.eventType, geo: ev.geo || null, clientTime: ev.clientTime, eventId: ev.id
+      eventType: ev.eventType, geo: ev.geo || null, clientTime: ev.clientTime, eventId: ev.id, ip: ev.ip || ''
     }, { keepalive: true })
       .then(function (res) {
         pendingInFlight = false;
@@ -8574,6 +8652,7 @@
         : '<li>Разрешите сайту точное местоположение и включите Wi-Fi.</li>';
     return '<div class="geoAlertHint">' + accLine +
       '<p>Если вы на объекте, а отметка не проходит:</p><ol>' + steps +
+      '<li><b>Подключитесь к Wi-Fi офиса</b> и повторите — если сеть офиса запомнена администратором, отметка пройдёт по ней.</li>' +
       '<li>Подойдите ближе к окну или выйдите на улицу и повторите через 10–20 секунд.</li></ol></div>';
   }
   function showGeoBlockedAlert(message, geo) {
