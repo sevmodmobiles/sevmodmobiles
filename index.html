@@ -528,6 +528,21 @@
   .adminObjForm label { font-size: 12px; }
   .adminObjSaveRow { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   .adminObjSaveRow button { margin: 0; padding: 8px 12px; width: auto; font-size: 13px; }
+  .adminObjSaveRow .adminObjQrBtn { background: transparent; color: var(--blue); border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .adminObjQrBtn svg, .qrBtns svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .qrPreview { display: block; width: 100%; max-height: 44vh; object-fit: contain; border: 1px solid var(--border); border-radius: 10px; background: #fff; margin: 4px 0 12px; }
+  .qrBtns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .qrBtns button { flex: 1 1 0; min-width: 0; margin: 0; padding-left: 6px; padding-right: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 15px; }
+  .qrBtns button[hidden] { display: none; }
+  #qrPrintArea { display: none; }
+  @media print {
+    body.printingQr > *:not(#qrPrintArea) { display: none !important; }
+    html, body.printingQr { height: auto !important; min-height: 0 !important; }
+    body.printingQr { background: #fff !important; padding: 0 !important; margin: 0 !important; display: block !important; }
+    body.printingQr #qrPrintArea { display: block !important; }
+    #qrPrintArea img { display: block; width: 100%; height: auto; max-height: 265mm; object-fit: contain; margin: 0 auto; }
+    @page { size: A4 portrait; margin: 12mm; }
+  }
   .adminObjSaveStatus { font-size: 12px; }
   .adminEmpRow {
     display: flex;
@@ -2132,6 +2147,25 @@
     </div>
   </div>
 
+  <!-- QR-код объекта: генерируется прямо в приложении (без сторонних
+       сервисов). В коде — точное название объекта, как его ждёт сканер. -->
+  <div id="qrModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="qrTitle">
+    <div class="modalBox">
+      <h2 id="qrTitle" style="margin-top:0; color: var(--text);">QR-код объекта</h2>
+      <div id="qrStatus" class="modalText"></div>
+      <img id="qrPreview" class="qrPreview" alt="QR-код объекта" hidden>
+      <div class="ctHint" style="margin:-4px 0 12px;">Распечатайте и повесьте у входа на объект.</div>
+      <div class="qrBtns">
+        <button id="qrDownload" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 19h14"/></svg>Скачать</button>
+        <button id="qrPrint" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/><path d="M7 14h10v6H7z"/></svg>Печать</button>
+        <button id="qrShare" type="button" hidden disabled><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/></svg>Отправить</button>
+      </div>
+      <div class="calBtns">
+        <button id="qrClose" type="button" class="calCancel">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Смена статуса записи / всех записей человека -->
   <div id="statusModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="stTitle">
     <div class="modalBox">
@@ -3654,6 +3688,159 @@
   // разворачивается по клику стрелкой). Новые объекты в таблице добавляются
   // вниз, но актуальнее для админа именно недавно добавленные — поэтому
   // здесь показываем в обратном порядке (последний добавленный — сверху).
+  // ---------- QR-код объекта ----------
+  // Генерируется в самом приложении: библиотека qrcode-generator грузится
+  // только при первом открытии окна. В код кладётся точное название объекта
+  // (UTF-8) — ровно то, что ожидает сканер (onScanDecoded_ сверяет его с
+  // листом «Объекты»). На выходе — карточка для печати: код, название,
+  // адрес и подсказка сотрудникам.
+  var QRGEN_SRC = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+  var qrGenPromise = null;
+  function loadQrGen_() {
+    if (window.qrcode) return Promise.resolve(window.qrcode);
+    if (qrGenPromise) return qrGenPromise;
+    qrGenPromise = new Promise(function (resolve, reject) {
+      var sc = document.createElement('script');
+      sc.src = QRGEN_SRC;
+      sc.onload = function () { window.qrcode ? resolve(window.qrcode) : reject(new Error('библиотека не загрузилась')); };
+      sc.onerror = function () { qrGenPromise = null; reject(new Error('нет связи')); };
+      document.head.appendChild(sc);
+    });
+    return qrGenPromise;
+  }
+  function qrWrapLines_(ctx, text, maxWidth, maxLines) {
+    var words = String(text || '').split(/\s+/).filter(Boolean), lines = [], cur = '';
+    words.forEach(function (w) {
+      var probe = cur ? cur + ' ' + w : w;
+      if (ctx.measureText(probe).width <= maxWidth || !cur) cur = probe;
+      else { lines.push(cur); cur = w; }
+    });
+    if (cur) lines.push(cur);
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines);
+      var last = lines[maxLines - 1];
+      while (last.length > 1 && ctx.measureText(last + '…').width > maxWidth) last = last.slice(0, -1);
+      lines[maxLines - 1] = last + '…';
+    }
+    return lines;
+  }
+  // Карточка A4 (1240×1754 = 150 dpi): шапка, код, название, адрес, подсказка.
+  function renderObjectQrCard_(qrLib, name, address) {
+    qrLib.stringToBytes = qrLib.stringToBytesFuncs['UTF-8'];
+    var qr = qrLib(0, 'M');
+    qr.addData(name, 'Byte');
+    qr.make();
+    var W = 1240, H = 1754, cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var ctx = cv.getContext('2d'), font = 'Arial, Helvetica, sans-serif';
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#d0d5dd'; ctx.lineWidth = 4;
+    ctx.strokeRect(40, 40, W - 80, H - 80);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#1f3b8f'; ctx.font = 'bold 72px ' + font;
+    ctx.fillText('SEVMOD', W / 2, 170);
+    ctx.fillStyle = '#555b66'; ctx.font = '38px ' + font;
+    ctx.fillText('Отметка прихода и ухода', W / 2, 228);
+    // Сам код: целое число пикселей на модуль, белое поле вокруг — 4 модуля.
+    var n = qr.getModuleCount(), quiet = 4;
+    var cell = Math.floor(860 / (n + quiet * 2)), size = cell * (n + quiet * 2);
+    var qx = Math.round((W - size) / 2), qy = 280;
+    ctx.fillStyle = '#000000';
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        if (qr.isDark(r, c)) ctx.fillRect(qx + (c + quiet) * cell, qy + (r + quiet) * cell, cell, cell);
+      }
+    }
+    var y = qy + size + 90;
+    ctx.fillStyle = '#111111'; ctx.font = 'bold 76px ' + font;
+    qrWrapLines_(ctx, name, W - 200, 2).forEach(function (line) { ctx.fillText(line, W / 2, y); y += 90; });
+    if (address) {
+      y += 6;
+      ctx.fillStyle = '#555b66'; ctx.font = '40px ' + font;
+      qrWrapLines_(ctx, address, W - 200, 2).forEach(function (line) { ctx.fillText(line, W / 2, y); y += 54; });
+    }
+    ctx.fillStyle = '#555b66'; ctx.font = '32px ' + font;
+    ctx.fillText('Откройте приложение SEVMOD, нажмите «Отметить приход»', W / 2, H - 150);
+    ctx.fillText('или «Отметить уход» и наведите камеру на код', W / 2, H - 106);
+    return cv;
+  }
+  var qrCurrent = null; // { name, blob, url }
+  // Имя файла — латиницей: кириллицу в имени скачиваемого файла часть
+  // браузеров молча заменяет на «download».
+  var QR_TRANSLIT = { а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'y',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya' };
+  function qrFileName_(name) {
+    var lat = String(name).split('').map(function (ch) {
+      var lo = ch.toLowerCase(), t = QR_TRANSLIT[lo];
+      if (t === undefined) return ch;
+      return lo === ch ? t : t.charAt(0).toUpperCase() + t.slice(1);
+    }).join('');
+    lat = lat.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+    return 'QR-' + (lat || 'object') + '.png';
+  }
+  function closeObjectQr_() {
+    document.getElementById('qrModal').classList.remove('open');
+  }
+  function openObjectQr_(name, address) {
+    name = String(name || '').trim();
+    if (!name) return;
+    var modal = document.getElementById('qrModal');
+    var st = document.getElementById('qrStatus'), img = document.getElementById('qrPreview');
+    var dl = document.getElementById('qrDownload'), pr = document.getElementById('qrPrint'), sh = document.getElementById('qrShare');
+    document.getElementById('qrTitle').textContent = 'QR-код: ' + name;
+    if (qrCurrent && qrCurrent.url) URL.revokeObjectURL(qrCurrent.url);
+    qrCurrent = null;
+    img.hidden = true; img.removeAttribute('src');
+    [dl, pr, sh].forEach(function (b) { b.disabled = true; });
+    sh.hidden = true;
+    st.textContent = 'Формирую QR-код…'; st.className = 'modalText';
+    modal.classList.add('open');
+    loadQrGen_().then(function (lib) {
+      var cv = renderObjectQrCard_(lib, name, String(address || '').trim());
+      cv.toBlob(function (blob) {
+        if (!blob) { st.textContent = 'Не удалось сформировать изображение'; st.className = 'modalText error'; return; }
+        qrCurrent = { name: name, blob: blob, url: URL.createObjectURL(blob) };
+        img.src = qrCurrent.url; img.hidden = false;
+        st.textContent = '';
+        dl.disabled = false; pr.disabled = false;
+        try {
+          var file = new File([blob], qrFileName_(name), { type: 'image/png' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) { sh.hidden = false; sh.disabled = false; }
+        } catch (e) {}
+      }, 'image/png');
+    }).catch(function (err) {
+      st.textContent = 'Не удалось сформировать QR-код: ' + (err && err.message || err) + '. Проверьте интернет и попробуйте ещё раз.';
+      st.className = 'modalText error';
+    });
+  }
+  document.getElementById('qrClose').addEventListener('click', closeObjectQr_);
+  document.getElementById('qrModal').addEventListener('click', function (e) { if (e.target === this) closeObjectQr_(); });
+  document.getElementById('qrDownload').addEventListener('click', function () {
+    if (!qrCurrent) return;
+    var a = document.createElement('a');
+    a.href = qrCurrent.url; a.download = qrFileName_(qrCurrent.name);
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  document.getElementById('qrShare').addEventListener('click', function () {
+    if (!qrCurrent) return;
+    var file = new File([qrCurrent.blob], qrFileName_(qrCurrent.name), { type: 'image/png' });
+    navigator.share({ files: [file], title: 'QR-код: ' + qrCurrent.name }).catch(function () {});
+  });
+  document.getElementById('qrPrint').addEventListener('click', function () {
+    if (!qrCurrent) return;
+    var area = document.getElementById('qrPrintArea');
+    area.innerHTML = '';
+    var pimg = new Image();
+    pimg.alt = 'QR-код: ' + qrCurrent.name;
+    var done = function () { document.body.classList.remove('printingQr'); area.innerHTML = ''; };
+    pimg.onload = function () {
+      document.body.classList.add('printingQr');
+      window.addEventListener('afterprint', done, { once: true });
+      setTimeout(function () { window.print(); }, 50);
+    };
+    pimg.src = qrCurrent.url;
+    area.appendChild(pimg);
+  });
+
   function renderAdminObjectsList(res) {
     var listEl = document.getElementById('adminObjectsList');
     lastAdminObjectsResponse = res;
@@ -3708,6 +3895,7 @@
             '<input id="' + fId + '" type="text" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
             '<div class="adminObjSaveRow">' +
               '<button type="button" class="adminObjSaveBtn" data-name="' + escapeHtml(obj.name) + '" data-idx="' + idx + '">Сохранить</button>' +
+              '<button type="button" class="adminObjQrBtn" data-name="' + escapeHtml(obj.name) + '" data-address="' + escapeHtml(obj.address || '') + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h2v2h-2zM18 14h2M14 18v2h2M18 18h2v2"/></svg>QR-код</button>' +
               '<span class="adminObjSaveStatus" id="' + statusId + '"></span>' +
             '</div>' +
           '</div>' +
@@ -3717,6 +3905,12 @@
 
     listEl.querySelectorAll('input[id^="objForeman"]').forEach(function (input) {
       initAutocomplete(input, function () { return Object.keys(adminAssigneeMap); });
+    });
+
+    listEl.querySelectorAll('.adminObjQrBtn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openObjectQr_(btn.getAttribute('data-name'), btn.getAttribute('data-address'));
+      });
     });
 
     listEl.querySelectorAll('.adminObjSaveBtn').forEach(function (btn) {
@@ -5773,6 +5967,7 @@
       btn.disabled = false;
       if (res.status !== 'ok') { st.textContent = res.message || 'Не удалось создать объект'; st.className = 'error'; return; }
       if (expLookups.objects.indexOf(name) < 0) expLookups.objects.push(name);
+      openObjectQr_(name, document.getElementById('ctObjAddress').value.trim());
       document.getElementById('ctObject').value = name;
       showPickError('ctObject', '');
       ['ctObjName', 'ctObjAddress', 'ctObjS1a', 'ctObjS1b', 'ctObjS2a', 'ctObjS2b', 'ctObjForeman'].forEach(function (id) { document.getElementById(id).value = ''; });
@@ -6888,6 +7083,7 @@
         btn.disabled = false;
         if (res.status === 'ok') {
           setObjectAddStatus('Объект добавлен', 'success');
+          openObjectQr_(name, addressInput.value.trim());
           nameInput.value = '';
           addressInput.value = '';
           shift1StartInput.value = '';
@@ -7752,5 +7948,6 @@
     debugPanel.classList.remove('open');
   });
 </script>
+<div id="qrPrintArea"></div>
 </body>
 </html>
