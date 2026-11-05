@@ -69,6 +69,15 @@ jobs:
           keytool -list -v -keystore keystore/sevmod-release.p12 -storetype PKCS12 -alias sevmod \
             -storepass "$ANDROID_KEYSTORE_PASSWORD" | grep -E "SHA1:|SHA256:" | sed 's/^[[:space:]]*/CERT /'
 
+      # Без google-services.json (Firebase) уведомления не работают: убираем
+      # метку SEVMOD-Push, чтобы приложение не пыталось их включать.
+      - name: Push-уведомления (Firebase)
+        run: |
+          if [ ! -f android/app/google-services.json ]; then
+            echo "::warning::Нет android-app/android/app/google-services.json — сборка без push-уведомлений"
+            node -e "const f='capacitor.config.json',c=require('./'+f);delete c.android.appendUserAgent;require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+          fi
+
       - name: Зависимости и синхронизация
         run: |
           npm ci
