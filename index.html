@@ -686,7 +686,33 @@
   .checkRow { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0 6px; font-weight: 600; cursor: pointer; }
   .checkRow input { width: 22px; height: 22px; margin: 1px 0 0; flex: none; accent-color: var(--green); }
   .checkRow small { display: block; font-weight: 400; color: var(--muted); font-size: 13px; margin-top: 2px; }
-  .taskCard .taskWho { font-weight: 600; margin-top: 4px; }
+  .tasksSection { margin: 16px 2px 8px !important; }
+  /* Карточка задачи в списке: объект и статус в одну строку, текст до 3
+     строк, внизу — исполнитель, даты, число фото. */
+  .taskCard.tCard {
+    display: block; padding: 12px 14px; margin: 0 0 8px; border: 1px solid var(--border);
+    border-radius: 14px; background: var(--card); cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .taskCard.tCard:last-child { border-bottom: 1px solid var(--border); }
+  .tCard:active { background: var(--bg); }
+  .tCard.done { opacity: .78; }
+  .tTop { display: flex; align-items: center; gap: 8px; }
+  .tObj { flex: 1; min-width: 0; font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tTop .adminTaskStatusTag { margin: 0; flex: none; }
+  .tText {
+    margin-top: 4px; font-size: 15px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .tMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+  .tMeta .tWho { color: var(--text); font-weight: 600; }
+  .tMeta .tIco { display: inline-flex; align-items: center; gap: 3px; }
+  .tMeta svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .tCard .adminTaskDetail { cursor: default; }
+  /* список задач — шире: меньше внутренние поля карточки-подложки;
+     снизу место под кнопку «+», чтобы она не закрывала последнюю задачу */
+  .card.tasksCard { padding: 14px 10px 6px; }
+  .card.tasksCard .segCtl, .card.tasksCard #tasksPersonSel, .card.tasksCard .expChips { margin-left: 2px; margin-right: 2px; }
+  #screenTasks { padding-bottom: 64px; }
   .taskCard {
     padding: 12px 0;
     border-bottom: 1px solid var(--border);
@@ -1639,7 +1665,7 @@
       <div class="whoami">Вы вошли как: <b id="tasksWhoamiName"></b></div>
       <div class="switchUser"><a id="tasksBackLink">← Главный экран</a></div>
     </div>
-    <div class="card">
+    <div class="card tasksCard">
       <!-- «Мои» / «Лента задач» (все сотрудники) — переключатель только у администраторов -->
       <div id="tasksModeSeg" class="segCtl" style="display:none;">
         <button type="button" data-m="my" class="on">Мои</button>
@@ -4169,15 +4195,29 @@
   try { tasksMode = localStorage.getItem('sevmod_tasks_mode') || 'my'; } catch (e) {}
   var tasksLast = { my: null, all: null };
   function isDoneTask_(t) { return t.status === 'Выполнена'; }
+  // «05.11.2026 23:33» → «05.11 23:33» (текущий год) или «05.11.25»
+  function taskWhen_(s) {
+    var m = /^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{1,2}:\d{2}))?/.exec(String(s || ''));
+    if (!m) return String(s || '');
+    return m[1] + '.' + m[2] + (Number(m[3]) === new Date().getFullYear() ? (m[4] ? ' ' + m[4] : '') : '.' + m[3].slice(2));
+  }
+  var T_ICO_CAL = '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>';
+  var T_ICO_DONE = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  var T_ICO_PHOTO = '<svg viewBox="0 0 24 24"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>';
   function taskCardHtml_(t, feed) {
     var tag = taskStatusTag(t.status), done = isDoneTask_(t);
-    return '<div class="taskCard adminTaskCardClickable' + (done ? ' taskCardDone' : '') + '" data-id="' + escapeHtml(t.id) + '">' +
-      (feed ? '<div class="taskWho">' + escapeHtml(t.name || '') + '</div>' : '') +
-      '<div><span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span>' +
-      (t.objectName ? ' <b>' + escapeHtml(t.objectName) + '</b>' : '') + '</div>' +
-      '<div class="taskText">' + escapeHtml(t.text) + '</div>' +
-      '<div class="taskDate">Поставлена: ' + escapeHtml(shortYear_(t.createdAt)) +
-      (done && t.completedAt ? ' · выполнена: ' + escapeHtml(shortYear_(t.completedAt)) : '') + '</div>' +
+    var photos = (t.taskPhotos || []).length + (t.beforePhotos || []).length + (t.afterPhotos || []).length;
+    var meta = [];
+    if (feed) meta.push('<span class="tWho">' + escapeHtml(personShort_(t.name) || t.name || '') + '</span>');
+    meta.push('<span class="tIco" title="Поставлена">' + T_ICO_CAL + escapeHtml(taskWhen_(t.createdAt)) + '</span>');
+    if (done && t.completedAt) meta.push('<span class="tIco" title="Выполнена">' + T_ICO_DONE + escapeHtml(taskWhen_(t.completedAt)) + '</span>');
+    if (photos) meta.push('<span class="tIco" title="Фото">' + T_ICO_PHOTO + photos + '</span>');
+    if (t.photoReport === 'yes' && !done) meta.push('<span class="tIco">нужен фотоотчёт</span>');
+    return '<div class="tCard taskCard' + (done ? ' done' : '') + '" data-id="' + escapeHtml(t.id) + '">' +
+      '<div class="tTop"><span class="tObj">' + escapeHtml(t.objectName || 'Без объекта') + '</span>' +
+        '<span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span></div>' +
+      '<div class="tText">' + escapeHtml(t.text) + '</div>' +
+      '<div class="tMeta">' + meta.join('') + '</div>' +
       (feed ? '<div class="adminTaskDetail" style="display:none;"></div>' : '') +
     '</div>';
   }
