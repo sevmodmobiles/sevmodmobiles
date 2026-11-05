@@ -873,7 +873,7 @@
   }
 
   /* Просмотр фото на весь экран: свайп влево/вправо — соседние фото,
-     вниз — закрыть, двойное касание — увеличить. */
+     вниз — закрыть, двумя пальцами — увеличить. */
   #photoViewer {
     position: fixed; inset: 0; z-index: 300; background: #000;
     display: none; touch-action: pan-x;
@@ -887,13 +887,13 @@
   }
   #pvTrack::-webkit-scrollbar { display: none; }
   #pvTrack.zoomed { overflow-x: hidden; }
+  #photoViewer.zoomed, #photoViewer.zoomed #pvTrack { touch-action: none; }
+  .pvSlide img { transform-origin: center center; will-change: transform; }
   .pvSlide {
     flex: 0 0 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always;
     display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;
   }
-  .pvSlide.zoom { overflow: auto; display: block; }
   .pvSlide img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
-  .pvSlide.zoom img { max-width: none; max-height: none; width: 250%; }
   .pvSlide .spinner { position: absolute; left: 50%; top: 50%; margin: -10px 0 0 -10px; }
   .pvBar {
     position: absolute; left: 0; right: 0; top: 0; z-index: 2;
@@ -4557,6 +4557,7 @@
   }
   function closePhotoViewer_(fromPop) {
     if (!pvEl.classList.contains('open')) return;
+    pz.img = null; pz.s = 1; pz.x = 0; pz.y = 0; pz.mode = ''; pvEl.classList.remove('zoomed');
     pvEl.classList.remove('open');
     pvTrack.innerHTML = '';
     document.body.style.overflow = '';
@@ -4571,22 +4572,63 @@
     var BR = nativePlugin_('Browser');
     if (BR) BR.open({ url: u }); else window.open(u, '_blank');
   });
-  // двойное касание — увеличить/уменьшить в точке касания
-  var pvLastTap = 0;
-  pvTrack.addEventListener('click', function (e) {
-    var now = Date.now(), slide = e.target.closest('.pvSlide');
-    if (!slide || now - pvLastTap > 300) { pvLastTap = now; return; }
-    pvLastTap = 0;
-    var img = slide.querySelector('img');
-    if (slide.classList.contains('zoom')) {
-      slide.classList.remove('zoom'); pvTrack.classList.remove('zoomed');
-    } else if (img) {
-      var r = img.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
-      slide.classList.add('zoom'); pvTrack.classList.add('zoomed');
-      slide.scrollLeft = Math.max(0, img.offsetWidth * fx - slide.clientWidth / 2);
-      slide.scrollTop = Math.max(0, img.offsetHeight * fy - slide.clientHeight / 2);
+  // Увеличение двумя пальцами (щипок), при увеличении — двигать одним пальцем.
+  var pz = { img: null, s: 1, x: 0, y: 0, mode: '', d0: 0, s0: 1, x0: 0, y0: 0, m0: null, q: null, p0: null };
+  function pzImg_() { var sl = pvTrack.children[pvIndex]; return sl ? sl.querySelector('img') : null; }
+  function pzApply_() {
+    if (!pz.img) return;
+    pz.img.style.transform = pz.s > 1 ? 'translate(' + pz.x + 'px,' + pz.y + 'px) scale(' + pz.s + ')' : '';
+    var z = pz.s > 1.01;
+    pvTrack.classList.toggle('zoomed', z);
+    pvEl.classList.toggle('zoomed', z);
+  }
+  function pzReset_() {
+    if (pz.img) { pz.img.style.transition = 'transform .2s'; pz.img.style.transform = ''; var im = pz.img; setTimeout(function () { im.style.transition = ''; }, 220); }
+    pz.s = 1; pz.x = 0; pz.y = 0; pz.mode = '';
+    pvTrack.classList.remove('zoomed'); pvEl.classList.remove('zoomed');
+  }
+  function pzClamp_() {
+    if (!pz.img) return;
+    var w = pz.img.offsetWidth, h = pz.img.offsetHeight, vw = pvTrack.clientWidth, vh = pvTrack.clientHeight;
+    var mx = Math.max(0, (w * pz.s - vw) / 2), my = Math.max(0, (h * pz.s - vh) / 2);
+    pz.x = Math.max(-mx, Math.min(mx, pz.x)); pz.y = Math.max(-my, Math.min(my, pz.y));
+  }
+  function pzCenter_() { var r = pz.img.getBoundingClientRect(); var s = pz.s; return { x: r.left + r.width / 2 - pz.x, y: r.top + r.height / 2 - pz.y, s: s }; }
+  function tDist_(t) { return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY); }
+  function tMid_(t) { return { x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 }; }
+  pvTrack.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 2) {
+      var img = pzImg_(); if (!img) return;
+      if (pz.img !== img) { if (pz.img) pz.img.style.transform = ''; pz.img = img; pz.s = 1; pz.x = 0; pz.y = 0; }
+      var c = pzCenter_(), m = tMid_(e.touches);
+      pz.mode = 'pinch'; pz.d0 = tDist_(e.touches); pz.s0 = pz.s;
+      // точка картинки под пальцами (относительно центра, в масштабе 1)
+      pz.q = { x: (m.x - c.x - pz.x) / pz.s, y: (m.y - c.y - pz.y) / pz.s }; pz.c = c;
+      e.preventDefault();
+    } else if (e.touches.length === 1 && pz.s > 1.01) {
+      pz.mode = 'pan'; pz.p0 = { x: e.touches[0].clientX, y: e.touches[0].clientY }; pz.x0 = pz.x; pz.y0 = pz.y;
     }
+  }, { passive: false });
+  pvTrack.addEventListener('touchmove', function (e) {
+    if (pz.mode === 'pinch' && e.touches.length === 2) {
+      var m = tMid_(e.touches);
+      pz.s = Math.max(1, Math.min(5, pz.s0 * tDist_(e.touches) / pz.d0));
+      pz.x = m.x - pz.c.x - pz.s * pz.q.x; pz.y = m.y - pz.c.y - pz.s * pz.q.y;
+      pzClamp_(); pzApply_(); e.preventDefault();
+    } else if (pz.mode === 'pan' && e.touches.length === 1) {
+      pz.x = pz.x0 + e.touches[0].clientX - pz.p0.x; pz.y = pz.y0 + e.touches[0].clientY - pz.p0.y;
+      pzClamp_(); pzApply_(); e.preventDefault();
+    }
+  }, { passive: false });
+  pvTrack.addEventListener('touchend', function (e) {
+    if (pz.mode === 'pinch' && e.touches.length < 2) {
+      if (pz.s < 1.05) { pzReset_(); return; }
+      if (e.touches.length === 1) { pz.mode = 'pan'; pz.p0 = { x: e.touches[0].clientX, y: e.touches[0].clientY }; pz.x0 = pz.x; pz.y0 = pz.y; }
+      else pz.mode = '';
+    } else if (pz.mode === 'pan' && !e.touches.length) pz.mode = '';
   });
+  // другое фото или закрытие — масштаб сбрасывается
+  pvTrack.addEventListener('scroll', function () { if (pz.img && pz.img !== pzImg_()) { pz.img.style.transform = ''; pz.img = null; pz.s = 1; pz.x = 0; pz.y = 0; pvTrack.classList.remove('zoomed'); pvEl.classList.remove('zoomed'); } });
   // свайп вниз — закрыть
   var pvY0 = null, pvX0 = 0, pvDy = 0, pvVertical = null;
   pvTrack.addEventListener('touchstart', function (e) {
@@ -4595,6 +4637,10 @@
   }, { passive: true });
   pvTrack.addEventListener('touchmove', function (e) {
     if (pvY0 === null) return;
+    if (e.touches.length > 1 || pz.mode) {
+      pvY0 = null; pvTrack.style.transition = ''; pvTrack.style.transform = ''; pvEl.style.backgroundColor = '';
+      return;
+    }
     var dy = e.touches[0].clientY - pvY0, dx = e.touches[0].clientX - pvX0;
     if (pvVertical === null && (Math.abs(dy) > 8 || Math.abs(dx) > 8)) pvVertical = Math.abs(dy) > Math.abs(dx);
     if (!pvVertical) return;
