@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SEVMOD</string>
+    <string name="title_activity_main">SEVMOD</string>
+    <string name="package_name">ru.sevmod.app</string>
+    <string name="custom_url_scheme">ru.sevmod.app</string>
+</resources>

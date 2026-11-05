@@ -2937,8 +2937,12 @@
   var INSTALL_LATER_KEY = 'sevmod_install_later';
   window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installPromptEvt = e; renderInstallCards_(); });
   window.addEventListener('appinstalled', function () { installPromptEvt = null; renderInstallCards_(); });
+  // Запущено внутри Android-приложения SEVMOD (Capacitor-оболочка).
+  function isNativeApp_() {
+    try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); } catch (e) { return false; }
+  }
   function isStandalone_() {
-    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+    return isNativeApp_() || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
   }
   function installEnv_() {
     var ua = navigator.userAgent || '';

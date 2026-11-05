@@ -1,0 +1,88 @@
+# Сборка Android-приложения SEVMOD (Capacitor-оболочка, открывает
+# https://sevmodmobiles.github.io/sevmodmobiles/). Запускается при изменении
+# android-app/ или вручную. Готовый APK выкладывается в GitHub Releases;
+# постоянная ссылка на последнюю версию:
+# https://github.com/sevmodmobiles/sevmodmobiles/releases/latest/download/sevmod.apk
+name: Android — сборка APK
+
+on:
+  push:
+    branches: [main]
+    paths: ['android-app/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Проверить секрет с паролем ключа
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            echo "::error::Нет секрета ANDROID_KEYSTORE_PASSWORD (Settings → Secrets and variables → Actions)"; exit 1
+          fi
+
+      # Ключ подписи создаётся один раз, при первой сборке, с паролем из
+      # секрета, и сохраняется в репозиторий (файл зашифрован этим паролем).
+      # Один и тот же ключ нужен, чтобы новые версии ставились поверх старых.
+      - name: Ключ подписи (создать при первой сборке)
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ ! -f keystore/sevmod-release.p12 ]; then
+            mkdir -p keystore
+            keytool -genkeypair -storetype PKCS12 -keystore keystore/sevmod-release.p12 -alias sevmod \
+              -keyalg RSA -keysize 2048 -validity 10950 \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEYSTORE_PASSWORD" \
+              -dname "CN=SEVMOD, O=Severny Modern, C=RU"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add keystore/sevmod-release.p12
+            git commit -m "Android: ключ подписи приложения (создан при первой сборке)"
+            git push
+          fi
+
+      - name: Зависимости и синхронизация
+        run: |
+          npm ci
+          npx cap sync android
+
+      - name: Сборка APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../sevmod.apk
+
+      - name: Выложить в Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v${{ github.run_number }}
+          name: SEVMOD для Android, сборка ${{ github.run_number }}
+          body: |
+            Установка: откройте на телефоне ссылку
+            https://github.com/sevmodmobiles/sevmodmobiles/releases/latest/download/sevmod.apk
+            и разрешите установку из этого источника.
+          files: android-app/sevmod.apk
+          make_latest: true

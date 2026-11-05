@@ -1,0 +1,15 @@
+{
+  "appId": "ru.sevmod.app",
+  "appName": "SEVMOD",
+  "webDir": "www",
+  "server": {
+    "url": "https://sevmodmobiles.github.io/sevmodmobiles/",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  }
+}
