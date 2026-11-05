@@ -721,10 +721,18 @@
   .tCard .adminTaskDetail { cursor: default; }
   /* Карточка задачи: фото крупно — лента во всю ширину (соседнее фото
      выглядывает справа, листается пальцем); одно фото — на всю ширину. */
-  .photoGrid.big { gap: 8px; }
-  .photoGrid.big .ph { width: 86%; height: auto; aspect-ratio: 4 / 3; border-radius: 14px; }
-  .photoGrid.big .ph:only-of-type { width: 100%; }
-  .photoGrid.big .ph .phN { font-size: 12px; padding: 2px 8px; right: 8px; bottom: 8px; }
+  /* фото во всю ширину экрана (выходят за поля карточки), целиком, без
+     обрезки; высота — до нижней панели (см. sizeTaskPhotos_), листаются вбок */
+  .photoGrid.big {
+    width: 100vw; min-width: 0; max-width: none; margin: 8px 0 8px calc(50% - 50vw);
+    padding: 0; gap: 0; scroll-snap-type: x mandatory;
+  }
+  .photoGrid.big .ph {
+    width: 100vw; height: var(--phH, 62vh); border: none; border-radius: 0;
+    background: var(--bg); scroll-snap-align: center; scroll-snap-stop: always;
+  }
+  .photoGrid.big .ph img { object-fit: contain; }
+  .photoGrid.big .ph .phN { font-size: 13px; padding: 3px 10px; right: 12px; bottom: 12px; border-radius: 12px; }
   #screenTaskDetail { width: 100%; max-width: 440px; }
   #taskDetailExecutor { font-size: 14px; margin: 2px 0 8px; color: var(--muted); }
   #taskDetailExecutor b { color: var(--text); }
@@ -1714,8 +1722,8 @@
         <h2 id="taskDetailObjectTitle" style="margin-top:8px;"></h2>
         <div id="taskDetailExecutor" style="display:none;"></div>
         <div id="taskDetailText" class="taskText"></div>
-        <div id="taskDetailTaskPhotos" class="photoGrid big"></div>
         <div id="taskDetailMeta" class="taskDate"></div>
+        <div id="taskDetailTaskPhotos" class="photoGrid big"></div>
 
         <div id="taskDetailBeforeSection" style="display:none; margin-top:16px;">
           <h3>Фото до начала работ</h3>
@@ -4643,6 +4651,17 @@
     pushScreenState('taskDetail', { taskId: taskId });
   }
 
+  // Фото задачи — от строки «Поставлена» до нижней панели (не меньше 300 px).
+  function sizeTaskPhotos_() {
+    var g = document.getElementById('taskDetailTaskPhotos');
+    if (!g || g.style.display === 'none' || !g.offsetParent) return;
+    var top = g.getBoundingClientRect().top + window.scrollY;
+    var nav = document.getElementById('bottomNav');
+    var navH = nav && nav.classList.contains('visible') ? nav.offsetHeight : 0;
+    var h = Math.max(300, Math.min(window.innerHeight * 0.85, window.innerHeight - top - navH - 12));
+    g.style.setProperty('--phH', Math.round(h) + 'px');
+  }
+  window.addEventListener('resize', function () { setTimeout(sizeTaskPhotos_, 50); });
   var taskDetailPreview = null;
   function loadTaskDetail() {
     var phone = currentUser ? currentUser.phone : '';
@@ -4690,6 +4709,7 @@
     document.getElementById('taskDetailObjectTitle').textContent = t.objectName || 'Задача';
     document.getElementById('taskDetailText').textContent = t.text;
     renderPhotoGrid(document.getElementById('taskDetailTaskPhotos'), t.taskPhotos);
+    setTimeout(sizeTaskPhotos_, 0);
     document.getElementById('taskDetailMeta').textContent = 'Поставлена: ' + shortYear_(t.createdAt);
 
     var beforeSection = document.getElementById('taskDetailBeforeSection');
