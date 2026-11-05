@@ -682,6 +682,9 @@
   .tasksSection { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin: 14px 0 2px; }
   .tasksSection:first-child { margin-top: 2px; }
   .taskCard.taskCardDone { opacity: .72; }
+  .checkRow { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0 6px; font-weight: 600; cursor: pointer; }
+  .checkRow input { width: 22px; height: 22px; margin: 1px 0 0; flex: none; accent-color: var(--green); }
+  .checkRow small { display: block; font-weight: 400; color: var(--muted); font-size: 13px; margin-top: 2px; }
   .taskCard .taskWho { font-weight: 600; margin-top: 4px; }
   .taskCard {
     padding: 12px 0;
@@ -1669,9 +1672,11 @@
           <button id="taskStartBtn" type="button">Приступить к выполнению</button>
         </div>
         <div id="taskStartForm" style="display:none; margin-top:16px;">
-          <label>Сфотографируйте объект ДО начала работ</label>
-          <input id="taskBeforePhotoInput" type="file" accept="image/*" capture="environment" multiple>
-          <div id="taskBeforePhotoPreview" class="photoPreviewRow"></div>
+          <div id="taskBeforePhotoWrap">
+            <label>Сфотографируйте объект ДО начала работ</label>
+            <input id="taskBeforePhotoInput" type="file" accept="image/*" capture="environment" multiple>
+            <div id="taskBeforePhotoPreview" class="photoPreviewRow"></div>
+          </div>
           <button id="taskStartSubmitBtn" type="button">Подтвердить начало</button>
           <div id="taskStartStatus" style="margin-top:10px;"></div>
         </div>
@@ -1681,9 +1686,11 @@
           <button id="taskCompleteBtn" type="button" class="taskDoneBtn">Подтвердить выполнение</button>
         </div>
         <div id="taskCompleteForm" style="display:none; margin-top:16px;">
-          <label>Сфотографируйте результат выполненных работ</label>
-          <input id="taskAfterPhotoInput" type="file" accept="image/*" capture="environment" multiple>
-          <div id="taskAfterPhotoPreview" class="photoPreviewRow"></div>
+          <div id="taskAfterPhotoWrap">
+            <label>Сфотографируйте результат выполненных работ</label>
+            <input id="taskAfterPhotoInput" type="file" accept="image/*" capture="environment" multiple>
+            <div id="taskAfterPhotoPreview" class="photoPreviewRow"></div>
+          </div>
           <label for="taskCompleteCommentInput">Комментарий (если были доп. работы)</label>
           <textarea id="taskCompleteCommentInput" rows="2" placeholder="Необязательно"></textarea>
           <button id="taskCompleteSubmitBtn" type="button" class="taskDoneBtn">Отправить</button>
@@ -1716,15 +1723,17 @@
         <label for="taskTextInput">Текст задачи</label>
         <textarea id="taskTextInput" rows="3" placeholder="Опишите, что нужно сделать"></textarea>
 
-        <label>Фото задачи (необязательно, можно несколько)</label>
+        <label>Приложить фото (необязательно, можно несколько)</label>
         <input id="taskPhotoInput" type="file" accept="image/*" multiple>
         <div id="taskPhotoPreview" class="photoPreviewRow"></div>
 
+        <label class="checkRow" for="taskPhotoReportInput">
+          <input id="taskPhotoReportInput" type="checkbox">
+          <span>Нужен фотоотчёт<small>исполнитель прикладывает фото до начала и после выполнения</small></span>
+        </label>
+
         <button id="taskCreateBtn" type="button">Поставить задачу</button>
         <div id="taskCreateStatus" style="margin-top:10px;"></div>
-
-        <h2 style="margin-top:20px;">Активные задачи</h2>
-        <div id="adminTasksList"><div class="statsEmpty">Загрузка…</div></div>
       </div>
     </div>
   </div>
@@ -4402,7 +4411,17 @@
       });
   }
 
+  // Фотоотчёт: 'yes' — фото до/после обязательны, 'no' — задача без фото,
+  // '' — старые задачи (фото можно приложить, но не обязательно).
+  var currentTaskPhotoReport = '';
   function renderTaskDetail(t) {
+    currentTaskPhotoReport = t.photoReport || '';
+    var noPhotos = currentTaskPhotoReport === 'no';
+    ['taskBeforePhotoWrap', 'taskAfterPhotoWrap'].forEach(function (id) { document.getElementById(id).style.display = noPhotos ? 'none' : ''; });
+    document.querySelector('#taskDetailBeforeSection h3').style.display = noPhotos ? 'none' : '';
+    document.querySelector('#taskDetailAfterSection h3').style.display = noPhotos ? 'none' : '';
+    document.getElementById('taskCompleteBtn').textContent = noPhotos ? 'Отметить выполненной' : 'Подтвердить выполнение';
+    document.getElementById('taskCompleteSubmitBtn').textContent = noPhotos ? 'Готово' : 'Отправить';
     var tag = taskStatusTag(t.status);
     var badge = document.getElementById('taskDetailStatusBadge');
     badge.className = 'taskStatusBadge ' + tag.cls;
@@ -4457,6 +4476,8 @@
   document.getElementById('taskStartBtn').addEventListener('click', function () {
     document.getElementById('taskStartAction').style.display = 'none';
     document.getElementById('taskStartForm').style.display = 'block';
+    // без фотоотчёта — приступаем сразу, без формы
+    if (currentTaskPhotoReport === 'no') { taskBeforePhotosBase64 = []; document.getElementById('taskStartSubmitBtn').click(); }
   });
 
   document.getElementById('taskBeforePhotoInput').addEventListener('change', function (e) {
@@ -4470,6 +4491,11 @@
     var statusEl5 = document.getElementById('taskStartStatus');
     var btn = document.getElementById('taskStartSubmitBtn');
     var phone = currentUser ? currentUser.phone : '';
+    if (currentTaskPhotoReport === 'yes' && !taskBeforePhotosBase64.length) {
+      statusEl5.textContent = 'Добавьте хотя бы одно фото до начала работ';
+      statusEl5.className = 'error';
+      return;
+    }
     btn.disabled = true;
     statusEl5.textContent = 'Отправка…';
     statusEl5.className = '';
@@ -4510,6 +4536,11 @@
     var btn = document.getElementById('taskCompleteSubmitBtn');
     var phone = currentUser ? currentUser.phone : '';
     var comment = document.getElementById('taskCompleteCommentInput').value.trim();
+    if (currentTaskPhotoReport === 'yes' && !taskAfterPhotosBase64.length) {
+      statusEl6.textContent = 'Добавьте хотя бы одно фото выполненной работы';
+      statusEl6.className = 'error';
+      return;
+    }
     btn.disabled = true;
     statusEl6.textContent = 'Отправка…';
     statusEl6.className = '';
@@ -5212,20 +5243,26 @@
         name: assignee.name,
         objectName: objectName,
         text: text,
-        photos: taskCreatePhotosBase64
+        photos: taskCreatePhotosBase64,
+        photoReport: document.getElementById('taskPhotoReportInput').checked
       })
         .then(function (res) {
           taskCreateBtnEl.disabled = false;
           if (res.status === 'ok') {
-            statusEl4.textContent = 'Задача поставлена';
+            statusEl4.textContent = '';
             statusEl4.className = '';
             assigneeInput.value = '';
             objectInput.value = '';
             textInput.value = '';
+            document.getElementById('taskPhotoReportInput').checked = false;
             taskCreatePhotosBase64 = [];
             taskPhotoInputEl.value = '';
             document.getElementById('taskPhotoPreview').innerHTML = '';
-            loadAdminTasks();
+            toast_('Задача поставлена — ' + assignee.name, 'ok');
+            // к ленте задач: новая задача видна сверху
+            tasksMode = 'all';
+            try { localStorage.setItem('sevmod_tasks_mode', 'all'); } catch (e) {}
+            showTasksScreen();
           } else {
             statusEl4.textContent = res.message || 'Не удалось поставить задачу';
             statusEl4.className = 'error';

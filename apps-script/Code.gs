@@ -1,3 +1,4 @@
+// v77: задачи с фотоотчётом и без: колонка N «Фотоотчёт» (Да/Нет) в «Задачи».
 // v76: getMyTasks(phone, all) — экран «Задачи» показывает и выполненные.
 // v75: уведомление о заявке: «Екатерина просит согласовать», тип и даты
 //      простыми словами, комментарий; в Android-приложении (сборка с
@@ -523,7 +524,7 @@ function doPost(e) {
         data.shift1Start, data.shift1End, data.shift2Start, data.shift2End, data.foremanPhone));
     }
     if (data.action === 'adminCreateTask') {
-      return jsonOutput(adminCreateTask(data.phone, data.targetPhone, data.name, data.objectName, data.text, data.photos));
+      return jsonOutput(adminCreateTask(data.phone, data.targetPhone, data.name, data.objectName, data.text, data.photos, data.photoReport === true));
     }
     if (data.action === 'adminGetTasks') {
       return jsonOutput(adminGetTasks(data.phone));
@@ -1817,11 +1818,12 @@ function adminUpdateObjectShifts(adminPhone, objectName, shift1Start, shift1End,
 // комментарий). Лист создаётся автоматически.
 var TASKS_SHEET_COLUMNS = [
   'ID', 'Телефон', 'ФИО', 'Объект', 'Текст', 'ФотоЗадачи', 'Статус',
-  'Создано', 'ФотоДо', 'Начато', 'ФотоПосле', 'Комментарий', 'Выполнено'
+  'Создано', 'ФотоДо', 'Начато', 'ФотоПосле', 'Комментарий', 'Выполнено', 'Фотоотчёт'
 ];
 var TASK_COL = {
   ID: 1, PHONE: 2, NAME: 3, OBJECT: 4, TEXT: 5, PHOTOS_TASK: 6, STATUS: 7,
-  CREATED: 8, PHOTOS_BEFORE: 9, STARTED: 10, PHOTOS_AFTER: 11, COMMENT: 12, COMPLETED: 13
+  CREATED: 8, PHOTOS_BEFORE: 9, STARTED: 10, PHOTOS_AFTER: 11, COMMENT: 12, COMPLETED: 13,
+  PHOTO_REPORT: 14 // «Да» — нужны фото до/после, «Нет» — без фото, пусто — старые задачи
 };
 var TASK_STATUS = { NEW: 'Актуальна', IN_PROGRESS: 'В работе', DONE: 'Выполнена' };
 
@@ -1844,6 +1846,9 @@ function getOrCreateTasksSheet_() {
     sheet.getRange(1, 1, 1, TASKS_SHEET_COLUMNS.length).setValues([TASKS_SHEET_COLUMNS]);
   }
   ensureTextColumn_(sheet, 2); // колонка B — "Телефон"
+  if (sheet.getRange(1, TASK_COL.PHOTO_REPORT).getValue() !== 'Фотоотчёт') {
+    sheet.getRange(1, TASK_COL.PHOTO_REPORT).setValue('Фотоотчёт');
+  }
   return sheet;
 }
 
@@ -1854,7 +1859,7 @@ function urlsToArray_(cellValue) {
   return str.split(',').map(function (s) { return s.trim(); }).filter(String);
 }
 
-function adminCreateTask(adminPhone, targetPhone, name, objectName, text, photosBase64) {
+function adminCreateTask(adminPhone, targetPhone, name, objectName, text, photosBase64, photoReport) {
   var auth = adminAuth_(adminPhone);
   if (!auth.ok) return { status: 'error', message: auth.error };
 
@@ -1898,6 +1903,7 @@ function adminCreateTask(adminPhone, targetPhone, name, objectName, text, photos
   row[TASK_COL.PHOTOS_AFTER - 1] = '';
   row[TASK_COL.COMMENT - 1] = '';
   row[TASK_COL.COMPLETED - 1] = '';
+  row[TASK_COL.PHOTO_REPORT - 1] = photoReport ? 'Да' : 'Нет';
   sheet.appendRow(row);
 
   sendPush_([phone], 'Новая задача — ' + trimmedObject, taskText.slice(0, 200), { screen: 'taskDetail', taskId: id, tag: 'task-' + id });
@@ -1918,7 +1924,8 @@ function taskRowToObject_(row) {
     startedAt: row[TASK_COL.STARTED - 1] ? Utilities.formatDate(new Date(row[TASK_COL.STARTED - 1]), 'Europe/Moscow', 'dd.MM.yyyy HH:mm') : '',
     afterPhotos: urlsToArray_(row[TASK_COL.PHOTOS_AFTER - 1]),
     comment: row[TASK_COL.COMMENT - 1] || '',
-    completedAt: row[TASK_COL.COMPLETED - 1] ? Utilities.formatDate(new Date(row[TASK_COL.COMPLETED - 1]), 'Europe/Moscow', 'dd.MM.yyyy HH:mm') : ''
+    completedAt: row[TASK_COL.COMPLETED - 1] ? Utilities.formatDate(new Date(row[TASK_COL.COMPLETED - 1]), 'Europe/Moscow', 'dd.MM.yyyy HH:mm') : '',
+    photoReport: row[TASK_COL.PHOTO_REPORT - 1] === 'Да' ? 'yes' : (row[TASK_COL.PHOTO_REPORT - 1] === 'Нет' ? 'no' : '')
   };
 }
 
@@ -4329,7 +4336,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v76';
+var CODE_VERSION = 'v77';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
