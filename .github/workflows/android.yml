@@ -104,3 +104,20 @@ jobs:
             и разрешите установку из этого источника.
           files: android-app/sevmod.apk
           make_latest: true
+
+      # Номер последней сборки рядом с сайтом — приложение сверяется с ним при
+      # каждом открытии (без лимитов GitHub API).
+      - name: Записать номер сборки для проверки обновлений
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4; do
+            git fetch -q origin main && git checkout -q -B main origin/main
+            echo "{\"build\": ${{ github.run_number }}}" > app-version.json
+            git add app-version.json
+            git diff --cached --quiet && break
+            git commit -q -m "Android: сборка ${{ github.run_number }} — номер для проверки обновлений"
+            git push -q origin main && break
+            sleep $((i * 3))
+          done

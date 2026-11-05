@@ -3139,31 +3139,75 @@
   // только новой сборкой: раз в сутки сверяем номер установленной сборки с
   // последней на GitHub и предлагаем обновить.
   var APK_URL = 'https://github.com/sevmodmobiles/sevmodmobiles/releases/latest/download/sevmod.apk';
+  // Номер последней сборки берём из app-version.json в репозитории (его
+  // пишет сборка на GitHub, у raw-файлов нет лимита запросов, как у API);
+  // если файла нет — из GitHub API.
+  function latestApkBuild_() {
+    return fetch('https://raw.githubusercontent.com/sevmodmobiles/sevmodmobiles/main/app-version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('no file');
+      return r.json();
+    }).then(function (j) { return Number(j && j.build) || 0; }).catch(function () {
+      return fetch('https://api.github.com/repos/sevmodmobiles/sevmodmobiles/releases/latest', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { var m = /android-v(\d+)/.exec((j && j.tag_name) || ''); return m ? Number(m[1]) : 0; });
+    });
+  }
+  var apkUpdateShownFor = 0;
+  // При каждом открытии и возврате в приложение (не чаще раза в 5 минут).
   function checkAppUpdate_() {
     var APP = nativePlugin_('App');
     if (!APP) return;
     var last = 0;
     try { last = Number(localStorage.getItem('sevmod_apk_check') || 0); } catch (e) {}
-    if (Date.now() - last < 20 * 3600 * 1000) return;
+    if (Date.now() - last < 5 * 60 * 1000) return;
     try { localStorage.setItem('sevmod_apk_check', String(Date.now())); } catch (e) {}
-    Promise.all([APP.getInfo(), fetch('https://api.github.com/repos/sevmodmobiles/sevmodmobiles/releases/latest', { cache: 'no-store' }).then(function (r) { return r.json(); })])
-      .then(function (v) {
-        var mine = Number(v[0] && v[0].build) || 0;
-        var m = /android-v(\d+)/.exec((v[1] && v[1].tag_name) || '');
-        var latest = m ? Number(m[1]) : 0;
-        if (latest > mine) showAppUpdate_(latest);
-      }).catch(function () {});
+    Promise.all([APP.getInfo(), latestApkBuild_()]).then(function (v) {
+      var mine = Number(v[0] && v[0].build) || 0, latest = v[1];
+      if (latest > mine && apkUpdateShownFor !== latest) { apkUpdateShownFor = latest; showAppUpdate_(latest); }
+    }).catch(function () {});
   }
   function showAppUpdate_(build) {
-    askConfirm('Новая версия приложения', 'Доступна новая версия SEVMOD для Android (сборка ' + build + '). Нажмите «Обновить», скачайте файл и подтвердите установку — все данные сохранятся.',
+    var UPD = nativePlugin_('ApkUpdater');
+    askConfirm('Новая версия приложения', 'Доступна новая версия SEVMOD (сборка ' + build + '). Нажмите «Обновить», затем подтвердите установку — вход и данные сохранятся.',
       'Обновить', function () {
-        closeConfirm();
-        var BR = nativePlugin_('Browser');
-        if (BR) BR.open({ url: APK_URL }); else window.open(APK_URL, '_blank');
+        if (!UPD) {
+          closeConfirm();
+          var BR = nativePlugin_('Browser');
+          if (BR) BR.open({ url: APK_URL }); else window.open(APK_URL, '_blank');
+          return;
+        }
+        installApkUpdate_(UPD);
       });
     document.getElementById('cfOk').style.background = '';
   }
+  // Скачивание внутри приложения с прогрессом, затем системное окно «Обновить?».
+  function installApkUpdate_(UPD) {
+    var ok = document.getElementById('cfOk'), txt = document.getElementById('cfText');
+    UPD.canInstall().then(function (r) {
+      if (!r.allowed) {
+        txt.textContent = 'Один раз нужно разрешить SEVMOD устанавливать обновления: сейчас откроются настройки — включите «Разрешить установку из этого источника», вернитесь назад и снова нажмите «Обновить».';
+        ok.textContent = 'Открыть настройки';
+        cfAction = function () { UPD.openInstallSettings(); ok.textContent = 'Обновить'; cfAction = function () { installApkUpdate_(UPD); }; };
+        return;
+      }
+      ok.disabled = true;
+      txt.textContent = 'Скачиваю обновление… 0%';
+      var sub = UPD.addListener('progress', function (p) {
+        txt.textContent = 'Скачиваю обновление… ' + (p.percent >= 0 ? p.percent + '%' : Math.round(p.bytes / 1048576) + ' МБ');
+      });
+      UPD.downloadAndInstall({ url: APK_URL }).then(function () {
+        ok.disabled = false;
+        closeConfirm();
+      }).catch(function (e) {
+        ok.disabled = false;
+        txt.textContent = 'Не удалось скачать обновление (' + ((e && e.message) || 'нет связи') + '). Проверьте интернет и нажмите «Обновить» ещё раз.';
+      }).then(function () { Promise.resolve(sub).then(function (h) { h && h.remove && h.remove(); }); });
+    }).catch(function () {});
+  }
   setTimeout(checkAppUpdate_, 4000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') setTimeout(checkAppUpdate_, 1500);
+  });
 
   // ===== Push-уведомления (Android-приложение) =====
   // Только в сборке с Firebase (метка SEVMOD-Push в User-Agent). Разрешение
