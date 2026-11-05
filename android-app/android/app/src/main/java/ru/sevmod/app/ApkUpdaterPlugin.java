@@ -1,6 +1,8 @@
 package ru.sevmod.app;
 
+import android.app.PendingIntent;
 import android.content.Intent;
+import android.content.pm.PackageInstaller;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -11,6 +13,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -45,8 +48,54 @@ public class ApkUpdaterPlugin extends Plugin {
         call.resolve();
     }
 
+    static ApkUpdaterPlugin instance;
+
+    @Override
+    public void load() {
+        instance = this;
+    }
+
+    /** Итог установки из InstallResultReceiver — в приложение (событие installStatus). */
+    static void reportInstall(int status, String message) {
+        if (instance == null) return;
+        JSObject r = new JSObject();
+        r.put("status", status);
+        r.put("message", message == null ? "" : message);
+        instance.notifyListeners("installStatus", r);
+    }
+
     @PluginMethod
     public void downloadAndInstall(PluginCall call) {
+        download(call, false);
+    }
+
+    /** Через системный установщик (PackageInstaller) — без окна «Открыть с помощью». */
+    @PluginMethod
+    public void downloadAndInstallSession(PluginCall call) {
+        download(call, true);
+    }
+
+    private void installWithSession(File apk) throws Exception {
+        PackageInstaller pi = getContext().getPackageManager().getPackageInstaller();
+        PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        params.setAppPackageName(getContext().getPackageName());
+        int id = pi.createSession(params);
+        try (PackageInstaller.Session s = pi.openSession(id)) {
+            try (InputStream in = new FileInputStream(apk); OutputStream out = s.openWrite("sevmod", 0, apk.length())) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                s.fsync(out);
+            }
+            Intent cb = new Intent(getContext(), InstallResultReceiver.class);
+            cb.setAction("ru.sevmod.app.INSTALL_RESULT");
+            int f = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+            PendingIntent p = PendingIntent.getBroadcast(getContext(), id, cb, f);
+            s.commit(p.getIntentSender());
+        }
+    }
+
+    private void download(final PluginCall call, final boolean session) {
         final String url = call.getString("url");
         if (url == null || !url.startsWith("https://")) {
             call.reject("bad url");
@@ -96,11 +145,15 @@ public class ApkUpdaterPlugin extends Plugin {
                     }
                 }
                 if (total > 0 && done != total) throw new Exception("download incomplete");
-                Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", apk);
-                Intent i = new Intent(Intent.ACTION_VIEW);
-                i.setDataAndType(uri, "application/vnd.android.package-archive");
-                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(i);
+                if (session) {
+                    installWithSession(apk);
+                } else {
+                    Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", apk);
+                    Intent i = new Intent(Intent.ACTION_VIEW);
+                    i.setDataAndType(uri, "application/vnd.android.package-archive");
+                    i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    getContext().startActivity(i);
+                }
                 JSObject r = new JSObject();
                 r.put("started", true);
                 call.resolve(r);

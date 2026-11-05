@@ -3163,12 +3163,19 @@
     try { localStorage.setItem('sevmod_apk_check', String(Date.now())); } catch (e) {}
     Promise.all([APP.getInfo(), latestApkBuild_()]).then(function (v) {
       var mine = Number(v[0] && v[0].build) || 0, latest = v[1];
+      apkMyBuild = mine;
       if (latest > mine && apkUpdateShownFor !== latest) { apkUpdateShownFor = latest; showAppUpdate_(latest); }
     }).catch(function () {});
   }
+  // Сборки до 7 ставили обновление через окно «Открыть с помощью» — на
+  // части телефонов оно ничего не устанавливало. Для них — через браузер,
+  // с 7-й — через системный установщик внутри приложения.
+  var apkMyBuild = 0;
   function showAppUpdate_(build) {
-    var UPD = nativePlugin_('ApkUpdater');
-    askConfirm('Новая версия приложения', 'Доступна новая версия SEVMOD (сборка ' + build + '). Нажмите «Обновить», затем подтвердите установку — вход и данные сохранятся.',
+    var UPD = apkMyBuild >= 7 ? nativePlugin_('ApkUpdater') : null;
+    askConfirm('Новая версия приложения', UPD
+      ? 'Доступна новая версия SEVMOD (сборка ' + build + '). Нажмите «Обновить», затем подтвердите установку — вход и данные сохранятся.'
+      : 'Доступна новая версия SEVMOD (сборка ' + build + '). Нажмите «Обновить» — скачается файл; откройте его из уведомления о загрузке и нажмите «Обновить» / «Установить». Вход и данные сохранятся.',
       'Обновить', function () {
         if (!UPD) {
           closeConfirm();
@@ -3181,6 +3188,7 @@
     document.getElementById('cfOk').style.background = '';
   }
   // Скачивание внутри приложения с прогрессом, затем системное окно «Обновить?».
+  var apkStatusSub = null;
   function installApkUpdate_(UPD) {
     var ok = document.getElementById('cfOk'), txt = document.getElementById('cfText');
     UPD.canInstall().then(function (r) {
@@ -3195,7 +3203,21 @@
       var sub = UPD.addListener('progress', function (p) {
         txt.textContent = 'Скачиваю обновление… ' + (p.percent >= 0 ? p.percent + '%' : Math.round(p.bytes / 1048576) + ' МБ');
       });
-      UPD.downloadAndInstall({ url: APK_URL }).then(function () {
+      if (!apkStatusSub) apkStatusSub = UPD.addListener('installStatus', function (st) {
+        // 0 — установлено (приложение перезапустится само), 3 — отменено
+        if (st.status === 0) return;
+        askConfirm('Обновление не установлено', st.status === 3
+          ? 'Установка отменена. Нажмите «Обновить», чтобы попробовать ещё раз.'
+          : 'Телефон не установил обновление' + (st.message ? ' (' + escapeHtml(st.message) + ')' : '') + '. Нажмите «Скачать» — файл откроется через браузер.',
+          st.status === 3 ? 'Обновить' : 'Скачать', function () {
+            if (st.status === 3) { installApkUpdate_(UPD); return; }
+            closeConfirm();
+            var BR = nativePlugin_('Browser');
+            if (BR) BR.open({ url: APK_URL }); else window.open(APK_URL, '_blank');
+          });
+        document.getElementById('cfOk').style.background = '';
+      });
+      UPD.downloadAndInstallSession({ url: APK_URL }).then(function () {
         ok.disabled = false;
         closeConfirm();
       }).catch(function (e) {
