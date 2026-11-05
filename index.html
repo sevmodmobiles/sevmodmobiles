@@ -734,8 +734,39 @@
   .photoGrid.big .ph img { object-fit: contain; }
   .photoGrid.big .ph .phN { font-size: 13px; padding: 3px 10px; right: 12px; bottom: 12px; border-radius: 12px; }
   #screenTaskDetail { width: 100%; max-width: 440px; }
-  #taskDetailExecutor { font-size: 14px; margin: 2px 0 8px; color: var(--muted); }
-  #taskDetailExecutor b { color: var(--text); }
+  /* Шапка карточки задачи: объект + статус, текст, «чипы» (исполнитель,
+     фотоотчёт, фото), путь задачи «Поставлена → В работе → Выполнена». */
+  .tdHead { display: flex; align-items: flex-start; gap: 10px; }
+  .tdObjWrap { flex: 1; min-width: 0; }
+  .tdLbl { font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .tdObj { font-size: 20px; font-weight: 800; line-height: 1.2; margin-top: 2px; overflow-wrap: anywhere; }
+  .tdHead .taskStatusBadge { flex: none; margin-top: 2px; }
+  .tdText {
+    margin: 12px 0 0; padding: 12px 14px; font-size: 17px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere;
+    background: var(--bg); border-radius: 12px; border-left: 3px solid var(--blue);
+  }
+  .tdChips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+  .tdChip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 20px;
+    background: var(--bg); border: 1px solid var(--border); font-size: 12.5px; font-weight: 600;
+  }
+  .tdChip svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
+  .tdChip.req { color: var(--blue); border-color: rgba(66,133,244,.45); }
+  .tdChip.req svg { color: var(--blue); }
+  .tdSteps { display: flex; margin: 16px 0 4px; }
+  .tdStep { flex: 1; position: relative; text-align: center; font-size: 12px; color: var(--muted); }
+  .tdStep::before {
+    content: ''; position: absolute; top: 6px; left: -50%; right: 50%; height: 2px; background: var(--border);
+  }
+  .tdStep:first-child::before { display: none; }
+  .tdStep .dot { position: relative; z-index: 1; display: block; width: 14px; height: 14px; margin: 0 auto 6px; border-radius: 50%; background: var(--card); border: 2px solid var(--border); box-sizing: border-box; }
+  .tdStep.on { color: var(--text); }
+  .tdStep.on .dot { background: var(--green); border-color: var(--green); }
+  .tdStep.on::before { background: var(--green); }
+  .tdStep.cur .dot { box-shadow: 0 0 0 4px rgba(52,168,83,.22); }
+  .tdStep b { display: block; font-size: 12.5px; font-weight: 700; }
+  .tdStep span { display: block; margin-top: 1px; font-variant-numeric: tabular-nums; }
+  #taskDetailStartedMeta, #taskDetailCompletedMeta { display: none; }
   /* список задач — шире: меньше внутренние поля карточки-подложки;
      снизу место под кнопку «+», чтобы она не закрывала последнюю задачу */
   .card.tasksCard { padding: 14px 10px 6px; }
@@ -1718,11 +1749,15 @@
     <div class="card">
       <div id="taskDetailLoading" class="statsEmpty"><span class="spinner"></span> Загрузка…</div>
       <div id="taskDetailBody" style="display:none;">
-        <div id="taskDetailStatusBadge" class="taskStatusBadge"></div>
-        <h2 id="taskDetailObjectTitle" style="margin-top:8px;"></h2>
+        <div class="tdHead">
+          <div class="tdObjWrap"><div class="tdLbl">Объект</div><div id="taskDetailObjectTitle" class="tdObj"></div></div>
+          <span id="taskDetailStatusBadge" class="taskStatusBadge"></span>
+        </div>
+        <div id="taskDetailText" class="tdText"></div>
+        <div id="taskDetailChips" class="tdChips"></div>
+        <div id="taskDetailSteps" class="tdSteps"></div>
         <div id="taskDetailExecutor" style="display:none;"></div>
-        <div id="taskDetailText" class="taskText"></div>
-        <div id="taskDetailMeta" class="taskDate"></div>
+        <div id="taskDetailMeta" class="taskDate" style="display:none;"></div>
         <div id="taskDetailTaskPhotos" class="photoGrid big"></div>
 
         <div id="taskDetailBeforeSection" style="display:none; margin-top:16px;">
@@ -4231,6 +4266,8 @@
     return m[1] + '.' + m[2] + (Number(m[3]) === new Date().getFullYear() ? '' : '.' + m[3].slice(2));
   }
   var T_ICO_CAL = '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>';
+  var TD_ICO_USER = '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/></svg>';
+  var TD_ICO_TEXT = '<svg viewBox="0 0 24 24"><path d="M5 6h14M5 11h14M5 16h9"/></svg>';
   var T_ICO_DONE = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   var T_ICO_PHOTO = '<svg viewBox="0 0 24 24"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>';
   function taskCardHtml_(t, feed) {
@@ -4740,7 +4777,7 @@
     // чужая задача (администратор открыл из ленты) — только просмотр
     var mine = !currentUser || !t.phone || t.phone === currentUser.phone;
     var ex = document.getElementById('taskDetailExecutor');
-    ex.style.display = mine ? 'none' : 'block';
+    ex.style.display = 'none'; // исполнитель — в «чипах» ниже
     ex.innerHTML = mine ? '' : 'Исполнитель: <b>' + escapeHtml(personShort_(t.name) || t.name || '') + '</b>';
     var noPhotos = currentTaskPhotoReport === 'no';
     ['taskBeforePhotoWrap', 'taskAfterPhotoWrap'].forEach(function (id) { document.getElementById(id).style.display = noPhotos ? 'none' : ''; });
@@ -4754,6 +4791,21 @@
     badge.textContent = tag.label;
     document.getElementById('taskDetailObjectTitle').textContent = t.objectName || 'Задача';
     document.getElementById('taskDetailText').textContent = t.text;
+    // чипы: исполнитель (в чужой задаче), фотоотчёт, сколько фото
+    var nPh = (t.taskPhotos || []).length + (t.beforePhotos || []).length + (t.afterPhotos || []).length;
+    var chips = [];
+    if (!mine) chips.push('<span class="tdChip">' + TD_ICO_USER + escapeHtml(personShort_(t.name) || t.name || '') + '</span>');
+    if (t.photoReport === 'yes') chips.push('<span class="tdChip req">' + T_ICO_PHOTO + 'Фотоотчёт</span>');
+    else if (t.photoReport === 'no') chips.push('<span class="tdChip">' + TD_ICO_TEXT + 'Без фото</span>');
+    if (nPh) chips.push('<span class="tdChip">' + T_ICO_PHOTO + nPh + ' фото</span>');
+    document.getElementById('taskDetailChips').innerHTML = chips.join('');
+    // путь задачи
+    var stage = t.status === 'Выполнена' ? 3 : (t.status === 'В работе' ? 2 : 1);
+    var dt = function (v) { var m = /^(\d{2})\.(\d{2})\.(\d{2,4})\s+(\d{1,2}:\d{2})/.exec(String(v || '')); return m ? m[1] + '.' + m[2] + ', ' + m[4] : (v ? taskWhen_(v) : '—'); };
+    document.getElementById('taskDetailSteps').innerHTML = [['Поставлена', t.createdAt], ['В работе', t.startedAt], ['Выполнена', t.completedAt]].map(function (x, i) {
+      var on = i < stage;
+      return '<div class="tdStep' + (on ? ' on' : '') + (i === stage - 1 && stage < 3 ? ' cur' : '') + '"><i class="dot"></i><b>' + x[0] + '</b><span>' + (on ? escapeHtml(dt(x[1])) : '—') + '</span></div>';
+    }).join('');
     renderPhotoGrid(document.getElementById('taskDetailTaskPhotos'), t.taskPhotos);
     setTimeout(sizeTaskPhotos_, 0);
     document.getElementById('taskDetailMeta').textContent = 'Поставлена: ' + shortYear_(t.createdAt);
