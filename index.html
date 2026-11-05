@@ -536,6 +536,19 @@
     background: linear-gradient(90deg, transparent 0, var(--blue) 40%, transparent 80%) 0 0 / 50% 100% no-repeat; }
   #busyBar.on { opacity: 1; animation: busyMove 1.1s linear infinite; }
   @keyframes busyMove { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+  #toastBox { position: fixed; left: 0; right: 0; bottom: calc(92px + env(safe-area-inset-bottom, 0px)); z-index: 3500;
+    display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0 16px; pointer-events: none; }
+  .toast { pointer-events: auto; max-width: 420px; width: 100%; box-sizing: border-box; display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 12px 12px 14px; border-radius: 12px; font-size: 14px; line-height: 1.4; color: #fff;
+    box-shadow: 0 6px 20px rgba(0,0,0,.25); animation: toastIn .18s ease-out; transition: opacity .2s, transform .2s; }
+  .toast.t-ok { background: #1f7a43; }
+  .toast.t-error { background: #b3261e; }
+  .toast.t-info { background: #3a3a40; }
+  #toastBox .toast { font-weight: 500; }
+  .toast.out { opacity: 0; transform: translateY(6px); }
+  .toastText { flex: 1; }
+  .toast .toastClose { background: transparent; color: inherit; border: 0; width: auto; margin: 0; padding: 0 2px; font-size: 20px; line-height: 1; opacity: .8; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   .skelList { display: grid; gap: 10px; padding: 4px 0; width: 360px; max-width: 100%; }
   .skelRow { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; }
   .skelLine { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--border) 0, var(--bg) 50%, var(--border) 100%) 0 0 / 200% 100%; animation: skelShine 1.3s ease-in-out infinite; }
@@ -2567,6 +2580,51 @@
     busyCount = Math.max(0, busyCount - 1);
     if (!busyCount) { clearTimeout(busyTimer); document.getElementById('busyBar').classList.remove('on'); }
   }
+  // ===== Мгновенные действия: изменение видно сразу, отправка — в фоне =====
+  // Экран меняется сразу после нажатия, запрос уходит в фоне (keepalive —
+  // дойдёт, даже если приложение свернут). Итог — коротким уведомлением
+  // внизу. Если сервер отказал или нет связи — изменение откатывается
+  // (данные перечитываются с сервера) и показывается понятная ошибка.
+  var writesInFlight = 0;
+  function bgWrite_(body, opts) {
+    opts = opts || {};
+    writesInFlight++;
+    var small = JSON.stringify(body).length < 60000;
+    return apiPost(body, { keepalive: small }).then(function (res) {
+      writesInFlight--;
+      if (!res || res.status !== 'ok') {
+        var m = (res && res.message) || 'сервер не принял изменение';
+        toast_((opts.failPrefix || 'Не сохранилось') + ': ' + m + (opts.rollback ? '. Изменение отменено.' : ''), 'error');
+        if (opts.rollback) opts.rollback(m);
+        return res;
+      }
+      var okText = typeof opts.ok === 'function' ? opts.ok(res) : opts.ok;
+      if (okText) toast_(okText, res.conflicts ? 'error' : 'ok');
+      if (opts.done) opts.done(res);
+      return res;
+    }, function (err) {
+      writesInFlight--;
+      toast_((opts.failPrefix || 'Не сохранилось') + ': нет связи с сервером' + (opts.rollback ? '. Изменение отменено — повторите, когда появится интернет.' : ''), 'error');
+      if (opts.rollback) opts.rollback(String(err));
+    });
+  }
+  // Уведомление внизу экрана. Успех исчезает сам, ошибка — по нажатию.
+  function toast_(text, kind) {
+    var box = document.getElementById('toastBox');
+    if (!box) return;
+    var el = document.createElement('div');
+    el.className = 'toast t-' + (kind || 'ok');   // не «error»: у .error в стилях красный текст !important
+    el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+    el.innerHTML = '<span class="toastText"></span><button type="button" class="toastClose" aria-label="Закрыть">×</button>';
+    el.querySelector('.toastText').textContent = text;
+    var close = function () { el.classList.add('out'); setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 200); };
+    el.querySelector('.toastClose').addEventListener('click', close);
+    box.appendChild(el);
+    while (box.children.length > 3) box.removeChild(box.firstChild);
+    if (kind !== 'error') setTimeout(close, 3500);
+    if (kind === 'error' && navigator.vibrate) { try { navigator.vibrate(120); } catch (e) {} }
+  }
+
   // Замер скорости запросов на этом телефоне — для панели администратора.
   var TIMING_KEY = 'sevmod_timing_v1';
   function timingRecord_(action, ms) {
@@ -3463,20 +3521,28 @@
         '</div>' +
         (btns ? '<div class="absReqBtns">' + btns + '</div>' : '') + '</div>';
     }).join('');
+    var shownRes = res;
     listEl.querySelectorAll('button[data-decision]').forEach(function (b) {
       b.addEventListener('click', function () {
-        listEl.querySelectorAll('button').forEach(function (x) { x.disabled = true; });
-        apiPost({
-          action: 'adminDecideAbsence',
-          phone: currentUser && currentUser.phone,
-          id: Number(b.getAttribute('data-id')),
-          decision: b.getAttribute('data-decision')
-        })
-          .then(renderAdminAbsences)
-          .catch(function (err) {
-            listEl.querySelectorAll('button').forEach(function (x) { x.disabled = false; });
-            alert('Ошибка соединения: ' + err);
-          });
+        var id = Number(b.getAttribute('data-id')), decision = b.getAttribute('data-decision');
+        // Сразу: заявка уходит в «Рассмотренные» с новым статусом; запись — в фоне.
+        var next = JSON.parse(JSON.stringify(shownRes)), item = null;
+        next.items = next.items.filter(function (it) { if (Number(it.id) === id) { item = it; return false; } return true; });
+        if (item) {
+          item.status = decision === 'approve' ? 'Согласовано' : 'Не согласовано';
+          item.decidedBy = (currentUser && currentUser.name) || '';
+          var firstDone = 0;
+          while (firstDone < next.items.length && next.items[firstDone].status === 'На согласовании') firstDone++;
+          next.items.splice(firstDone, 0, item);
+          next.pendingCount = Math.max(0, (Number(next.pendingCount) || 0) - 1);
+        }
+        renderAdminAbsences(next);
+        bgWrite_({ action: 'adminDecideAbsence', phone: currentUser && currentUser.phone, id: id, decision: decision }, {
+          ok: (decision === 'approve' ? '✓ Согласовано: ' : '✓ Отклонено: ') + (item ? item.name : ''),
+          failPrefix: 'Решение не сохранилось',
+          done: function (fresh) { if (fresh && fresh.items) renderAdminAbsences(fresh); },
+          rollback: function () { renderAdminAbsences(shownRes); }
+        });
       });
     });
   }
@@ -4163,10 +4229,14 @@
         var objectName = btn.getAttribute('data-name');
         var statusEl = document.getElementById('objSaveStatus' + idx);
         var foremanInput = document.getElementById('objForeman' + idx);
-        btn.disabled = true;
-        statusEl.textContent = 'Сохраняем…';
-        statusEl.style.color = 'var(--muted)';
-        apiPost({
+        // Сразу «Сохранено»; итог сервера — уведомлением, при отказе — прежние значения.
+        var fieldIds = ['objShift1Start', 'objShift1End', 'objShift2Start', 'objShift2End', 'objForeman'].map(function (p2) { return p2 + idx; });
+        var prevVals = fieldIds.map(function (id) { return document.getElementById(id).defaultValue; });
+        fieldIds.forEach(function (id) { var el = document.getElementById(id); el.defaultValue = el.value; });
+        statusEl.textContent = 'Сохранено ✓';
+        statusEl.style.color = 'var(--green)';
+        setTimeout(function () { statusEl.textContent = ''; }, 2500);
+        bgWrite_({
           action: 'adminUpdateObjectShifts',
           phone: currentUser && currentUser.phone,
           objectName: objectName,
@@ -4175,27 +4245,14 @@
           shift2Start: document.getElementById('objShift2Start' + idx).value,
           shift2End: document.getElementById('objShift2End' + idx).value,
           foremanPhone: resolveForemanPhoneFromInput_(foremanInput)
-        })
-          .then(function (res) {
-            btn.disabled = false;
-            if (res.status === 'ok') {
-              // Список не перестраиваем целиком — чтобы раскрытая карточка
-              // не "захлопнулась" сразу после сохранения, просто обновляем
-              // карту объектов (на случай поиска) и показываем подтверждение.
-              lastAdminObjectsResponse = res;
-              statusEl.textContent = 'Сохранено ✓';
-              statusEl.style.color = 'var(--green)';
-              setTimeout(function () { statusEl.textContent = ''; }, 2500);
-            } else {
-              statusEl.textContent = res.message || 'Не удалось сохранить';
-              statusEl.style.color = 'var(--red)';
-            }
-          })
-          .catch(function (err) {
-            btn.disabled = false;
-            statusEl.textContent = 'Ошибка соединения: ' + err;
-            statusEl.style.color = 'var(--red)';
-          });
+        }, {
+          failPrefix: 'Объект «' + objectName + '» не сохранился',
+          // Список не перестраиваем — раскрытая карточка не «захлопнется».
+          done: function (res) { lastAdminObjectsResponse = res; },
+          rollback: function () {
+            fieldIds.forEach(function (id, i) { var el = document.getElementById(id); if (el) { el.value = prevVals[i]; el.defaultValue = prevVals[i]; } });
+          }
+        });
       });
     });
   }
@@ -4246,25 +4303,15 @@
           btn.addEventListener('click', function () {
             var input = document.getElementById(btn.getAttribute('data-input'));
             var phone = btn.getAttribute('data-phone');
-            var rate = input.value;
-            btn.disabled = true;
-            btn.textContent = '…';
-            apiPost({ action: 'adminSetRate', phone: currentUser && currentUser.phone, targetPhone: phone, rate: rate })
-              .then(function (res) {
-                btn.disabled = false;
-                if (res.status === 'ok') {
-                  btn.textContent = 'Сохранено ✓';
-                  setTimeout(function () { btn.textContent = 'Сохранить'; }, 1500);
-                } else {
-                  btn.textContent = 'Сохранить';
-                  alert(res.message || 'Не удалось сохранить');
-                }
-              })
-              .catch(function (err) {
-                btn.disabled = false;
-                btn.textContent = 'Сохранить';
-                alert('Ошибка соединения: ' + err);
-              });
+            var rate = input.value, prev = input.defaultValue;
+            // Сразу «Сохранено»; не сохранилось — вернём прежнюю ставку.
+            input.defaultValue = rate;
+            btn.textContent = 'Сохранено ✓';
+            setTimeout(function () { btn.textContent = 'Сохранить'; }, 1500);
+            bgWrite_({ action: 'adminSetRate', phone: currentUser && currentUser.phone, targetPhone: phone, rate: rate }, {
+              failPrefix: 'Ставка не сохранилась',
+              rollback: function () { input.value = prev; input.defaultValue = prev; btn.textContent = 'Сохранить'; }
+            });
           });
         });
       }, function (err) {
@@ -5248,56 +5295,62 @@
       whoText = payload.worker;
     }
     if (!payload.objectName) { setExpStatus('Укажите объект', 'error'); return; }
-    btn.disabled = true;
-    setExpStatus('Записываю в таблицу…');
-    apiPost(payload)
-      .then(function (res) {
-        btn.disabled = false;
-        if (res.status === 'ok') {
-          var sentDays = daysBetween_(payload.date, payload.dateTo);
-          var n = res.days || 1;
-          var rowsN = res.rows || n;
-          if (payload.entries && !res.rows) {
-            setExpStatus('Скрипт в таблице устарел и не умеет записывать бригаду — обновите его до v43', 'error');
-            return;
-          }
-          var msg = '✓ ' + whoText + ': добавлено ' + rowsN + ' ' + (rowsN % 10 === 1 && rowsN % 100 !== 11 ? 'строка' : (rowsN % 10 >= 2 && rowsN % 10 <= 4 && (rowsN % 100 < 12 || rowsN % 100 > 14) ? 'строки' : 'строк')) +
-            ' (' + fmtIsoRu_(payload.date) + (n > 1 ? ' – ' + fmtIsoRu_(payload.dateTo) : '') + ')' +
-            ', статус «' + payload.status + '»' +
-            (res.sorted ? ', таблица отсортирована по дате' : '');
-          if (sentDays > 1 && !res.days) {
-            // Старый серверный скрипт не знает про период и записал одну строку.
-            msg += '. Внимание: записана только первая дата — обновите скрипт в таблице до v37';
-          }
-          setExpStatus(msg + (res.warning ? '. Внимание: ' + res.warning : ''), 'success');
-          // Форма обнуляется полностью: дата — снова сегодня, поля пустые.
-          ['expWorker', 'expBrigadier', 'expObject', 'expRate', 'expComment'].forEach(function (id) {
-            document.getElementById(id).value = '';
-          });
-          document.getElementById('expAddWorker').value = '';
-          document.getElementById('expPayStatus').value = expDefaultStatus_();
-          updatePayStatusDot();
-          // Сводка «Расходы» должна загрузиться заново — суммы изменились.
-          expOverview = null;
-          expRange = { from: isoToday_(), to: isoToday_() };
-          // Запомненный состав этой бригады обновляем локально (сервер вернёт его же при следующей загрузке).
-          if (payload.entries) {
-            expLookups.brigades[payload.brigadier] = payload.entries.map(function (e) { return { worker: e.worker, rate: Number(e.rate) }; });
-          }
-          (payload.entries || [{ worker: payload.worker, rate: payload.rate }]).forEach(function (e) {
-            if (e.worker) expLookups.lastRates[e.worker] = Number(e.rate);
-          });
-          updateBrigadeMode();
-          renderExpDateField();
-          EXP_PICK_FIELDS.forEach(function (f) { showPickError(f.id, ''); });
-        } else {
-          setExpStatus(res.message || 'Не удалось записать', 'error');
+    // Сразу: форма очищена и готова к следующей записи, запись — в фоне.
+    // Не записалось — поля вернутся, и появится понятная ошибка.
+    var snapIds = ['expWorker', 'expBrigadier', 'expObject', 'expRate', 'expComment', 'expAddWorker', 'expPayStatus'];
+    var snap = { vals: snapIds.map(function (id) { return document.getElementById(id).value; }), range: { from: expRange.from, to: expRange.to } };
+    ['expWorker', 'expBrigadier', 'expObject', 'expRate', 'expComment'].forEach(function (id) {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('expAddWorker').value = '';
+    document.getElementById('expPayStatus').value = expDefaultStatus_();
+    updatePayStatusDot();
+    expRange = { from: isoToday_(), to: isoToday_() };
+    // Запомненный состав этой бригады и ставки обновляем локально сразу.
+    if (payload.entries) {
+      expLookups.brigades[payload.brigadier] = payload.entries.map(function (e) { return { worker: e.worker, rate: Number(e.rate) }; });
+    }
+    (payload.entries || [{ worker: payload.worker, rate: payload.rate }]).forEach(function (e) {
+      if (e.worker) expLookups.lastRates[e.worker] = Number(e.rate);
+    });
+    updateBrigadeMode();
+    renderExpDateField();
+    EXP_PICK_FIELDS.forEach(function (f) { showPickError(f.id, ''); });
+    setExpStatus('Отправлено: ' + whoText + ' — записываю в таблицу. Можно вносить следующую запись.');
+    expWriteStart_();
+    bgWrite_(payload, {
+      ok: function (res) {
+        var sentDays = daysBetween_(payload.date, payload.dateTo);
+        var n = res.days || 1;
+        var rowsN = res.rows || n;
+        if (payload.entries && !res.rows) {
+          setExpStatus('Скрипт в таблице устарел и не умеет записывать бригаду — обновите его до v43', 'error');
+          return '';
         }
-      })
-      .catch(function (err) {
-        btn.disabled = false;
-        setExpStatus('Ошибка соединения: ' + err, 'error');
-      });
+        var msg = '✓ ' + whoText + ': добавлено ' + rowsN + ' ' + (rowsN % 10 === 1 && rowsN % 100 !== 11 ? 'строка' : (rowsN % 10 >= 2 && rowsN % 10 <= 4 && (rowsN % 100 < 12 || rowsN % 100 > 14) ? 'строки' : 'строк')) +
+          ' (' + fmtIsoRu_(payload.date) + (n > 1 ? ' – ' + fmtIsoRu_(payload.dateTo) : '') + ')' +
+          ', статус «' + payload.status + '»' +
+          (res.sorted ? ', таблица отсортирована по дате' : '');
+        if (sentDays > 1 && !res.days) {
+          // Старый серверный скрипт не знает про период и записал одну строку.
+          msg += '. Внимание: записана только первая дата — обновите скрипт в таблице до v37';
+        }
+        msg += res.warning ? '. Внимание: ' + res.warning : '';
+        setExpStatus(msg, 'success');
+        return msg;
+      },
+      failPrefix: 'Не записалось (' + whoText + ')',
+      done: function () { expWriteEnd_(false); },
+      rollback: function (m) {
+        expWriteEnd_(true);
+        snapIds.forEach(function (id, i) { document.getElementById(id).value = snap.vals[i]; });
+        expRange = snap.range;
+        updatePayStatusDot();
+        updateBrigadeMode();
+        renderExpDateField();
+        setExpStatus('Не записалось: ' + m + '. Поля восстановлены — проверьте и отправьте ещё раз.', 'error');
+      }
+    });
   });
 
   // ===== Расходы: сводка (экран "Расходы") и просмотр по людям =====
@@ -5328,11 +5381,70 @@
     expOverview = c.d;
     return true;
   }
+  // Мгновенные изменения расходов: правим загруженную сводку на месте
+  // (статус, суммы по статусам, удаление строк), отправляем в фоне и после
+  // последней отправки перечитываем сводку с сервера. Пока изменения в пути,
+  // ответы «загрузить сводку» не затирают показанное.
+  var expWrites = 0;
+  function expRerender_() {
+    if (!expOverview) return;
+    if (screenExpView.style.display === 'block') renderExpView();
+    if (screenExpPay.style.display === 'block') renderPay();
+    if (screenExpHub.style.display === 'block') renderExpSummary();
+  }
+  function expSummaryAdd_(label, amt) {
+    var k = expKey_(label);
+    var hit = (expOverview.summary || []).filter(function (x) { return expKey_(x.label) === k; })[0];
+    if (hit && typeof hit.value === 'number') hit.value += amt;
+  }
+  function expApplyStatus_(rowNums, status, payDate, cm) {
+    if (!expOverview) return;
+    var f = expOverview.fields, iRow = f.indexOf('row'), iSt = f.indexOf('status'), iPd = f.indexOf('payDate'),
+      iCm = f.indexOf('comment'), iPayer = f.indexOf('payer'), iTot = f.indexOf('total');
+    var want = {}; rowNums.forEach(function (n) { want[n] = true; });
+    expOverview.rows.forEach(function (r) {
+      if (!want[r[iRow]]) return;
+      var amt = Number(r[iTot]) || 0;
+      expSummaryAdd_(r[iSt], -amt); expSummaryAdd_(status, amt);
+      r[iSt] = status;
+      if (iPd >= 0 && payDate !== undefined) r[iPd] = payDate || '';
+      var x = cm && cm[r[iRow]];
+      if (x) {
+        if (x.comment && iCm >= 0) r[iCm] = r[iCm] ? r[iCm] + ' · ' + x.comment : x.comment;
+        if (x.payer && iPayer >= 0) r[iPayer] = x.payer;
+      }
+    });
+  }
+  function expApplyDelete_(rowNums) {
+    if (!expOverview) return;
+    var f = expOverview.fields, iRow = f.indexOf('row'), iSt = f.indexOf('status'), iTot = f.indexOf('total');
+    var del = rowNums.map(Number).sort(function (a, b) { return a - b; }), want = {};
+    del.forEach(function (n) { want[n] = true; });
+    expOverview.rows = expOverview.rows.filter(function (r) {
+      if (!want[r[iRow]]) return true;
+      expSummaryAdd_(r[iSt], -(Number(r[iTot]) || 0));
+      return false;
+    });
+    // Строки ниже удалённых в таблице сдвигаются вверх — номера тоже.
+    expOverview.rows.forEach(function (r) {
+      var n = Number(r[iRow]), shift = 0;
+      for (var i = 0; i < del.length && del[i] < n; i++) shift++;
+      r[iRow] = n - shift;
+    });
+  }
+  function expWriteStart_() { expWrites++; }
+  function expWriteEnd_(failed) {
+    expWrites = Math.max(0, expWrites - 1);
+    if (expWrites > 0) return;
+    if (failed) expOverview = null;
+    loadExpOverview(function (err) { if (!err) expRerender_(); });
+  }
   function loadExpOverview(onDone) {
     busyStart_();
     swrFetch_({ action: 'adminExpenseOverview', phone: currentUser && currentUser.phone })
       .finally(busyEnd_)
       .then(function (res) {
+        if (expWrites > 0 && expOverview) { onDone(null); return; }
         if (res && res.status === 'ok') { expOverview = res; onDone(null); }
         else onDone((res && res.message) || 'Не удалось загрузить расходы');
       })
@@ -5495,18 +5607,19 @@
     var err = !mv.from ? 'Укажите, от кого' : !mv.to ? 'Укажите, кому' : !(amt > 0) ? 'Укажите сумму' : !mv.date ? 'Укажите дату' :
       !mv.method ? 'Укажите, как передали' : (mv.method === 'card' && !mv.bank) ? 'Укажите банк' : '';
     if (err) { st.textContent = err; st.className = 'error'; return; }
-    btn.disabled = true; st.textContent = 'Записываю…'; st.className = '';
-    apiPost({ action: 'adminAddCashMove', phone: currentUser && currentUser.phone, from: mv.from, to: mv.to, amount: amt, date: mv.date,
-      method: mv.method === 'cash' ? 'наличными' : 'на карту ' + mv.bank, comment: mv.comment.trim() })
-      .then(function (res) {
-        if (!res || res.status !== 'ok') {
-          btn.disabled = false; st.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v57'; st.className = 'error'; return;
-        }
-        cmModal.classList.remove('open');
-        expOverview = null;
-        loadExpOverview(function (e2) { if (!e2) { renderExpSummary(); } });
-      })
-      .catch(function (e2) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + e2; st.className = 'error'; });
+    // Сразу закрываем окно; запись — в фоне. Не записалось — окно снова
+    // откроется с теми же данными.
+    st.textContent = ''; st.className = '';
+    cmModal.classList.remove('open');
+    var who = mv.from + ' → ' + mv.to + ': ' + money_(amt);
+    expWriteStart_();
+    bgWrite_({ action: 'adminAddCashMove', phone: currentUser && currentUser.phone, from: mv.from, to: mv.to, amount: amt, date: mv.date,
+      method: mv.method === 'cash' ? 'наличными' : 'на карту ' + mv.bank, comment: mv.comment.trim() }, {
+      ok: '✓ Передача записана: ' + who,
+      failPrefix: 'Передача не записалась',
+      done: function () { expWriteEnd_(false); },
+      rollback: function () { expWriteEnd_(true); btn.disabled = false; cmModal.classList.add('open'); }
+    });
   });
 
   function renderExpSummary() {
@@ -5831,33 +5944,24 @@
       document.getElementById('cfReason').focus();
       return;
     }
-    okBtn.disabled = true; st.textContent = 'Удаляю…'; st.className = '';
-    apiPost({ action: 'adminDeleteExpenseRows', phone: currentUser && currentUser.phone, reason: reason,
-      items: rows.map(function (r) { return { row: r.row, key: payKey_(r) }; }) })
-      .then(function (res) {
-        if (!res || res.status !== 'ok') {
-          okBtn.disabled = false;
-          st.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v53';
-          st.className = 'error'; return;
-        }
-        closeConfirm();
-        var tot = document.getElementById('expTotals');
-        expOverview = null;
-        expOpenPeople = {}; expSel = {};
-        document.getElementById('expSelBar').hidden = true;
-        loadExpOverview(function (err) {
-          if (err) { document.getElementById('expPeople').innerHTML = '<div class="statsEmpty">' + escapeHtml(err) + '</div>'; return; }
-          renderExpView();
-          var note = document.createElement('div');
-          note.className = res.conflicts ? 'error' : 'success';
-          note.style.margin = '0 0 8px';
-          note.textContent = '✓ ' + doneText + ': удалено ' + res.deleted + ' зап.' +
-            (res.conflicts ? '. ' + res.conflicts + ' зап. изменились в таблице и не удалены — проверьте список' : '');
-          tot.parentNode.insertBefore(note, tot);
-          setTimeout(function () { if (note.parentNode) note.parentNode.removeChild(note); }, 6000);
-        });
-      })
-      .catch(function (err) { okBtn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+    var body = { action: 'adminDeleteExpenseRows', phone: currentUser && currentUser.phone, reason: reason,
+      items: rows.map(function (r) { return { row: r.row, key: payKey_(r) }; }) };
+    // Сразу: записи исчезают с экрана; удаление в таблице — в фоне.
+    closeConfirm();
+    expSel = {};
+    document.getElementById('expSelBar').hidden = true;
+    expApplyDelete_(rows.map(function (r) { return r.row; }));
+    if (screenExpView.style.display === 'block') renderExpView();
+    expWriteStart_();
+    bgWrite_(body, {
+      ok: function (res) {
+        return '✓ ' + doneText + ': удалено ' + res.deleted + ' зап.' +
+          (res.conflicts ? '. ' + res.conflicts + ' зап. изменились в таблице и не удалены — проверьте список' : '');
+      },
+      failPrefix: 'Не удалилось',
+      done: function () { expWriteEnd_(false); },
+      rollback: function () { expWriteEnd_(true); }
+    });
   }
 
   // ----- Смена статуса из «Расходы по людям» -----
@@ -5916,31 +6020,25 @@
     }
     sendSt_({});
     function sendSt_(cm) {
-    okBtn.disabled = true; st.textContent = 'Сохраняю…'; st.className = '';
-    apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: stPick, payDate: payDate, reason: reason,
-      items: rows.map(function (r) { var x = cm[r.row] || {}; return { row: r.row, key: payKey_(r), comment: x.comment || '', payer: x.payer || '' }; }) })
-      .then(function (res) {
-        if (!res || res.status !== 'ok') {
-          okBtn.disabled = false;
-          st.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v55';
-          st.className = 'error'; return;
-        }
-        closeStatusModal_();
-        var tot = document.getElementById('expTotals');
-        expOverview = null; expSel = {};
-        loadExpOverview(function (err) {
-          if (err) { document.getElementById('expPeople').innerHTML = '<div class="statsEmpty">' + escapeHtml(err) + '</div>'; return; }
-          renderExpView();
-          var note = document.createElement('div');
-          note.className = res.conflicts ? 'error' : 'success';
-          note.style.margin = '0 0 8px';
-          note.textContent = '✓ Статус «' + res.newStatus + '»: ' + res.updated + ' зап.' +
-            (res.conflicts ? '. ' + res.conflicts + ' зап. изменились в таблице и не тронуты — проверьте список' : '');
-          tot.parentNode.insertBefore(note, tot);
-          setTimeout(function () { if (note.parentNode) note.parentNode.removeChild(note); }, 6000);
-        });
-      })
-      .catch(function (err) { okBtn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+    var newSt = stPick;
+    var body = { action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: newSt, payDate: payDate, reason: reason,
+      items: rows.map(function (r) { var x = cm[r.row] || {}; return { row: r.row, key: payKey_(r), comment: x.comment || '', payer: x.payer || '' }; }) };
+    // Сразу: окно закрыто, статус на экране уже новый; запись — в фоне.
+    closeStatusModal_();
+    expSel = {};
+    document.getElementById('expSelBar').hidden = true;
+    expApplyStatus_(rows.map(function (r) { return r.row; }), newSt, payDate, cm);
+    renderExpView();
+    expWriteStart_();
+    bgWrite_(body, {
+      ok: function (res) {
+        return '✓ Статус «' + res.newStatus + '»: ' + res.updated + ' зап.' +
+          (res.conflicts ? '. ' + res.conflicts + ' зап. изменились в таблице и не тронуты — проверьте список' : '');
+      },
+      failPrefix: 'Статус не сменился',
+      done: function () { expWriteEnd_(false); },
+      rollback: function () { expWriteEnd_(true); }
+    });
     }
   });
 
@@ -6714,25 +6812,25 @@
     sendPay_('');
     function sendPay_(reason, cm) {
     cm = cm || {};
-    btn.disabled = true; msg.textContent = 'Меняю статус…'; msg.className = '';
-    apiPost({ action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: status,
+    var body = { action: 'adminSetExpenseStatus', phone: currentUser && currentUser.phone, status: status,
       items: items.map(function (it) { var x = cm[it.row] || {}; return { row: it.row, key: it.key, comment: x.comment || '', payer: x.payer || '' }; }),
-      payDate: payDate ? payDate : null, reason: reason })
-      .then(function (res) {
-        if (!res || res.status !== 'ok') {
-          btn.disabled = false;
-          msg.textContent = (res && res.message) || 'Не удалось — проверьте, что в таблице развёрнут скрипт v50';
-          msg.className = 'error'; return;
-        }
-        msg.textContent = '✓ Статус «' + res.newStatus + '» поставлен: ' + res.updated + ' зап.' +
+      payDate: payDate ? payDate : null, reason: reason };
+    // Сразу: статус на экране новый, выбор снят; запись — в фоне.
+    msg.textContent = ''; msg.className = '';
+    paySel = {};
+    expApplyStatus_(items.map(function (it) { return it.row; }), status, payDate || '', cm);
+    renderPay();
+    expWriteStart_();
+    bgWrite_(body, {
+      ok: function (res) {
+        return '✓ Статус «' + res.newStatus + '» поставлен: ' + res.updated + ' зап.' +
           (payDate ? ', дата погашения ' + fmtIsoRu_(payDate) : '') +
           (res.conflicts ? '. ' + res.conflicts + ' зап. изменились в таблице и не тронуты — список обновлён, проверьте' : '');
-        msg.className = res.conflicts ? 'error' : 'success';
-        paySel = {};
-        expOverview = null;
-        loadExpOverview(function (err) { if (!err) renderPay(); else updatePaySel([]); });
-      })
-      .catch(function (err) { btn.disabled = false; msg.textContent = 'Ошибка соединения: ' + err; msg.className = 'error'; });
+      },
+      failPrefix: 'Статус не сменился',
+      done: function () { expWriteEnd_(false); },
+      rollback: function () { expWriteEnd_(true); }
+    });
     }
   });
   document.getElementById('pdInfoBtn').addEventListener('click', function () {
@@ -7270,9 +7368,13 @@
     if (!dateFrom || !dateTo) { setAbsenceStatus('Выберите дату', 'error'); return; }
     if (dateTo < dateFrom) { setAbsenceStatus('Дата "по" раньше даты "с"', 'error'); return; }
     if (isPartial && !timeFrom) { setAbsenceStatus('Укажите время', 'error'); return; }
-    btn.disabled = true;
-    startWaitIndicator(absenceStatusEl, 'Отправляем…');
-    apiPost({
+    // Сразу: «Заявка отправлена», комментарий очищен; запись — в фоне.
+    btn.disabled = true;   // защита от двойного нажатия
+    setTimeout(function () { btn.disabled = false; }, 2000);
+    var commentEl = document.getElementById('absenceComment'), commentVal = commentEl.value.trim();
+    commentEl.value = '';
+    setAbsenceStatus('Заявка отправлена — записываю…', 'success');
+    bgWrite_({
       action: 'submitAbsence',
       phone: currentUser && currentUser.phone,
       kind: kind,
@@ -7280,22 +7382,19 @@
       dateTo: dateTo,
       timeFrom: timeFrom,
       timeTo: '',
-      comment: document.getElementById('absenceComment').value.trim()
-    })
-      .then(function (res) {
-        btn.disabled = false;
-        if (res.status === 'ok') {
-          setAbsenceStatus('Заявка записана ✓', 'success');
-          document.getElementById('absenceComment').value = '';
-          renderAbsences(res);
-        } else {
-          setAbsenceStatus(res.message || 'Не удалось отправить заявку', 'error');
-        }
-      })
-      .catch(function (err) {
-        btn.disabled = false;
-        setAbsenceStatus('Ошибка соединения: ' + err, 'error');
-      });
+      comment: commentVal
+    }, {
+      ok: '✓ Заявка записана',
+      failPrefix: 'Заявка не отправилась',
+      done: function (res) {
+        setAbsenceStatus('Заявка записана ✓', 'success');
+        renderAbsences(res);
+      },
+      rollback: function (m) {
+        if (!commentEl.value) commentEl.value = commentVal;
+        setAbsenceStatus('Не отправилось: ' + m + '. Проверьте и отправьте ещё раз.', 'error');
+      }
+    });
   });
 
   // ===== Экран "Профиль" — обработчики =====
@@ -8334,5 +8433,6 @@
 </script>
 <div id="qrPrintArea"></div>
 <div id="busyBar" aria-hidden="true"></div>
+<div id="toastBox" aria-live="polite"></div>
 </body>
 </html>
