@@ -532,6 +532,11 @@
   .adminObjForm label { font-size: 12px; }
   .adminObjSaveRow { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   .adminObjSaveRow button { margin: 0; padding: 8px 12px; width: auto; font-size: 13px; }
+  .serverVer { font-size: 14px; line-height: 1.45; margin-bottom: 10px; }
+  .serverVer .verRow { display: flex; justify-content: space-between; gap: 10px; }
+  .serverVer .verNum { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .serverVer .verState { margin-top: 4px; font-weight: 600; }
+  .serverVer .verLast { margin-top: 2px; font-size: 12px; color: var(--muted); }
   .adminObjSaveRow .adminObjQrBtn { background: transparent; color: var(--blue); border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
   .adminObjQrBtn svg, .qrBtns svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   .qrPreview { display: block; width: 100%; max-height: 44vh; object-fit: contain; border: 1px solid var(--border); border-radius: 10px; background: #fff; margin: 4px 0 12px; }
@@ -1627,6 +1632,7 @@
       <!-- Сервер (Apps Script) обновляется сам после каждой выкладки на
            GitHub; кнопка — ручная проверка, если что-то пошло не так. -->
       <div class="card">
+        <div id="serverVersionInfo" class="serverVer"><span class="spinner"></span> Версия сервера…</div>
         <button id="adminSelfUpdateBtn" type="button" style="background: var(--muted);">Обновить сервер</button>
         <div id="adminSelfUpdateStatus" class="ctHint" style="margin-top:8px;">Обычно не нужно: сервер обновляется сам через минуту после выкладки.</div>
       </div>
@@ -3612,6 +3618,7 @@
     showBottomNav();
     setActiveNav('profile');
     pushScreenState('admin');
+    loadServerVersion_();
   }
 
   // --- Экран "Поставить задачу" (вынесен из панели администратора на
@@ -4462,6 +4469,31 @@
   document.getElementById('adminRatesBackLink').addEventListener('click', function () {
     showAdminScreen();
   });
+  // Версия сервера: работающая (CODE_VERSION в Code.gs) и последняя на GitHub.
+  function loadServerVersion_() {
+    var box = document.getElementById('serverVersionInfo');
+    if (!box || !currentUser) return;
+    apiPost({ action: 'adminServerVersion', phone: currentUser.phone }).then(function (res) {
+      if (!res || res.status !== 'ok') {
+        box.innerHTML = '<div class="verRow"><span>Сервер</span><span class="verNum">ниже v63</span></div>' +
+          '<div class="verState" style="color:var(--red);">Сервер старше v63 и не сообщает версию. Нажмите «Обновить сервер»: если автообновление настроено, он обновится сам.</div>';
+        return;
+      }
+      var same = res.latest && res.latest === res.running;
+      var state = !res.latest
+        ? '<div class="verState" style="color:var(--muted);">Не удалось узнать версию на GitHub</div>'
+        : same
+          ? '<div class="verState" style="color:var(--green);">Совпадает — установлена последняя версия</div>'
+          : '<div class="verState" style="color:var(--red);">Не совпадает — на сервере старая версия. Нажмите «Обновить сервер»</div>';
+      box.innerHTML =
+        '<div class="verRow"><span>Работает на сервере</span><span class="verNum">' + escapeHtml(res.running || '?') + '</span></div>' +
+        '<div class="verRow"><span>Последняя на GitHub</span><span class="verNum">' + escapeHtml(res.latest || '—') + '</span></div>' +
+        state +
+        (res.lastUpdate ? '<div class="verLast">Последнее обновление: ' + escapeHtml(res.lastUpdate) + '</div>' : '');
+    }).catch(function () {
+      box.innerHTML = '<div class="verState" style="color:var(--muted);">Нет связи с сервером</div>';
+    });
+  }
   document.getElementById('adminSelfUpdateBtn').addEventListener('click', function () {
     var btn = this, st = document.getElementById('adminSelfUpdateStatus');
     btn.disabled = true;
@@ -4472,6 +4504,7 @@
       var ok = res && res.status === 'ok';
       st.style.color = ok ? 'var(--green)' : 'var(--red)';
       st.textContent = (res && res.message) || (ok ? 'Готово' : 'Сервер не ответил — возможно, на нём ещё версия без самообновления (ниже v62)');
+      setTimeout(loadServerVersion_, 2000);
     }).catch(function (err) {
       btn.disabled = false;
       st.style.color = 'var(--red)';

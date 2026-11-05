@@ -1,3 +1,7 @@
+// v63: номер версии сервера в панели администратора. CODE_VERSION —
+//      версия работающего кода (обязана совпадать с первой строкой файла,
+//      иначе самообновление откажется ставить файл). adminServerVersion
+//      возвращает работающую версию и последнюю на GitHub.
 // v62: самообновление с GitHub. Скрипт сам берёт новый Code.gs из
 //      репозитория sevmodmobiles/sevmodmobiles (ветка main), подменяет свой
 //      файл Code и обновляет текущее развертывание веб-приложения (адрес не
@@ -420,6 +424,9 @@ function doPost(e) {
     }
     if (data.action === 'status') {
       return jsonOutput(getShiftStatus(data.phone));
+    }
+    if (data.action === 'adminServerVersion') {
+      return jsonOutput(adminServerVersion(data.phone));
     }
     if (data.action === 'adminSelfUpdate') {
       var suAuth = adminAuth_(data.phone);
@@ -4176,6 +4183,9 @@ function adminExpenseLookups(phone) {
 // манифест) не трогаются. Нужны: включённый «Google Apps Script API»
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
+// Версия этого кода. Меняется вместе с первой строкой файла.
+var CODE_VERSION = 'v63';
+
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
   BRANCH: 'main',
@@ -4274,7 +4284,8 @@ function selfUpdate_(source, sha) {
     var gh = fetchGithubCode_(sha);
     var code = gh.code;
     toVer = selfUpdateVersion_(code);
-    if (toVer === '?' || code.length < 20000 || code.indexOf('function doPost') < 0 || code.indexOf('function selfUpdate_') < 0) {
+    if (toVer === '?' || code.length < 20000 || code.indexOf('function doPost') < 0 || code.indexOf('function selfUpdate_') < 0 ||
+        code.indexOf("var CODE_VERSION = '" + toVer + "'") < 0) {
       throw new Error('Файл на GitHub не похож на рабочий Code.gs — обновление отменено');
     }
     var sid = ScriptApp.getScriptId();
@@ -4301,6 +4312,7 @@ function selfUpdate_(source, sha) {
       }
     });
     if (gh.sha) props.setProperty('SELF_UPDATE_SHA', gh.sha);
+    cache.remove('selfupd_latest_ver');
     var note = 'версия проекта №' + ver.versionNumber;
     if (ver.versionNumber >= 180) note += ' — версий много, при необходимости удалите старые в «Истории проекта»';
     selfUpdateLog_(source, fromVer, toVer, gh.sha, 'обновлено', note);
@@ -4312,6 +4324,28 @@ function selfUpdate_(source, sha) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Версия работающего сервера и последняя на GitHub — для панели администратора.
+function adminServerVersion(adminPhone) {
+  var auth = adminAuth_(adminPhone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  var cache = CacheService.getScriptCache(), latest = cache.get('selfupd_latest_ver');
+  if (!latest) {
+    try {
+      latest = selfUpdateVersion_(fetchGithubCode_('').code);
+      if (latest !== '?') cache.put('selfupd_latest_ver', latest, 60);
+    } catch (e) { latest = ''; }
+  }
+  var last = '';
+  try {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SELF_UPDATE.LOG_SHEET);
+    if (sh && sh.getLastRow() >= 2) {
+      var row = sh.getRange(sh.getLastRow(), 1, 1, 7).getValues()[0];
+      last = Utilities.formatDate(new Date(row[0]), Session.getScriptTimeZone(), 'dd.MM.yy HH:mm') + ' — ' + row[5] + (row[3] ? ' ' + row[3] : '');
+    }
+  } catch (e) {}
+  return { status: 'ok', running: CODE_VERSION, latest: latest, lastUpdate: last };
 }
 
 // Резервная проверка раз в час (на случай, если вызов от GitHub не дошёл).
