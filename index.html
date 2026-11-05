@@ -1880,12 +1880,13 @@
     <div class="card" id="profileAdminCard" style="display:none;">
       <h2 style="margin-top:0;">Администрирование</h2>
       <button id="profileAdminPanelBtn" type="button" class="hasDot" style="background:var(--blue);">Админ-панель</button>
-      <button id="profileAbsenceApproveBtn" type="button" class="hasDot">Согласовать отгулы</button>
     </div>
     <div class="card">
       <h2 style="margin-top:0;">Отсутствия</h2>
       <button id="profileAbsenceBtn" type="button">Запросить отгул / больничный</button>
       <button id="profileLateBtn" type="button">Приду позже / уйду раньше</button>
+      <!-- только для администраторов: синяя, как остальные админ-кнопки -->
+      <button id="profileAbsenceApproveBtn" type="button" class="hasDot" style="display:none; background:var(--blue);">Согласовать отгулы</button>
       <div class="switchUser"><a id="profileAllAbsencesLink">Все запросы</a></div>
     </div>
     <div class="card">
@@ -3596,6 +3597,8 @@
     // же на Главной экране.
     var profileCard = document.getElementById('profileAdminCard');
     if (profileCard) profileCard.style.display = isAdmin ? 'block' : 'none';
+    var approveBtn = document.getElementById('profileAbsenceApproveBtn');
+    if (approveBtn) approveBtn.style.display = isAdmin ? 'block' : 'none';
     var tasksFab = document.getElementById('tasksAddFab');
     if (tasksFab) tasksFab.style.display = isAdmin ? 'flex' : 'none';
     var navExp = document.getElementById('navExpBtn');
