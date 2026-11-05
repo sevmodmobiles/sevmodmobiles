@@ -719,6 +719,15 @@
   .tMeta .tIco { display: inline-flex; align-items: center; gap: 3px; }
   .tMeta svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
   .tCard .adminTaskDetail { cursor: default; }
+  /* Карточка задачи: фото крупно — лента во всю ширину (соседнее фото
+     выглядывает справа, листается пальцем); одно фото — на всю ширину. */
+  .photoGrid.big { gap: 8px; }
+  .photoGrid.big .ph { width: 86%; height: auto; aspect-ratio: 4 / 3; border-radius: 14px; }
+  .photoGrid.big .ph:only-of-type { width: 100%; }
+  .photoGrid.big .ph .phN { font-size: 12px; padding: 2px 8px; right: 8px; bottom: 8px; }
+  #screenTaskDetail { width: 100%; max-width: 440px; }
+  #taskDetailExecutor { font-size: 14px; margin: 2px 0 8px; color: var(--muted); }
+  #taskDetailExecutor b { color: var(--text); }
   /* список задач — шире: меньше внутренние поля карточки-подложки;
      снизу место под кнопку «+», чтобы она не закрывала последнюю задачу */
   .card.tasksCard { padding: 14px 10px 6px; }
@@ -1703,19 +1712,20 @@
       <div id="taskDetailBody" style="display:none;">
         <div id="taskDetailStatusBadge" class="taskStatusBadge"></div>
         <h2 id="taskDetailObjectTitle" style="margin-top:8px;"></h2>
+        <div id="taskDetailExecutor" style="display:none;"></div>
         <div id="taskDetailText" class="taskText"></div>
-        <div id="taskDetailTaskPhotos" class="photoGrid"></div>
+        <div id="taskDetailTaskPhotos" class="photoGrid big"></div>
         <div id="taskDetailMeta" class="taskDate"></div>
 
         <div id="taskDetailBeforeSection" style="display:none; margin-top:16px;">
           <h3>Фото до начала работ</h3>
-          <div id="taskDetailBeforePhotos" class="photoGrid"></div>
+          <div id="taskDetailBeforePhotos" class="photoGrid big"></div>
           <div id="taskDetailStartedMeta" class="taskDate"></div>
         </div>
 
         <div id="taskDetailAfterSection" style="display:none; margin-top:16px;">
           <h3>Фото после выполнения</h3>
-          <div id="taskDetailAfterPhotos" class="photoGrid"></div>
+          <div id="taskDetailAfterPhotos" class="photoGrid big"></div>
           <div id="taskDetailCommentBlock" style="display:none; margin-top:8px;">
             <div class="taskDate">Комментарий сотрудника:</div>
             <div id="taskDetailComment" class="taskText"></div>
@@ -4310,12 +4320,8 @@
     var t = (tasksLast[tasksMode] || []).filter(function (x) { return String(x.id) === id; })[0];
     // своя задача — экран задачи (с кнопками «Приступить» / «Выполнено»);
     // чужая в ленте — подробности раскрываются прямо в карточке
-    if (!t || tasksMode === 'my' || (currentUser && t.phone === currentUser.phone)) { showTaskDetailScreen(id); return; }
-    var det = card.querySelector('.adminTaskDetail');
-    if (!det) return;
-    if (det.style.display !== 'none') { det.style.display = 'none'; return; }
-    det.innerHTML = adminTaskDetailHtml(t) || '<div class="taskDate">Фото и комментариев пока нет</div>';
-    det.style.display = 'block';
+    taskDetailPreview = t || null; // покажем сразу, пока свежие данные грузятся
+    showTaskDetailScreen(id);
   });
 
   // --- Экран деталей одной задачи (у сотрудника) ---
@@ -4637,9 +4643,16 @@
     pushScreenState('taskDetail', { taskId: taskId });
   }
 
+  var taskDetailPreview = null;
   function loadTaskDetail() {
     var phone = currentUser ? currentUser.phone : '';
     var forId = currentTaskId;
+    var pv = taskDetailPreview; taskDetailPreview = null;
+    if (pv && String(pv.id) === String(forId) && !swrHas_({ action: 'getTaskById', phone: phone, taskId: forId })) {
+      document.getElementById('taskDetailLoading').style.display = 'none';
+      document.getElementById('taskDetailBody').style.display = 'block';
+      renderTaskDetail(pv);
+    }
     swrLoad_({ action: 'getTaskById', phone: phone, taskId: currentTaskId }, function (res) {
         if (forId !== currentTaskId) return;
         if (res.status !== 'ok') {
@@ -4659,6 +4672,11 @@
   var currentTaskPhotoReport = '';
   function renderTaskDetail(t) {
     currentTaskPhotoReport = t.photoReport || '';
+    // чужая задача (администратор открыл из ленты) — только просмотр
+    var mine = !currentUser || !t.phone || t.phone === currentUser.phone;
+    var ex = document.getElementById('taskDetailExecutor');
+    ex.style.display = mine ? 'none' : 'block';
+    ex.innerHTML = mine ? '' : 'Исполнитель: <b>' + escapeHtml(personShort_(t.name) || t.name || '') + '</b>';
     var noPhotos = currentTaskPhotoReport === 'no';
     ['taskBeforePhotoWrap', 'taskAfterPhotoWrap'].forEach(function (id) { document.getElementById(id).style.display = noPhotos ? 'none' : ''; });
     document.querySelector('#taskDetailBeforeSection h3').style.display = noPhotos ? 'none' : '';
@@ -4710,6 +4728,7 @@
       }
       document.getElementById('taskDetailCompletedMeta').textContent = 'Выполнено: ' + (t.completedAt || '');
     }
+    if (!mine) { startAction.style.display = 'none'; completeAction.style.display = 'none'; }
   }
 
   document.getElementById('taskDetailBackLink').addEventListener('click', function () {

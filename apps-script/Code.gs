@@ -1,3 +1,4 @@
+// v80: getTaskById — администратор может открыть любую задачу.
 // v79: uploadPhoto — фото задач загружаются по одному сразу после выбора;
 //      savePhotos_ принимает и готовые ссылки на Диск.
 // v78: action «version» — номер сервера для строки версий в «Профиле».
@@ -1985,7 +1986,8 @@ function getTaskById(phone, taskId) {
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, TASKS_SHEET_COLUMNS.length).getValues();
   for (var i = 0; i < data.length; i++) {
     if (String(data[i][TASK_COL.ID - 1]) === String(taskId)) {
-      if (normalizePhone_(data[i][TASK_COL.PHONE - 1]) !== normalizedPhone) {
+      // чужую задачу может открыть только администратор (лента задач)
+      if (normalizePhone_(data[i][TASK_COL.PHONE - 1]) !== normalizedPhone && !isAdminPhone_(normalizedPhone)) {
         return { status: 'error', message: 'Эта задача поставлена не вам' };
       }
       return { status: 'ok', task: taskRowToObject_(data[i]) };
@@ -4367,7 +4369,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v79';
+var CODE_VERSION = 'v80';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
