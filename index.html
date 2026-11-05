@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Учёт рабочего времени</title>
 
 <!-- Иконки и настройки для установки как приложение (PWA) -->
@@ -55,6 +55,8 @@
   }
   html { scroll-padding-top: env(safe-area-inset-top, 0px); height: 100%; }
   * { box-sizing: border-box; }
+  /* Приложение не масштабируется двумя пальцами (только фото в просмотре) */
+  html, body { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
     /* min-height, а не height: иначе на длинных экранах body не растёт и его
@@ -4562,6 +4564,10 @@
     try { openPhotoViewer_(JSON.parse(ph.getAttribute('data-pv')), Number(ph.getAttribute('data-i')) || 0); } catch (err) {}
   }, true);
 
+  // iPhone (Safari) не слушается user-scalable=no — гасим его жест масштаба
+  ['gesturestart', 'gesturechange'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
+  });
   var pvEl = document.getElementById('photoViewer'), pvTrack = document.getElementById('pvTrack');
   var pvUrls = [], pvIndex = 0, pvHistory = false;
   function pvUpdate_() {
