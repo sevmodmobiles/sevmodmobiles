@@ -2984,6 +2984,11 @@
       }
       html = '<div class="ic"><img src="icon-192.png?v=2" alt=""><div><b>' + title + '</b><p>' + text + '</p></div></div>' + extra +
         '<div class="ib">' + action + '<button type="button" class="later">Позже</button></div>';
+    } else if (badgeNeedsPermission_()) {
+      // iPhone, приложение уже на экране «Домой»: число на иконке покажется
+      // только после разрешения уведомлений (так устроен iOS).
+      html = '<div class="ic"><img src="icon-192.png?v=2" alt=""><div><b>Счётчик на иконке</b><p>Чтобы на значке SEVMOD появлялось число новых задач и заявок, разрешите уведомления.</p></div></div>' +
+        '<div class="ib"><button type="button" class="badgeEnableBtn">Разрешить</button><button type="button" class="later badgeLater">Не сейчас</button></div>';
     }
     document.querySelectorAll('.installCard').forEach(function (el) { el.innerHTML = html; el.hidden = !html; });
   }
@@ -2992,6 +2997,17 @@
       var ev = installPromptEvt; installPromptEvt = null;
       ev.prompt();
       (ev.userChoice || Promise.resolve()).then(renderInstallCards_);
+      return;
+    }
+    if (e.target.closest('.installCard .badgeEnableBtn')) {
+      try {
+        Notification.requestPermission().then(function () { updateAppBadge_(); renderInstallCards_(); });
+      } catch (err) { renderInstallCards_(); }
+      return;
+    }
+    if (e.target.closest('.installCard .badgeLater')) {
+      try { localStorage.setItem('sevmod_badge_later', String(Date.now() + 14 * 86400000)); } catch (err) {}
+      renderInstallCards_();
       return;
     }
     if (e.target.closest('.installCard .later')) {
@@ -3099,7 +3115,29 @@
 
   // Красная точка-счётчик на кнопке "Мои задачи" — показывает, сколько
   // сейчас невыполненных задач, и сама исчезает, когда их не осталось.
+  // ===== Число на иконке приложения (Badging API) =====
+  // Новые задачи + (для администратора) заявки на отгул на согласовании.
+  // Работает у установленного приложения: iPhone (iOS 16.4+, после разрешения
+  // уведомлений), компьютер; на Android в браузерной версии система число не
+  // показывает — появится в Android-приложении. Без push число обновляется,
+  // когда приложение открыто или свёрнуто недавно.
+  var badgeTasks = 0, badgeAdmin = 0;
+  function updateAppBadge_() {
+    var n = badgeTasks + badgeAdmin;
+    try {
+      if (!navigator.setAppBadge) return;
+      (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(function () {});
+    } catch (e) {}
+  }
+  function badgeNeedsPermission_() {
+    var later = 0;
+    try { later = Number(localStorage.getItem('sevmod_badge_later') || 0); } catch (e) {}
+    return !!(installEnv_().ios && isStandalone_() && navigator.setAppBadge && window.Notification &&
+      Notification.permission === 'default' && later < Date.now() && currentUser);
+  }
   function updateTasksBadge(count) {
+    badgeTasks = Number(count) || 0;
+    updateAppBadge_();
     var text = count > 9 ? '9+' : String(count);
     [document.getElementById('myTasksBadge'), document.getElementById('navTasksBadge')].forEach(function (badge) {
       if (!badge) return;
@@ -3536,6 +3574,8 @@
   function hideAdminPopup_() { document.getElementById('adminPopup').classList.remove('open'); }
   function setAdminPending(n) {
     adminPendingCount = Number(n) || 0;
+    badgeAdmin = adminPendingCount;
+    updateAppBadge_();
     setAdminDots_(adminPendingCount > 0);
     var notified = loadNotified_();
     if (adminPendingCount < notified) saveNotified_(adminPendingCount);
@@ -8059,6 +8099,7 @@
         try { localStorage.removeItem(adminStatusCacheKey(currentUser.phone)); } catch (e) {}
       }
       currentUser = null;
+      badgeTasks = 0; badgeAdmin = 0; updateAppBadge_();
       shiftStatusKnown = false;
       document.getElementById('regLastName').value = '';
       document.getElementById('regFirstName').value = '';
