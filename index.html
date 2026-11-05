@@ -712,6 +712,9 @@
   }
   .tReq svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .tMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+  .tMeta .tWhen { margin-left: auto; }
+  .tPh { display: inline-flex; align-items: center; gap: 3px; margin-left: 4px; font-size: 12.5px; color: var(--muted); white-space: nowrap; vertical-align: -2px; line-height: 1; }
+  .tPh svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
   .tMeta .tWho { color: var(--text); font-weight: 600; }
   .tMeta .tIco { display: inline-flex; align-items: center; gap: 3px; }
   .tMeta svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -4215,17 +4218,16 @@
   function taskCardHtml_(t, feed) {
     var tag = taskStatusTag(t.status), done = isDoneTask_(t);
     var photos = (t.taskPhotos || []).length + (t.beforePhotos || []).length + (t.afterPhotos || []).length;
-    var meta = [];
-    if (feed) meta.push('<span class="tWho">' + escapeHtml(personShort_(t.name) || t.name || '') + '</span>');
-    meta.push('<span class="tIco" title="Поставлена">' + T_ICO_CAL + escapeHtml(taskWhen_(t.createdAt)) + '</span>');
-    if (done && t.completedAt) meta.push('<span class="tIco" title="Выполнена">' + T_ICO_DONE + escapeHtml(taskWhen_(t.completedAt)) + '</span>');
-    if (photos) meta.push('<span class="tIco" title="Фото">' + T_ICO_PHOTO + photos + '</span>');
-    var reqTag = t.photoReport === 'yes' && !done ? '<span class="tReq" title="Нужен фотоотчёт">' + T_ICO_PHOTO + 'фотоотчёт</span>' : '';
+    // дата справа внизу: у выполненных — когда выполнена (с галочкой), иначе — когда поставлена
+    var when = done && t.completedAt
+      ? '<span class="tIco tWhen" title="Выполнена">' + T_ICO_DONE + escapeHtml(taskWhen_(t.completedAt)) + '</span>'
+      : '<span class="tIco tWhen" title="Поставлена">' + escapeHtml(taskWhen_(t.createdAt)) + '</span>';
     return '<div class="tCard taskCard' + (done ? ' done' : '') + '" data-id="' + escapeHtml(t.id) + '">' +
       '<div class="tTop"><span class="tObj">' + escapeHtml(t.objectName || 'Без объекта') + '</span>' +
         '<span class="adminTaskStatusTag ' + tag.cls + '">' + tag.label + '</span></div>' +
-      '<div class="tRow"><div class="tText">' + escapeHtml(t.text) + '</div>' + reqTag + '</div>' +
-      '<div class="tMeta">' + meta.join('') + '</div>' +
+      '<div class="tText">' + escapeHtml(t.text) +
+        (photos ? ' <span class="tPh" title="Фото">' + T_ICO_PHOTO + photos + '</span>' : '') + '</div>' +
+      '<div class="tMeta">' + (feed ? '<span class="tWho">' + escapeHtml(personShort_(t.name) || t.name || '') + '</span>' : '') + when + '</div>' +
       (feed ? '<div class="adminTaskDetail" style="display:none;"></div>' : '') +
     '</div>';
   }
