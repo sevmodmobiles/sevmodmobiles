@@ -1,3 +1,4 @@
+// v78: action «version» — номер сервера для строки версий в «Профиле».
 // v77: задачи с фотоотчётом и без: колонка N «Фотоотчёт» (Да/Нет) в «Задачи».
 // v76: getMyTasks(phone, all) — экран «Задачи» показывает и выполненные.
 // v75: уведомление о заявке: «Екатерина просит согласовать», тип и даты
@@ -476,6 +477,9 @@ function doPost(e) {
     }
     if (data.action === 'status') {
       return jsonOutput(getShiftStatus(data.phone));
+    }
+    if (data.action === 'version') {
+      return jsonOutput({ status: 'ok', version: CODE_VERSION });
     }
     if (data.action === 'registerPush') {
       return jsonOutput(registerPush(data.phone, data.token, data.platform, data.oldToken));
@@ -4336,7 +4340,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v77';
+var CODE_VERSION = 'v78';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',

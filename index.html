@@ -672,6 +672,7 @@
   }
 
   /* ===== Задачи (разовые работы) ===== */
+  .verLine { margin-top: 12px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
   .segCtl { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
   .segCtl button {
     flex: 1; margin: 0; padding: 9px 6px; font-size: 14px; font-weight: 600; border-radius: 9px;
@@ -1918,6 +1919,7 @@
     </div>
     <div class="card">
       <button id="profilePolicyBtn" type="button" style="background:var(--muted);">Политика обработки персональных данных</button>
+      <div id="profileVersion" class="verLine"></div>
     </div>
   </div>
 
@@ -2666,7 +2668,7 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
@@ -3352,6 +3354,27 @@
     if (document.visibilityState === 'visible') setTimeout(checkAppUpdate_, 1500);
   });
 
+  // ===== Строка версий внизу «Профиля» =====
+  // Приложение (сборка Android-оболочки) · сервер (CODE_VERSION) · экраны
+  // (время выкладки сайта — заголовок Last-Modified от GitHub Pages).
+  function renderVersionLine_() {
+    var el = document.getElementById('profileVersion');
+    if (!el) return;
+    var parts = { app: isNativeApp_() ? 'сборка …' : 'браузер', server: '…', screens: '' };
+    var lm = new Date(document.lastModified);
+    if (!isNaN(lm) && location.protocol !== 'file:') {
+      var p2 = function (n) { return ('0' + n).slice(-2); };
+      parts.screens = p2(lm.getDate()) + '.' + p2(lm.getMonth() + 1) + ' ' + p2(lm.getHours()) + ':' + p2(lm.getMinutes());
+    }
+    function draw() {
+      el.textContent = 'Приложение: ' + parts.app + ' · Сервер: ' + parts.server + (parts.screens ? ' · Экраны от ' + parts.screens : '');
+    }
+    draw();
+    var APP = nativePlugin_('App');
+    if (APP) APP.getInfo().then(function (i) { parts.app = 'сборка ' + (i && i.build || '?'); draw(); }).catch(function () {});
+    swrLoad_({ action: 'version' }, function (res) { if (res && res.version) { parts.server = res.version; draw(); } }, function () {});
+  }
+
   // ===== Push-уведомления (Android-приложение) =====
   // Только в сборке с Firebase (метка SEVMOD-Push в User-Agent). Разрешение
   // спрашивается один раз; токен телефона уходит на сервер (registerPush) и
@@ -3580,6 +3603,32 @@
   }
 
   var adminAssigneeMap = {};
+  // Подписи сотрудников в подсказках: «Екатерина Т.» (имя и первая буква
+  // фамилии) — без телефонов. Если у двоих совпало — добавляем буквы фамилии,
+  // в крайнем случае полное ФИО.
+  function personShort_(fullName, extra) {
+    var p = String(fullName || '').trim().split(/\s+/);
+    if (p.length < 2) return p[0] || '';
+    return p[1] + ' ' + p[0].slice(0, extra || 1) + '.';
+  }
+  function buildAssigneeMap_(employees) {
+    var map = {}, list = (employees || []).filter(function (e) { return e && e.name; });
+    list.forEach(function (emp) {
+      var label = personShort_(emp.name);
+      var clash = list.some(function (o) { return o !== emp && personShort_(o.name) === label; });
+      if (clash) {
+        label = personShort_(emp.name, 3);
+        if (list.some(function (o) { return o !== emp && personShort_(o.name, 3) === label; })) label = emp.name;
+        if (map[label]) label = emp.name + ' (…' + String(emp.phone).slice(-2) + ')';
+      }
+      map[label] = { phone: emp.phone, name: emp.name };
+    });
+    return map;
+  }
+  function assigneeLabelByPhone_(phone, fallback) {
+    for (var k in adminAssigneeMap) if (adminAssigneeMap[k].phone === phone) return k;
+    return fallback || '';
+  }
   // Последний успешный ответ adminGetObjects/adminUpdateObjectShifts — чтобы
   // после точечного сохранения в одной карточке не перестраивать весь
   // список (и не захлопывать раскрытую карточку), а просто иметь свежие
@@ -4079,6 +4128,7 @@
     showBottomNav();
     setActiveNav('profile');
     pushScreenState('profile');
+    renderVersionLine_();
   }
 
   // Единое отображение статуса — переиспользуется и в списке у сотрудника,
@@ -4702,6 +4752,7 @@
     var typed = inputEl.value.trim();
     if (!typed) return '';
     if (adminAssigneeMap[typed]) return adminAssigneeMap[typed].phone;
+    for (var k in adminAssigneeMap) if (adminAssigneeMap[k].name === typed) return adminAssigneeMap[k].phone;
     return typed; // возможно, ввели телефон напрямую — бэкенд сам проверит
   }
 
@@ -4909,7 +4960,7 @@
       var statusLine = obj.geoStatus
         ? '<div class="adminObjGeoStatus" style="color:' + (isOk ? 'var(--green)' : 'var(--red)') + ';">' + escapeHtml(obj.geoStatus) + '</div>'
         : '';
-      var foremanValue = obj.foremanPhone ? (obj.foremanName ? (obj.foremanName + ' — ' + obj.foremanPhone) : obj.foremanPhone) : '';
+      var foremanValue = obj.foremanPhone ? assigneeLabelByPhone_(obj.foremanPhone, obj.foremanName || obj.foremanPhone) : '';
       var s1Id = 'objShift1Start' + idx, e1Id = 'objShift1End' + idx;
       var s2Id = 'objShift2Start' + idx, e2Id = 'objShift2End' + idx;
       var fId = 'objForeman' + idx, statusId = 'objSaveStatus' + idx;
@@ -5043,11 +5094,7 @@
         // "Объекты") — сам выпадающий список рисует initAutocomplete,
         // подсказки читает прямо из adminAssigneeMap (см. ниже, где вызван
         // initAutocomplete для соответствующих полей).
-        adminAssigneeMap = {};
-        res.employees.forEach(function (emp) {
-          var label = emp.name + ' — ' + emp.phone;
-          adminAssigneeMap[label] = { phone: emp.phone, name: emp.name };
-        });
+        adminAssigneeMap = buildAssigneeMap_(res.employees);
 
         // Тип оплаты: подневно (ставка за 8-часовую смену) или оклад (за полный месяц).
         listEl.innerHTML = res.employees.map(function (emp, idx) {
@@ -7216,7 +7263,7 @@
     if (Object.keys(adminAssigneeMap).length) return;
     apiPost({ action: 'adminGetEmployees', phone: currentUser && currentUser.phone }).then(function (res) {
       if (!res || res.status !== 'ok' || !res.employees) return;
-      res.employees.forEach(function (emp) { adminAssigneeMap[emp.name + ' — ' + emp.phone] = { phone: emp.phone, name: emp.name }; });
+      adminAssigneeMap = buildAssigneeMap_(res.employees);
     }).catch(function () {});
   }
 
