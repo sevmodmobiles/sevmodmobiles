@@ -60,6 +60,15 @@ jobs:
             git push
           fi
 
+      # Отпечатки сертификата подписи (открытые данные) — нужны для входа
+      # через Google в Android-приложении (Google Cloud → Android OAuth client).
+      - name: Отпечаток ключа (SHA-1 / SHA-256)
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          keytool -list -v -keystore keystore/sevmod-release.p12 -storetype PKCS12 -alias sevmod \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" | grep -E "SHA1:|SHA256:" | sed 's/^[[:space:]]*/CERT /'
+
       - name: Зависимости и синхронизация
         run: |
           npm ci
