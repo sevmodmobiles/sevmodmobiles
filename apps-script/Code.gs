@@ -1,3 +1,5 @@
+// v64: самообновление находит основной файл проекта по содержимому
+//      (в русском интерфейсе он называется «Код», а не «Code»).
 // v63: номер версии сервера в панели администратора. CODE_VERSION —
 //      версия работающего кода (обязана совпадать с первой строкой файла,
 //      иначе самообновление откажется ставить файл). adminServerVersion
@@ -4184,13 +4186,13 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v63';
+var CODE_VERSION = 'v64';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
   BRANCH: 'main',
   PATH: 'apps-script/Code.gs',
-  FILE: 'Code',
+  FILES: ['Code', 'Код'],   // имя основного файла; если не нашлось — ищем файл с doPost
   // Развертывание, через которое работает приложение (тот же ID, что в
   // API_URL в index.html). Можно переопределить свойством скрипта
   // SELF_UPDATE_DEPLOYMENT_ID.
@@ -4264,6 +4266,13 @@ function selfUpdateLog_(source, fromVer, toVer, sha, result, message) {
   } catch (e) {}
 }
 
+// Основной файл проекта: по имени (Код / Code), иначе — тот, где doPost.
+function findMainFile_(files) {
+  var js = files.filter(function (f) { return f.type === 'SERVER_JS'; });
+  return js.filter(function (f) { return SELF_UPDATE.FILES.indexOf(f.name) >= 0; })[0] ||
+    js.filter(function (f) { return /function\s+doPost\s*\(/.test(f.source || ''); })[0] || null;
+}
+
 function selfUpdate_(source, sha) {
   sha = String(sha || '').trim().toLowerCase();
   var props = PropertiesService.getScriptProperties();
@@ -4292,8 +4301,8 @@ function selfUpdate_(source, sha) {
     var base = 'https://script.googleapis.com/v1/projects/' + sid;
     var content = scriptApi_('get', base + '/content');
     var files = (content.files || []).map(function (f) { return { name: f.name, type: f.type, source: f.source }; });
-    var target = files.filter(function (f) { return f.name === SELF_UPDATE.FILE && f.type === 'SERVER_JS'; })[0];
-    if (!target) throw new Error('В проекте нет файла «' + SELF_UPDATE.FILE + '.gs»');
+    var target = findMainFile_(files);
+    if (!target) throw new Error('Не нашёл в проекте основной файл скрипта (Код.gs / Code.gs)');
     fromVer = selfUpdateVersion_(target.source);
     if (target.source === code) {
       if (gh.sha) props.setProperty('SELF_UPDATE_SHA', gh.sha);
@@ -4364,10 +4373,12 @@ function setupAutoUpdate() {
   var sid = ScriptApp.getScriptId(), base = 'https://script.googleapis.com/v1/projects/' + sid;
   var msg;
   try {
-    scriptApi_('get', base + '/content');
+    var content = scriptApi_('get', base + '/content');
+    var main = findMainFile_(content.files || []);
+    if (!main) throw new Error('не нашёл основной файл скрипта (Код.gs / Code.gs)');
     var dep = scriptApi_('get', base + '/deployments/' + selfUpdateDeploymentId_());
     var v = dep.deploymentConfig && dep.deploymentConfig.versionNumber;
-    msg = 'Готово: автообновление включено. Развертывание найдено (сейчас версия проекта №' + v + ').';
+    msg = 'Готово: автообновление включено. Основной файл — «' + main.name + '.gs», развертывание найдено (сейчас версия проекта №' + v + ').';
     selfUpdateLog_('setupAutoUpdate', '', '', '', 'настроено', msg);
   } catch (e) {
     msg = 'Проверка не прошла: ' + (e && e.message || e);
