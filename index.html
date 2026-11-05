@@ -4349,10 +4349,18 @@
             '</div>'
           );
         }).join('');
+        // Смена «за день / оклад» не трогает введённое число. Подставляем
+        // сохранённую сумму другого типа, только если число не меняли и она есть.
         listEl.querySelectorAll('.adminPayType').forEach(function (sel) {
+          sel.addEventListener('focus', function () { sel.setAttribute('data-prev', sel.value); });
           sel.addEventListener('change', function () {
             var input = document.getElementById(sel.getAttribute('data-input'));
-            input.value = sel.value === 'Оклад' ? input.getAttribute('data-salary') : input.getAttribute('data-rate');
+            var prevType = sel.getAttribute('data-prev') || (sel.value === 'Оклад' ? 'Подневно' : 'Оклад');
+            var prevStored = input.getAttribute(prevType === 'Оклад' ? 'data-salary' : 'data-rate');
+            var otherStored = input.getAttribute(sel.value === 'Оклад' ? 'data-salary' : 'data-rate');
+            var untouched = String(Number(input.value) || 0) === String(Number(prevStored) || 0);
+            if (untouched && Number(otherStored) > 0) input.value = otherStored;
+            sel.setAttribute('data-prev', sel.value);
           });
         });
 
