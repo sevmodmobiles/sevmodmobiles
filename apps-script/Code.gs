@@ -1,3 +1,4 @@
+// v88: опоздания — от смены объекта, иначе от 10:00; согласованное «Приду позже» учитывается.
 // v87: «Общий кабинет» — за период у каждого сотрудника список всех смен.
 // v86: «Общий кабинет» — произвольный период (mode 'range', dateTo).
 // v85: «Общий кабинет» — итоги месяца по каждому объекту (для фильтра по объектам).
@@ -2458,6 +2459,9 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId, 
       var nearest = findNearestShift(now, shifts);
       if (nearest) {
         lateMinutes = nearest.lateMinutes;
+      } else {
+        // смена у объекта не задана — от начала рабочего дня
+        lateMinutes = now.getHours() * 60 + now.getMinutes() - timeStrToMinutes(OFFICE_START);
       }
     }
 
@@ -2726,7 +2730,7 @@ function getMyStatsCore_(phone) {
       if (!shifts[dateStr].arrival || ts < shifts[dateStr].arrival) {
         shifts[dateStr].arrival = ts;
         if (rowObject) shifts[dateStr].object = rowObject;
-        shifts[dateStr].lateMinutes = (lateVal === '' || lateVal === null || lateVal === undefined) ? '' : Number(lateVal);
+        shifts[dateStr].lateMinutes = computeLate_(ts, rowObject, phone);
       }
     } else if (eventType === 'Уход') {
       if (!shifts[dateStr].departure || ts > shifts[dateStr].departure) {
@@ -4459,7 +4463,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v87';
+var CODE_VERSION = 'v88';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4786,7 +4790,7 @@ function adminSalaryReport(phone, month) {
       var e = byPhone[normalizePhone_(r[2])]; if (!e) return;
       var iso = toIsoDate_(ts), key = e.phone + '|' + iso;
       var pd = perDay[key] || (perDay[key] = { e: e, iso: iso, arr: null, dep: null, late: null });
-      if (r[4] === 'Приход') { if (!pd.arr || ts < pd.arr) { pd.arr = ts; pd.late = r[5] === '' ? null : Number(r[5]); } }
+      if (r[4] === 'Приход') { if (!pd.arr || ts < pd.arr) { pd.arr = ts; pd.late = computeLate_(ts, r[3], r[2]); } }
       else if (r[4] === 'Уход') { if (!pd.dep || ts > pd.dep) pd.dep = ts; }
     });
     Object.keys(perDay).forEach(function (k) {
@@ -5403,7 +5407,7 @@ function adminAttendance(adminPhone, dateIso, mode, dateTo) {
       if (type === 'Приход') {
         if (!d.arrival || ts < d.arrival) {
           d.arrival = ts; if (obj) d.object = obj;
-          d.late = (r[5] === '' || r[5] === null) ? null : Number(r[5]);
+          d.late = computeLate_(ts, obj, r[2]);
         }
       } else if (type === 'Уход') {
         if (!d.departure || ts > d.departure) {
@@ -5503,4 +5507,41 @@ function adminAttendance(adminPhone, dateIso, mode, dateTo) {
   });
   rows.sort(function (a, b) { return b.hoursNum - a.hoursNum || a.name.localeCompare(b.name); });
   return { status: 'ok', mode: 'month', month: monthKey, from: fromIso, to: toIso, today: todayIso, items: rows };
+}
+
+
+// ===================== ОПОЗДАНИЯ (v88) =====================
+// Опоздание считается от начала смены объекта (лист «Объекты», если задано),
+// иначе — от начала рабочего дня OFFICE_START (10:00). Согласованное «Приду
+// позже» на этот день сдвигает начало на согласованное время. Раньше при
+// незаданных сменах опоздание не записывалось вовсе.
+var lateCtxCache_ = null;
+function lateCtx_() {
+  if (lateCtxCache_) return lateCtxCache_;
+  var c = { shifts: {}, until: {} };
+  try { c.shifts = getObjectShifts(); } catch (e) {}
+  try {
+    var as = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ABSENCE_SHEET_NAME);
+    if (as && as.getLastRow() >= 2) {
+      as.getRange(2, 1, as.getLastRow() - 1, ABS_COL.STATUS).getValues().forEach(function (r) {
+        if (absStatusOf_(r[ABS_COL.STATUS - 1]) !== ABS_STATUS.APPROVED) return;
+        if (String(r[ABS_COL.TYPE - 1]) !== ABSENCE_KINDS.late) return;
+        var f = r[ABS_COL.FROM - 1], tTo = normalizeTimeStr(r[ABS_COL.TIME_TO - 1]);
+        if (!(f instanceof Date) || !tTo) return;
+        c.until[normalizePhone_(r[ABS_COL.PHONE - 1]) + '|' + toIsoDate_(f)] = tTo;
+      });
+    }
+  } catch (e2) {}
+  lateCtxCache_ = c;
+  return c;
+}
+function computeLate_(ts, objectName, phone) {
+  if (!(ts instanceof Date)) return null;
+  var c = lateCtx_();
+  var arr = ts.getHours() * 60 + ts.getMinutes();
+  var allowed = c.until[normalizePhone_(phone) + '|' + toIsoDate_(ts)];
+  if (allowed) return Math.max(0, arr - timeStrToMinutes(allowed));
+  var n = findNearestShift(ts, c.shifts[String(objectName || '').trim()]);
+  if (n) return Math.max(0, n.lateMinutes);
+  return Math.max(0, arr - timeStrToMinutes(OFFICE_START));
 }
