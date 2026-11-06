@@ -1,3 +1,4 @@
+// v83: удаление расходов сдвигом строк вверх, если deleteRows не срабатывает.
 // v82: удаление расходов — запасной путь (по одной строке, затем очистка) и диагностика в журнал.
 // v81: удаление расходов — сначала удаляем и проверяем, потом журнал; ошибка
 //      удаления строк показывается в приложении (раньше журнал писался, а строки оставались).
@@ -4081,14 +4082,30 @@ function adminDeleteExpenseRows(phone, items, reason) {
     } catch (e) { errMsg = String(e && e.message || e); }
     var rem = remaining_();
     diag.push('строк было ' + lastBefore + ', стало ' + sheet.getLastRow() + ', осталось наших ' + rem.left);
-    // 2) запасной путь: найти оставшиеся заново и удалить по одной
+    // 2) В этом листе deleteRows из скрипта иногда ничего не делает (без
+    //    ошибки). Тогда «удаляем» сдвигом: данные ниже поднимаются вверх
+    //    (значения, формулы — в R1C1, чтобы ссылки не съехали), хвост
+    //    очищается. Итог для листа тот же, что у удаления строк.
     if (rem.left) {
       try {
-        rem.rows.sort(function (a, b) { return b - a; }).forEach(function (r) { sheet.deleteRow(r); });
+        var lastNow2 = sheet.getLastRow(), lc = sheet.getLastColumn();
+        var topR = Math.min.apply(null, rem.rows);
+        var blk = sheet.getRange(topR, 1, lastNow2 - topR + 1, lc);
+        var bv = blk.getValues(), bf = blk.getFormulasR1C1(), drop = {};
+        rem.rows.forEach(function (r) { drop[r - topR] = true; });
+        var kv = [], kf = [];
+        bv.forEach(function (v, i) { if (!drop[i]) { kv.push(v); kf.push(bf[i]); } });
+        if (kv.length) {
+          sheet.getRange(topR, 1, kv.length, lc).setValues(kv);
+          kf.forEach(function (fr, i) {
+            fr.forEach(function (f, j) { if (f) sheet.getRange(topR + i, j + 1).setFormulaR1C1(f); });
+          });
+        }
+        sheet.getRange(topR + kv.length, 1, rem.rows.length, lc).clearContent();
         SpreadsheetApp.flush();
       } catch (e) { errMsg = errMsg || String(e && e.message || e); }
       rem = remaining_();
-      diag.push('по одной: осталось ' + rem.left);
+      diag.push('сдвигом: осталось ' + rem.left);
     }
     // 3) крайний случай: очистить содержимое строк (из приложения они исчезнут)
     var cleared = 0;
@@ -4435,7 +4452,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v82';
+var CODE_VERSION = 'v83';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
