@@ -4254,7 +4254,7 @@
         return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(x.name) + '</span>' + pill + '</div>' +
           (sub.length ? '<div class="tmSub">' + sub.join('') + '</div>' : '') + '</div>';
       }).join('') : '<div class="statsEmpty">Никого</div>';
-      if (tmPerson) list.innerHTML += '<button type="button" class="tmMore" id="tmPersonMonth">Все смены за месяц</button>';
+      if (tmPerson) tmPersonExtra_(list);
       return;
     }
     var rows = res.items.filter(function (r) { return !tmPerson || r.name === tmPerson; });
@@ -4284,6 +4284,30 @@
     // выбран сотрудник — все его смены за период
     if (tmPerson && rows.length === 1) list.innerHTML += tmShiftsHtml_(rows[0].shifts || []);
   }
+  // Выбран сотрудник в режиме дня: сразу подгружаем его месяц (с 1-го числа
+  // по выбранный день; если выбрано 1-е — с 1-го прошлого месяца) — итоги и
+  // все смены под карточкой дня.
+  function tmPersonExtra_(list) {
+    var to = tmFrom, from = new Date(to.getFullYear(), to.getMonth(), 1);
+    if (tmSameDay_(from, to)) from = new Date(to.getFullYear(), to.getMonth() - 1, 1);
+    var body = { action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(from), mode: 'range', dateTo: tmIso_(to) };
+    var box = document.createElement('div');
+    box.innerHTML = '<div class="tmShHead">' + escapeHtml(tmRangeLabel_(from, to)) + '</div>' + skeletonHtml_(2);
+    list.appendChild(box);
+    var who = tmPerson, forFrom = tmFrom;
+    swrLoad_(body, function (res) {
+      if (who !== tmPerson || forFrom !== tmFrom || !box.parentNode) return;
+      var r = res && res.status === 'ok' ? (res.items || []).filter(function (x) { return x.name === who; })[0] : null;
+      if (!r) { box.innerHTML = '<div class="statsEmpty">Нет данных за месяц</div>'; return; }
+      var sub = ['<span>смен: <b>' + r.days + '</b></span>'];
+      if (r.lateDays) sub.push('<span class="late">опозданий ' + r.lateDays + ' (' + r.lateMinutes + ' мин)</span>');
+      if (r.absenceDays) sub.push('<span>отсутствия: <b>' + r.absenceDays + ' дн.</b></span>');
+      if (r.autoClosed) sub.push('<span class="warn">не отметил уход: ' + r.autoClosed + '</span>');
+      box.innerHTML = '<div class="tmShHead">' + escapeHtml(tmRangeLabel_(from, to)) + '</div>' +
+        '<div class="tmRow"><div class="tmTop"><span class="tmName">Итого за период</span><span class="tmPill b">' + escapeHtml(r.hours) + ' ч</span></div>' +
+        '<div class="tmSub">' + sub.join('') + '</div></div>' + tmShiftsHtml_(r.shifts || []);
+    }, function () { box.innerHTML = '<div class="statsEmpty">Не удалось загрузить месяц</div>'; });
+  }
   function tmShiftsHtml_(shifts) {
     var sh = shifts.filter(function (x) { return !tmObj || x.object === tmObj || (x.objects || []).indexOf(tmObj) >= 0; });
     if (!sh.length) return '<div class="statsEmpty">Смен за этот период нет</div>';
@@ -4305,13 +4329,6 @@
     var f = b.getAttribute('data-f');
     tmFilter = tmFilter === f ? 'all' : f;
     renderTeam_();
-  });
-  document.getElementById('tmList').addEventListener('click', function (e) {
-    if (!e.target.closest('#tmPersonMonth')) return;
-    var t = tmToday_();
-    tmFrom = new Date(t.getFullYear(), t.getMonth(), 1); tmTo = t;
-    if (tmSameDay_(tmFrom, tmTo)) tmFrom = new Date(t.getFullYear(), t.getMonth() - 1, t.getDate());
-    tmFilter = 'all'; loadTeam_();
   });
   document.getElementById('tmPersonSel').addEventListener('change', function () {
     tmPerson = this.value; tmFilter = 'all';
