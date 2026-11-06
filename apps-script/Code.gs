@@ -1,3 +1,4 @@
+// v87: «Общий кабинет» — за период у каждого сотрудника список всех смен.
 // v86: «Общий кабинет» — произвольный период (mode 'range', dateTo).
 // v85: «Общий кабинет» — итоги месяца по каждому объекту (для фильтра по объектам).
 // v84: adminAttendance — «Общий кабинет» (посещение объектов сотрудниками, день/месяц).
@@ -4458,7 +4459,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v86';
+var CODE_VERSION = 'v87';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5482,7 +5483,16 @@ function adminAttendance(adminPhone, dateIso, mode, dateTo) {
         if (di >= fromIso && di <= toIso && isRuWorkday_(dt)) absDays++;
       }
     });
-    return { name: o.name, phone: o.phone, days: worked, hours: hoursFractionToStr(frac), hoursNum: Math.round(frac * 24 * 10) / 10,
+    // все смены за период — для просмотра одного сотрудника
+    var shifts = keys.sort().reverse().map(function (k) {
+      var d = o.days[k];
+      var f = (d.arrival && d.departure && d.departure > d.arrival) ? (d.departure - d.arrival) / 86400000 : 0;
+      var os = open[o.phone], on = k === todayIso && os;
+      return { date: k, arrival: hm(d.arrival), departure: hm(d.departure), hours: f ? hoursFractionToStr(f) : '',
+        object: d.object || Object.keys(d.objects)[0] || '', objects: Object.keys(d.objects), late: d.late, closeNote: d.note,
+        onShift: on ? true : false };
+    });
+    return { name: o.name, phone: o.phone, shifts: shifts, days: worked, hours: hoursFractionToStr(frac), hoursNum: Math.round(frac * 24 * 10) / 10,
       lateDays: late, lateMinutes: lateMin, autoClosed: auto, absenceDays: absDays,
       objects: Object.keys(objs).sort(function (a, b) { return objs[b] - objs[a]; }).slice(0, 3),
       allObjects: Object.keys(objs),

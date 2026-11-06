@@ -747,6 +747,9 @@
   .tmSub .late { color: #F29900; font-weight: 700; }
   .tmSub .warn { color: var(--red); }
   .tmTime { font-variant-numeric: tabular-nums; }
+  .tmShHead { margin: 14px 2px 8px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .tmSh .tmName { font-size: 14.5px; }
+  .tmMore { margin: 6px 0 0; background: var(--blue); }
   .verLine { margin-top: 12px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
   .segCtl { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
   .segCtl button {
@@ -4251,6 +4254,7 @@
         return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(x.name) + '</span>' + pill + '</div>' +
           (sub.length ? '<div class="tmSub">' + sub.join('') + '</div>' : '') + '</div>';
       }).join('') : '<div class="statsEmpty">Никого</div>';
+      if (tmPerson) list.innerHTML += '<button type="button" class="tmMore" id="tmPersonMonth">Все смены за месяц</button>';
       return;
     }
     var rows = res.items.filter(function (r) { return !tmPerson || r.name === tmPerson; });
@@ -4258,7 +4262,7 @@
       // итоги именно по этому объекту
       rows = rows.filter(function (r) { return r.byObject && r.byObject[tmObj]; }).map(function (r) {
         var b = r.byObject[tmObj];
-        return { name: r.name, days: b.days, hours: b.hours, hoursNum: b.hoursNum, lateDays: b.lateDays, lateMinutes: 0, absenceDays: 0, autoClosed: 0, objects: [], objOnly: true };
+        return { name: r.name, days: b.days, hours: b.hours, hoursNum: b.hoursNum, lateDays: b.lateDays, lateMinutes: 0, absenceDays: 0, autoClosed: 0, objects: [], objOnly: true, shifts: r.shifts };
       }).sort(function (a, b) { return b.hoursNum - a.hoursNum; });
     }
     var totalH = 0, totalD = 0, lateN = 0;
@@ -4277,12 +4281,37 @@
       return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(r.name) + '</span>' +
         '<span class="tmPill ' + (r.days ? 'b' : '') + '">' + escapeHtml(r.hours) + ' ч</span></div><div class="tmSub">' + sub.join('') + '</div></div>';
     }).join('');
+    // выбран сотрудник — все его смены за период
+    if (tmPerson && rows.length === 1) list.innerHTML += tmShiftsHtml_(rows[0].shifts || []);
+  }
+  function tmShiftsHtml_(shifts) {
+    var sh = shifts.filter(function (x) { return !tmObj || x.object === tmObj || (x.objects || []).indexOf(tmObj) >= 0; });
+    if (!sh.length) return '<div class="statsEmpty">Смен за этот период нет</div>';
+    return '<div class="tmShHead">Смены · ' + sh.length + '</div>' + sh.map(function (x) {
+      var p = x.date.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]);
+      var right = x.onShift ? '<span class="tmPill g">на смене</span>' : (x.hours ? '<span class="tmPill b">' + escapeHtml(x.hours) + ' ч</span>' : '<span class="tmPill">—</span>');
+      var sub = [];
+      if (x.object) sub.push('<b>' + escapeHtml(x.object) + '</b>');
+      sub.push('<span class="tmTime">' + escapeHtml(x.arrival || '—') + ' – ' + escapeHtml(x.departure || (x.onShift ? 'сейчас' : '—')) + '</span>');
+      if (x.late > 0) sub.push('<span class="late">опоздание ' + x.late + ' мин</span>');
+      if (x.closeNote === 'auto') sub.push('<span class="warn">уход не отмечен</span>');
+      else if (x.closeNote === 'manual') sub.push('<span>уход со слов</span>');
+      if (x.objects && x.objects.length > 1) sub.push('ещё: ' + escapeHtml(x.objects.filter(function (o) { return o !== x.object; }).join(', ')));
+      return '<div class="tmRow tmSh"><div class="tmTop"><span class="tmName">' + tmFmt_(d) + ', ' + TM_DOW[d.getDay()] + '</span>' + right + '</div><div class="tmSub">' + sub.join('') + '</div></div>';
+    }).join('');
   }
   document.getElementById('tmTiles').addEventListener('click', function (e) {
     var b = e.target.closest('.tmTile[data-f]'); if (!b) return;
     var f = b.getAttribute('data-f');
     tmFilter = tmFilter === f ? 'all' : f;
     renderTeam_();
+  });
+  document.getElementById('tmList').addEventListener('click', function (e) {
+    if (!e.target.closest('#tmPersonMonth')) return;
+    var t = tmToday_();
+    tmFrom = new Date(t.getFullYear(), t.getMonth(), 1); tmTo = t;
+    if (tmSameDay_(tmFrom, tmTo)) tmFrom = new Date(t.getFullYear(), t.getMonth() - 1, t.getDate());
+    tmFilter = 'all'; loadTeam_();
   });
   document.getElementById('tmPersonSel').addEventListener('change', function () {
     tmPerson = this.value; tmFilter = 'all';
