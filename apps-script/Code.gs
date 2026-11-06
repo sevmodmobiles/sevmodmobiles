@@ -1,3 +1,4 @@
+// v84: adminAttendance — «Общий кабинет» (посещение объектов сотрудниками, день/месяц).
 // v83: удаление расходов сдвигом строк вверх, если deleteRows не срабатывает.
 // v82: удаление расходов — запасной путь (по одной строке, затем очистка) и диагностика в журнал.
 // v81: удаление расходов — сначала удаляем и проверяем, потом журнал; ошибка
@@ -484,6 +485,9 @@ function doPost(e) {
     }
     if (data.action === 'status') {
       return jsonOutput(getShiftStatus(data.phone));
+    }
+    if (data.action === 'adminAttendance') {
+      return jsonOutput(adminAttendance(data.phone, data.date, data.mode));
     }
     if (data.action === 'uploadPhoto') {
       return jsonOutput(uploadPhoto(data.phone, data.photo, data.label));
@@ -4452,7 +4456,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v83';
+var CODE_VERSION = 'v84';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5338,4 +5342,126 @@ function setupPush() {
   selfUpdateLog_('setupPush', '', CODE_VERSION, '', fcmOk ? 'настроено' : 'ошибка', msg);
   Logger.log(msg);
   return msg;
+}
+
+// ===================== ОБЩИЙ КАБИНЕТ (v84) =====================
+// Для администратора: как сотрудники посещают объекты. mode 'day' — за
+// дату (кто пришёл/ушёл, где, опоздания, кто сейчас на смене, кто в
+// отгуле, кто не отмечался); 'month' — итоги за месяц по каждому.
+function adminAttendance(adminPhone, dateIso, mode) {
+  var auth = adminAuth_(adminPhone);
+  if (!auth.ok) return { status: 'error', message: auth.error };
+  mode = mode === 'month' ? 'month' : 'day';
+  var tz = 'Europe/Moscow';
+  var day = parseIsoDate_(dateIso) || startOfDay_(new Date());
+  var todayIso = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var dayIso = Utilities.formatDate(day, tz, 'yyyy-MM-dd');
+  var monthKey = dayIso.slice(0, 7);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // сотрудники
+  var people = [], byPhone = {}, byName = {};
+  var es = ss.getSheetByName('Сотрудники');
+  if (es && es.getLastRow() >= 2) {
+    es.getRange(2, 1, es.getLastRow() - 1, 2).getValues().forEach(function (r) {
+      var name = String(r[0] || '').trim(), p = normalizePhone_(r[1]);
+      if (!name || !p || byPhone[p]) return;
+      var o = { name: name, phone: p, days: {} };
+      people.push(o); byPhone[p] = o; byName[name] = o;
+    });
+  }
+
+  // отметки
+  var log = ss.getSheetByName('Учет');
+  if (log && log.getLastRow() >= 2) {
+    var lc = Math.max(9, Math.min(log.getLastColumn(), 12));
+    log.getRange(2, 1, log.getLastRow() - 1, lc).getValues().forEach(function (r) {
+      var ts = r[0];
+      if (!(ts instanceof Date)) return;
+      var iso = Utilities.formatDate(ts, tz, 'yyyy-MM-dd');
+      if (mode === 'day' ? iso !== dayIso : iso.slice(0, 7) !== monthKey) return;
+      var o = byPhone[normalizePhone_(r[2])] || byName[String(r[1] || '').trim()];
+      if (!o) return;
+      var d = o.days[iso] || (o.days[iso] = { arrival: null, departure: null, object: '', late: null, note: '', objects: {} });
+      var obj = String(r[3] || '').trim(), type = r[4];
+      if (obj) d.objects[obj] = true;
+      if (type === 'Приход') {
+        if (!d.arrival || ts < d.arrival) {
+          d.arrival = ts; if (obj) d.object = obj;
+          d.late = (r[5] === '' || r[5] === null) ? null : Number(r[5]);
+        }
+      } else if (type === 'Уход') {
+        if (!d.departure || ts > d.departure) {
+          d.departure = ts;
+          var note = String(r[8] || '');
+          d.note = note.indexOf('автозакрытие') === 0 ? 'auto' : (note.indexOf('уход со слов') === 0 ? 'manual' : '');
+        }
+        if (!d.object && obj) d.object = obj;
+      }
+    });
+  }
+
+  // согласованные отсутствия
+  var absMap = {};
+  var as = ss.getSheetByName(ABSENCE_SHEET_NAME);
+  if (as && as.getLastRow() >= 2) {
+    as.getRange(2, 1, as.getLastRow() - 1, ABS_COL.STATUS).getValues().forEach(function (r) {
+      if (absStatusOf_(r[ABS_COL.STATUS - 1]) !== ABS_STATUS.APPROVED) return;
+      var f = r[ABS_COL.FROM - 1], t = r[ABS_COL.TO - 1];
+      if (!(f instanceof Date)) return;
+      if (!(t instanceof Date)) t = f;
+      var p = normalizePhone_(r[ABS_COL.PHONE - 1]);
+      var fi = Utilities.formatDate(f, tz, 'yyyy-MM-dd'), ti = Utilities.formatDate(t, tz, 'yyyy-MM-dd');
+      (absMap[p] = absMap[p] || []).push({ from: fi, to: ti, type: String(r[ABS_COL.TYPE - 1] || ''),
+        tFrom: String(r[ABS_COL.TIME_FROM - 1] || ''), tTo: String(r[ABS_COL.TIME_TO - 1] || '') });
+    });
+  }
+  function hm(d) { return d ? Utilities.formatDate(d, tz, 'HH:mm') : ''; }
+  var open = getOpenShiftsMap_();
+
+  if (mode === 'day') {
+    var items = people.map(function (o) {
+      var d = o.days[dayIso], it = { name: o.name, phone: o.phone };
+      if (d) {
+        it.arrival = hm(d.arrival); it.departure = hm(d.departure); it.object = d.object;
+        it.objects = Object.keys(d.objects); it.late = d.late; it.closeNote = d.note;
+        if (d.arrival && d.departure && d.departure > d.arrival) it.hours = hoursFractionToStr((d.departure - d.arrival) / 86400000);
+      }
+      var os = open[o.phone];
+      if (dayIso === todayIso && os) {
+        var since = os.since || openShiftSinceFromLog_(o.phone);
+        it.onShift = { object: os.objectName, since: since ? hm(new Date(since)) : '' };
+      }
+      (absMap[o.phone] || []).forEach(function (a) { if (a.from <= dayIso && dayIso <= a.to) it.absence = a; });
+      return it;
+    });
+    // порядок: на смене, были, отсутствие, не отмечались
+    var rank = function (it) { return it.onShift ? 0 : (it.arrival || it.departure ? 1 : (it.absence ? 2 : 3)); };
+    items.sort(function (a, b) { return rank(a) - rank(b) || (a.arrival || '99').localeCompare(b.arrival || '99') || a.name.localeCompare(b.name); });
+    return { status: 'ok', mode: 'day', date: dayIso, today: todayIso, items: items };
+  }
+
+  var rows = people.map(function (o) {
+    var keys = Object.keys(o.days), frac = 0, late = 0, lateMin = 0, auto = 0, objs = {}, worked = 0;
+    keys.forEach(function (k) {
+      var d = o.days[k];
+      if (d.arrival) worked++;
+      if (d.arrival && d.departure && d.departure > d.arrival) frac += (d.departure - d.arrival) / 86400000;
+      if (d.late > 0) { late++; lateMin += d.late; }
+      if (d.note === 'auto') auto++;
+      Object.keys(d.objects).forEach(function (x) { objs[x] = (objs[x] || 0) + 1; });
+    });
+    var absDays = 0;
+    (absMap[o.phone] || []).forEach(function (a) {
+      if (a.type === 'Приду позже' || a.type === 'Уйду раньше') return;
+      for (var dt = parseIsoDate_(a.from), end = parseIsoDate_(a.to); dt && dt <= end; dt.setDate(dt.getDate() + 1)) {
+        if (Utilities.formatDate(dt, tz, 'yyyy-MM') === monthKey && isRuWorkday_(dt)) absDays++;
+      }
+    });
+    return { name: o.name, phone: o.phone, days: worked, hours: hoursFractionToStr(frac), hoursNum: Math.round(frac * 24 * 10) / 10,
+      lateDays: late, lateMinutes: lateMin, autoClosed: auto, absenceDays: absDays,
+      objects: Object.keys(objs).sort(function (a, b) { return objs[b] - objs[a]; }).slice(0, 3) };
+  });
+  rows.sort(function (a, b) { return b.hoursNum - a.hoursNum || a.name.localeCompare(b.name); });
+  return { status: 'ok', mode: 'month', month: monthKey, today: todayIso, items: rows };
 }

@@ -674,6 +674,33 @@
   }
 
   /* ===== Задачи (разовые работы) ===== */
+  /* ===== Общий кабинет ===== */
+  #screenStats { width: 100%; max-width: 440px; }
+  .card.tmCard { padding: 14px 12px; }
+  .tmNav { display: flex; align-items: center; gap: 8px; margin: 12px 0 10px; }
+  .tmNav button { width: 40px; height: 40px; padding: 0; margin: 0; border-radius: 50%; background: var(--bg); color: var(--text); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; flex: none; }
+  .tmNav button:disabled { opacity: .35; }
+  .tmNav svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tmLabel { flex: 1; text-align: center; font-weight: 700; font-size: 16px; }
+  .tmLabel small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
+  .tmTiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+  .tmTile { margin: 0; padding: 8px 4px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); color: var(--text); text-align: center; display: block; }
+  .tmTile b { display: block; font-size: 20px; line-height: 1.1; }
+  .tmTile span { display: block; font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 2px; }
+  .tmTile.on { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+  .tmTile.g b { color: var(--green); } .tmTile.o b { color: #F29900; } .tmTile.r b { color: var(--red); } .tmTile.b b { color: var(--blue); }
+  .tmRow { padding: 11px 12px; border: 1px solid var(--border); border-radius: 14px; margin-bottom: 7px; }
+  .tmTop { display: flex; align-items: center; gap: 8px; }
+  .tmName { flex: 1; min-width: 0; font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tmPill { flex: none; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: var(--bg); color: var(--muted); }
+  .tmPill.g { color: var(--green); background: rgba(52,168,83,.14); }
+  .tmPill.b { color: var(--blue); background: rgba(66,133,244,.13); }
+  .tmPill.r { color: var(--red); background: rgba(234,67,53,.12); }
+  .tmSub { margin-top: 5px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 3px 10px; }
+  .tmSub b { color: var(--text); font-weight: 600; }
+  .tmSub .late { color: #F29900; font-weight: 700; }
+  .tmSub .warn { color: var(--red); }
+  .tmTime { font-variant-numeric: tabular-nums; }
   .verLine { margin-top: 12px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
   .segCtl { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
   .segCtl button {
@@ -1852,12 +1879,38 @@
   <!-- Экран личного кабинета -->
   <div id="screenStats">
     <div class="card logo-card">
-      <h1 style="margin-top:0;">Мой кабинет</h1>
+      <h1 style="margin-top:0;" id="statsTitle">Мой кабинет</h1>
       <div class="whoami">Вы вошли как: <b id="statsWhoamiName"></b></div>
       <div class="switchUser"><a id="backToScanLink">← Главный экран</a></div>
       <div class="switchUser" style="margin-top:6px;"><a id="goToAdminLink">Панель администратора</a></div>
     </div>
 
+    <!-- «Мой | Общий» — только у администраторов. Общий: как сотрудники
+         посещают объекты (день / месяц). -->
+    <div class="card" id="statsModeCard" style="display:none; padding:6px;">
+      <div id="statsModeSeg" class="segCtl" style="margin:0;">
+        <button type="button" data-m="mine" class="on">Мой кабинет</button>
+        <button type="button" data-m="team">Общий</button>
+      </div>
+    </div>
+
+    <div id="statsTeam" style="display:none;">
+      <div class="card tmCard">
+        <div class="segCtl" id="tmPeriodSeg">
+          <button type="button" data-p="day" class="on">День</button>
+          <button type="button" data-p="month">Месяц</button>
+        </div>
+        <div class="tmNav">
+          <button type="button" id="tmPrev" aria-label="Назад"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <div id="tmLabel" class="tmLabel"></div>
+          <button type="button" id="tmNext" aria-label="Вперёд"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+        </div>
+        <div id="tmTiles" class="tmTiles"></div>
+        <div id="tmList"></div>
+      </div>
+    </div>
+
+    <div id="statsMine">
     <div class="statsGrid">
       <div class="statCard">
         <div class="statLabel">Часы за месяц</div>
@@ -1884,6 +1937,7 @@
     <div class="card">
       <h2>По дням</h2>
       <div id="statsDaysList"><div class="statsEmpty"><span class="spinner"></span> Загрузка…</div></div>
+    </div>
     </div>
   </div>
 
@@ -2778,12 +2832,12 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
   var SWR_AFTER_WRITE = {
-    log: ['adminSalaryReport'],
+    log: ['adminSalaryReport', 'adminAttendance'], closeMissedShift: ['adminAttendance', 'stats', 'status'],
     adminSetExpenseStatus: ['adminExpenseOverview'], adminDeleteExpenseRows: ['adminExpenseOverview'],
     adminSplitExpenseRow: ['adminExpenseOverview'], adminAddExpense: ['adminExpenseOverview', 'adminExpenseLookups'],
     adminAddContract: ['adminExpenseOverview', 'adminExpenseLookups', 'adminGetObjects'],
@@ -3912,11 +3966,138 @@
     screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenStats.style.display = 'block';
     document.getElementById('statsWhoamiName').textContent = currentUser ? currentUser.name : 'Тестовый пользователь';
-    loadMyStats();
+    var isAdm = !!(currentUser && loadAdminStatusCache(currentUser.phone));
+    if (!isAdm) statsMode = 'mine';
+    document.getElementById('statsModeCard').style.display = isAdm ? 'block' : 'none';
+    applyStatsMode_();
     showBottomNav();
     setActiveNav('stats');
     pushScreenState('stats');
   }
+
+  // ===== «Мой кабинет» / «Общий» (для администратора) =====
+  var statsMode = 'mine', tmPeriod = 'day', tmDate = null, tmFilter = 'all', tmLast = null;
+  try { statsMode = localStorage.getItem('sevmod_stats_mode') || 'mine'; } catch (e) {}
+  function applyStatsMode_() {
+    Array.prototype.forEach.call(document.getElementById('statsModeSeg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-m') === statsMode); });
+    document.getElementById('statsMine').style.display = statsMode === 'mine' ? '' : 'none';
+    document.getElementById('statsTeam').style.display = statsMode === 'team' ? '' : 'none';
+    document.getElementById('statsTitle').textContent = statsMode === 'team' ? 'Общий кабинет' : 'Мой кабинет';
+    if (statsMode === 'mine') loadMyStats(); else loadTeam_();
+  }
+  document.getElementById('statsModeSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-m]'); if (!b) return;
+    statsMode = b.getAttribute('data-m');
+    try { localStorage.setItem('sevmod_stats_mode', statsMode); } catch (err) {}
+    applyStatsMode_();
+  });
+  var TM_DOW = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  var TM_MON = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  function tmIso_(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function tmToday_() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  function tmRenderNav_() {
+    if (!tmDate) tmDate = tmToday_();
+    var t = tmToday_(), lab = document.getElementById('tmLabel'), next = document.getElementById('tmNext');
+    if (tmPeriod === 'day') {
+      var diff = Math.round((t - tmDate) / 86400000);
+      var dd = ('0' + tmDate.getDate()).slice(-2) + '.' + ('0' + (tmDate.getMonth() + 1)).slice(-2);
+      lab.innerHTML = (diff === 0 ? 'Сегодня' : diff === 1 ? 'Вчера' : dd) + '<small>' + (diff <= 1 ? dd + ', ' : '') + TM_DOW[tmDate.getDay()] + '</small>';
+      next.disabled = diff <= 0;
+    } else {
+      lab.innerHTML = TM_MON[tmDate.getMonth()] + '<small>' + tmDate.getFullYear() + '</small>';
+      next.disabled = tmDate.getFullYear() === t.getFullYear() && tmDate.getMonth() === t.getMonth();
+    }
+    Array.prototype.forEach.call(document.getElementById('tmPeriodSeg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-p') === tmPeriod); });
+  }
+  function loadTeam_() {
+    tmRenderNav_();
+    var body = { action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(tmDate), mode: tmPeriod };
+    var list = document.getElementById('tmList');
+    if (!swrHas_(body)) { list.innerHTML = skeletonHtml_(4); document.getElementById('tmTiles').innerHTML = ''; }
+    var key = JSON.stringify(body);
+    swrLoad_(body, function (res) {
+      if (JSON.stringify({ action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(tmDate), mode: tmPeriod }) !== key) return;
+      if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
+      tmLast = res; renderTeam_();
+    }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+  }
+  function tmTile_(f, n, label, cls) {
+    return '<button type="button" class="tmTile ' + (cls || '') + (tmFilter === f ? ' on' : '') + '" data-f="' + f + '"><b>' + n + '</b><span>' + label + '</span></button>';
+  }
+  function renderTeam_() {
+    var res = tmLast, list = document.getElementById('tmList'), tiles = document.getElementById('tmTiles');
+    if (!res) return;
+    if (res.mode === 'day') {
+      var it = res.items, isToday = res.date === res.today;
+      var was = function (x) { return !!(x.arrival || x.departure); };
+      var cnt = {
+        shift: it.filter(function (x) { return x.onShift; }).length,
+        came: it.filter(was).length,
+        late: it.filter(function (x) { return x.late > 0; }).length,
+        none: it.filter(function (x) { return !was(x) && !x.absence && !x.onShift; }).length
+      };
+      tiles.innerHTML = (isToday ? tmTile_('shift', cnt.shift, 'на смене', 'g') : tmTile_('all', it.length, 'все', '')) +
+        tmTile_('came', cnt.came, 'отметились', 'b') + tmTile_('late', cnt.late, 'опоздали', 'o') + tmTile_('none', cnt.none, 'нет отметок', 'r');
+      var shown = it.filter(function (x) {
+        if (tmFilter === 'shift') return !!x.onShift;
+        if (tmFilter === 'came') return was(x);
+        if (tmFilter === 'late') return x.late > 0;
+        if (tmFilter === 'none') return !was(x) && !x.absence && !x.onShift;
+        return true;
+      });
+      list.innerHTML = shown.length ? shown.map(function (x) {
+        var pill, sub = [];
+        if (x.onShift) pill = '<span class="tmPill g">на смене с ' + escapeHtml(x.onShift.since || '') + '</span>';
+        else if (was(x)) pill = '<span class="tmPill b">' + (x.hours ? escapeHtml(x.hours) + ' ч' : 'был') + '</span>';
+        else if (x.absence) pill = '<span class="tmPill">' + escapeHtml(x.absence.type) + '</span>';
+        else pill = '<span class="tmPill r">нет отметок</span>';
+        var obj = (x.onShift && x.onShift.object) || x.object;
+        if (obj) sub.push('<b>' + escapeHtml(obj) + '</b>');
+        if (was(x)) sub.push('<span class="tmTime">' + escapeHtml(x.arrival || '—') + ' – ' + escapeHtml(x.departure || (x.onShift ? 'сейчас' : '—')) + '</span>');
+        if (x.late > 0) sub.push('<span class="late">опоздание ' + x.late + ' мин</span>');
+        if (x.closeNote === 'auto') sub.push('<span class="warn">уход не отмечен</span>');
+        if (x.objects && x.objects.length > 1) sub.push('ещё: ' + escapeHtml(x.objects.filter(function (o) { return o !== obj; }).join(', ')));
+        if (x.absence && (x.absence.tFrom || x.absence.tTo) && !was(x)) sub.push(escapeHtml(x.absence.tFrom + '–' + x.absence.tTo));
+        return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(x.name) + '</span>' + pill + '</div>' +
+          (sub.length ? '<div class="tmSub">' + sub.join('') + '</div>' : '') + '</div>';
+      }).join('') : '<div class="statsEmpty">Никого</div>';
+      return;
+    }
+    var rows = res.items, totalH = 0, totalD = 0, lateN = 0;
+    rows.forEach(function (r) { totalH += r.hoursNum; totalD += r.days; lateN += r.lateDays; });
+    tiles.innerHTML = '<div class="tmTile b"><b>' + Math.round(totalH) + '</b><span>часов</span></div>' +
+      '<div class="tmTile g"><b>' + totalD + '</b><span>смен</span></div>' +
+      '<div class="tmTile o"><b>' + lateN + '</b><span>опозданий</span></div>' +
+      '<div class="tmTile"><b>' + rows.filter(function (r) { return r.days; }).length + '</b><span>работали</span></div>';
+    list.innerHTML = rows.map(function (r) {
+      var sub = [];
+      sub.push('<span>смен: <b>' + r.days + '</b></span>');
+      if (r.lateDays) sub.push('<span class="late">опозданий ' + r.lateDays + ' (' + r.lateMinutes + ' мин)</span>');
+      if (r.absenceDays) sub.push('<span>отсутствия: <b>' + r.absenceDays + ' дн.</b></span>');
+      if (r.autoClosed) sub.push('<span class="warn">не отметил уход: ' + r.autoClosed + '</span>');
+      if (r.objects.length) sub.push('<span>' + escapeHtml(r.objects.join(', ')) + '</span>');
+      return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(r.name) + '</span>' +
+        '<span class="tmPill ' + (r.days ? 'b' : '') + '">' + escapeHtml(r.hours) + ' ч</span></div><div class="tmSub">' + sub.join('') + '</div></div>';
+    }).join('');
+  }
+  document.getElementById('tmTiles').addEventListener('click', function (e) {
+    var b = e.target.closest('.tmTile[data-f]'); if (!b) return;
+    var f = b.getAttribute('data-f');
+    tmFilter = tmFilter === f ? 'all' : f;
+    renderTeam_();
+  });
+  document.getElementById('tmPeriodSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-p]'); if (!b) return;
+    tmPeriod = b.getAttribute('data-p'); tmFilter = 'all'; tmDate = tmToday_(); loadTeam_();
+  });
+  function tmShift_(k) {
+    if (tmPeriod === 'day') tmDate = new Date(tmDate.getFullYear(), tmDate.getMonth(), tmDate.getDate() + k);
+    else tmDate = new Date(tmDate.getFullYear(), tmDate.getMonth() + k, 1);
+    if (tmDate > tmToday_()) tmDate = tmToday_();
+    tmFilter = 'all'; loadTeam_();
+  }
+  document.getElementById('tmPrev').addEventListener('click', function () { tmShift_(-1); });
+  document.getElementById('tmNext').addEventListener('click', function () { tmShift_(1); });
 
   // --- Мои задачи (разовые поручения) ---
   function showTasksScreen() {
