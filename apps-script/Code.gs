@@ -1,3 +1,4 @@
+// v85: «Общий кабинет» — итоги месяца по каждому объекту (для фильтра по объектам).
 // v84: adminAttendance — «Общий кабинет» (посещение объектов сотрудниками, день/месяц).
 // v83: удаление расходов сдвигом строк вверх, если deleteRows не срабатывает.
 // v82: удаление расходов — запасной путь (по одной строке, затем очистка) и диагностика в журнал.
@@ -4456,7 +4457,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v84';
+var CODE_VERSION = 'v85';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5442,11 +5443,20 @@ function adminAttendance(adminPhone, dateIso, mode) {
   }
 
   var rows = people.map(function (o) {
-    var keys = Object.keys(o.days), frac = 0, late = 0, lateMin = 0, auto = 0, objs = {}, worked = 0;
+    var keys = Object.keys(o.days), frac = 0, late = 0, lateMin = 0, auto = 0, objs = {}, worked = 0, byObj = {};
     keys.forEach(function (k) {
       var d = o.days[k];
       if (d.arrival) worked++;
-      if (d.arrival && d.departure && d.departure > d.arrival) frac += (d.departure - d.arrival) / 86400000;
+      var f = (d.arrival && d.departure && d.departure > d.arrival) ? (d.departure - d.arrival) / 86400000 : 0;
+      frac += f;
+      // по объектам: смена засчитывается объекту прихода (иначе — любому из дня)
+      var mainObj = d.object || Object.keys(d.objects)[0];
+      if (mainObj) {
+        var bo = byObj[mainObj] || (byObj[mainObj] = { days: 0, frac: 0, late: 0 });
+        if (d.arrival) bo.days++;
+        bo.frac += f;
+        if (d.late > 0) bo.late++;
+      }
       if (d.late > 0) { late++; lateMin += d.late; }
       if (d.note === 'auto') auto++;
       Object.keys(d.objects).forEach(function (x) { objs[x] = (objs[x] || 0) + 1; });
@@ -5460,7 +5470,12 @@ function adminAttendance(adminPhone, dateIso, mode) {
     });
     return { name: o.name, phone: o.phone, days: worked, hours: hoursFractionToStr(frac), hoursNum: Math.round(frac * 24 * 10) / 10,
       lateDays: late, lateMinutes: lateMin, autoClosed: auto, absenceDays: absDays,
-      objects: Object.keys(objs).sort(function (a, b) { return objs[b] - objs[a]; }).slice(0, 3) };
+      objects: Object.keys(objs).sort(function (a, b) { return objs[b] - objs[a]; }).slice(0, 3),
+      allObjects: Object.keys(objs),
+      byObject: Object.keys(byObj).reduce(function (m, k) {
+        m[k] = { days: byObj[k].days, hours: hoursFractionToStr(byObj[k].frac), hoursNum: Math.round(byObj[k].frac * 24 * 10) / 10, lateDays: byObj[k].late };
+        return m;
+      }, {}) };
   });
   rows.sort(function (a, b) { return b.hoursNum - a.hoursNum || a.name.localeCompare(b.name); });
   return { status: 'ok', mode: 'month', month: monthKey, today: todayIso, items: rows };
