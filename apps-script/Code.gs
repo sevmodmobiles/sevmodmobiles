@@ -1,3 +1,5 @@
+// v81: удаление расходов — сначала удаляем и проверяем, потом журнал; ошибка
+//      удаления строк показывается в приложении (раньше журнал писался, а строки оставались).
 // v80: getTaskById — администратор может открыть любую задачу.
 // v79: uploadPhoto — фото задач загружаются по одному сразу после выбора;
 //      savePhotos_ принимает и готовые ссылки на Диск.
@@ -4036,21 +4038,74 @@ function adminDeleteExpenseRows(phone, items, reason) {
       del[r] = true;
     });
     var rowsDesc = Object.keys(del).map(Number).sort(function (a, b) { return b - a; });
-    // Сначала — в журнал (все поля и формулы строки), потом удаляем.
     var logged = rowsDesc.slice().reverse().map(function (r) {
       return { row: r, values: data[r - first], formulas: fml[r - first] };
     });
-    logExpenseChanges_(auth, 'Удаление', reason, logged, lay);
-    // подряд идущие строки — одним deleteRows
-    var i = 0;
-    while (i < rowsDesc.length) {
-      var top = rowsDesc[i], n = 1;
-      while (i + n < rowsDesc.length && rowsDesc[i + n] === top - n) n++;
-      sheet.deleteRows(top - n + 1, n);
-      i += n;
+    // Удаляем снизу вверх (номера верхних строк не сдвигаются), подряд
+    // идущие — одним deleteRows. Ошибку не глотаем: запоминаем и сообщаем.
+    var errMsg = '';
+    try {
+      var i = 0;
+      while (i < rowsDesc.length) {
+        var top = rowsDesc[i], n = 1;
+        while (i + n < rowsDesc.length && rowsDesc[i + n] === top - n) n++;
+        sheet.deleteRows(top - n + 1, n);
+        i += n;
+      }
+      SpreadsheetApp.flush();
+    } catch (e) {
+      errMsg = String(e && e.message || e);
     }
-    SpreadsheetApp.flush();
-    notifyExpenseDelete_(auth, reason, logged, lay);
+    // Проверка: строк с такими данными на прежних местах быть не должно
+    // (после удаления на их местах — следующие строки).
+    var left = 0;
+    try {
+      var lastNow = sheet.getLastRow();
+      if (lastNow >= first) {
+        var nowData = sheet.getRange(first, 1, lastNow - first + 1, sheet.getLastColumn()).getValues();
+        var nowKeys = {};
+        nowData.forEach(function (v) {
+          var d = cols.date ? v[cols.date - 1] : '';
+          var k = expenseRowKey_(d instanceof Date ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : '',
+            cols.worker ? v[cols.worker - 1] : '', cols.object ? v[cols.object - 1] : '',
+            cols.rate ? v[cols.rate - 1] : '', cols.status ? v[cols.status - 1] : '');
+          nowKeys[k] = (nowKeys[k] || 0) + 1;
+        });
+        var wantKeys = {};
+        logged.forEach(function (e) {
+          var v = e.values, d = cols.date ? v[cols.date - 1] : '';
+          var k = expenseRowKey_(d instanceof Date ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : '',
+            cols.worker ? v[cols.worker - 1] : '', cols.object ? v[cols.object - 1] : '',
+            cols.rate ? v[cols.rate - 1] : '', cols.status ? v[cols.status - 1] : '');
+          wantKeys[k] = (wantKeys[k] || 0) + 1;
+        });
+        // было в листе data → сколько таких ключей было до удаления
+        var before = {};
+        data.forEach(function (v) {
+          var d = cols.date ? v[cols.date - 1] : '';
+          var k = expenseRowKey_(d instanceof Date ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : '',
+            cols.worker ? v[cols.worker - 1] : '', cols.object ? v[cols.object - 1] : '',
+            cols.rate ? v[cols.rate - 1] : '', cols.status ? v[cols.status - 1] : '');
+          before[k] = (before[k] || 0) + 1;
+        });
+        Object.keys(wantKeys).forEach(function (k) {
+          var expected = (before[k] || 0) - wantKeys[k];
+          if ((nowKeys[k] || 0) > expected) left += (nowKeys[k] || 0) - expected;
+        });
+      }
+    } catch (e2) { /* проверка — не критично */ }
+    var removed = Math.max(0, rowsDesc.length - left);
+    if (removed) {
+      logExpenseChanges_(auth, 'Удаление', reason, logged, lay);
+      notifyExpenseDelete_(auth, reason, logged, lay);
+    }
+    if (errMsg || left) {
+      var msg = 'Строки не удалились из листа «' + EXPENSE_SHEET_NAME + '»' + (errMsg ? ': ' + errMsg : ' (Google Таблица не дала их удалить)');
+      try { PropertiesService.getScriptProperties().setProperty('EXPENSE_DELETE_LAST_ERROR', new Date().toISOString() + ' ' + msg); } catch (e3) {}
+      // и в журнал — чтобы причину было видно в таблице
+      try { logExpenseChanges_(auth, 'Ошибка удаления', msg.slice(0, 450), logged.slice(0, 1), lay); } catch (e4) {}
+      return { status: removed ? 'ok' : 'error', message: msg, deleted: removed, conflicts: conflicts + left };
+    }
     return { status: 'ok', deleted: rowsDesc.length, conflicts: conflicts };
   } finally {
     lock.releaseLock();
@@ -4369,7 +4424,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v80';
+var CODE_VERSION = 'v81';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
