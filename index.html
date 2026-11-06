@@ -727,7 +727,8 @@
   .tmNav svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .tmLabel { flex: 1; text-align: center; font-weight: 700; font-size: 16px; }
   .tmLabel small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
-  #tmObjSel { margin: 0 0 10px; }
+  .tmFilters { display: flex; gap: 8px; margin: 0 0 10px; }
+  .tmFilters select { flex: 1; min-width: 0; margin: 0; padding: 11px 26px 11px 12px; font-size: 15px; text-overflow: ellipsis; }
   .tmTiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
   .tmTile { margin: 0; padding: 8px 4px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); color: var(--text); text-align: center; display: block; }
   .tmTile b { display: block; font-size: 20px; line-height: 1.1; }
@@ -1947,7 +1948,10 @@
           <span id="tmLabel"></span>
           <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
         </button>
-        <select id="tmObjSel"><option value="">Все объекты</option></select>
+        <div class="tmFilters">
+          <select id="tmObjSel"><option value="">Все объекты</option></select>
+          <select id="tmPersonSel"><option value="">Все сотрудники</option></select>
+        </div>
         <div id="tmTiles" class="tmTiles"></div>
         <div id="tmList"></div>
       </div>
@@ -4032,7 +4036,7 @@
   }
 
   // ===== «Мой кабинет» / «Общий» (для администратора) =====
-  var statsMode = 'mine', tmPeriod = 'day', tmDate = null, tmFilter = 'all', tmLast = null, tmObj = '';
+  var statsMode = 'mine', tmPeriod = 'day', tmDate = null, tmFilter = 'all', tmLast = null, tmObj = '', tmPerson = '';
   try { tmObj = localStorage.getItem('sevmod_tm_obj') || ''; } catch (e) {}
   // список объектов в фильтре — из данных выбранного дня/месяца
   function tmFillObjects_(res) {
@@ -4044,11 +4048,17 @@
     });
     if (tmObj) set[tmObj] = 1;
     var sel = document.getElementById('tmObjSel');
+    var names = (res.items || []).map(function (x) { return x.name; }).filter(Boolean).sort(function (a, b) { return a.localeCompare(b, 'ru'); });
+    if (tmPerson && names.indexOf(tmPerson) < 0) names.unshift(tmPerson);
+    document.getElementById('tmPersonSel').innerHTML = '<option value="">Все сотрудники</option>' + names.map(function (n) {
+      return '<option value="' + escapeHtml(n) + '"' + (n === tmPerson ? ' selected' : '') + '>' + escapeHtml(personShort_(n) || n) + '</option>';
+    }).join('');
     sel.innerHTML = '<option value="">Все объекты</option>' + Object.keys(set).sort(function (a, b) { return a.localeCompare(b, 'ru'); }).map(function (o) {
       return '<option value="' + escapeHtml(o) + '"' + (o === tmObj ? ' selected' : '') + '>' + escapeHtml(o) + '</option>';
     }).join('');
   }
   function tmAtObj_(x) {
+    if (tmPerson && x.name !== tmPerson) return false;
     if (!tmObj) return true;
     if (x.onShift && x.onShift.object === tmObj) return true;
     return (x.objects || []).indexOf(tmObj) >= 0 || (x.allObjects || []).indexOf(tmObj) >= 0;
@@ -4211,7 +4221,7 @@
       }).join('') : '<div class="statsEmpty">Никого</div>';
       return;
     }
-    var rows = res.items;
+    var rows = res.items.filter(function (r) { return !tmPerson || r.name === tmPerson; });
     if (tmObj) {
       // итоги именно по этому объекту
       rows = rows.filter(function (r) { return r.byObject && r.byObject[tmObj]; }).map(function (r) {
@@ -4240,6 +4250,10 @@
     var b = e.target.closest('.tmTile[data-f]'); if (!b) return;
     var f = b.getAttribute('data-f');
     tmFilter = tmFilter === f ? 'all' : f;
+    renderTeam_();
+  });
+  document.getElementById('tmPersonSel').addEventListener('change', function () {
+    tmPerson = this.value; tmFilter = 'all';
     renderTeam_();
   });
   document.getElementById('tmObjSel').addEventListener('change', function () {
