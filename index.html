@@ -677,6 +677,15 @@
   /* ===== Общий кабинет ===== */
   #screenStats { width: 100%; max-width: 440px; }
   .card.tmCard { padding: 14px 12px; }
+  .tmHead { display: flex; gap: 8px; align-items: stretch; margin-bottom: 12px; }
+  .tmHead .segCtl { flex: 1; margin: 0; }
+  .tmCal {
+    position: relative; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 12px; margin: 0;
+    border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-weight: 700; font-size: 14px; color: var(--text); cursor: pointer;
+  }
+  .tmCal svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .tmCal input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; padding: 0; border: 0; cursor: pointer; }
+  .tmCal input[hidden] { display: none; }
   .tmNav { display: flex; align-items: center; gap: 8px; margin: 12px 0 10px; }
   .tmNav button { width: 40px; height: 40px; padding: 0; margin: 0; border-radius: 50%; background: var(--bg); color: var(--text); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; flex: none; }
   .tmNav button:disabled { opacity: .35; }
@@ -1883,7 +1892,7 @@
       <h1 style="margin-top:0;" id="statsTitle">Мой кабинет</h1>
       <div class="whoami">Вы вошли как: <b id="statsWhoamiName"></b></div>
       <div class="switchUser"><a id="backToScanLink">← Главный экран</a></div>
-      <div class="switchUser" style="margin-top:6px;"><a id="goToAdminLink">Панель администратора</a></div>
+      <div class="switchUser" style="margin-top:6px; display:none;"><a id="goToAdminLink">Панель администратора</a></div>
     </div>
 
     <!-- «Мой | Общий» — только у администраторов. Общий: как сотрудники
@@ -1897,15 +1906,21 @@
 
     <div id="statsTeam" style="display:none;">
       <div class="card tmCard">
-        <div class="segCtl" id="tmPeriodSeg">
-          <button type="button" data-p="day" class="on">День</button>
-          <button type="button" data-p="month">Месяц</button>
+        <div class="tmHead">
+          <div class="segCtl" id="tmPeriodSeg">
+            <button type="button" data-p="day" class="on">День</button>
+            <button type="button" data-p="month">Месяц</button>
+          </div>
+          <!-- календарь: поверх кнопки — прозрачное поле даты/месяца, нажатие
+               открывает системный выбор (работает и в Android-приложении) -->
+          <label class="tmCal" title="Выбрать дату">
+            <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/><path d="M8.5 14h.01M12 14h.01M15.5 14h.01M8.5 17h.01M12 17h.01"/></svg>
+            <span id="tmLabel"></span>
+            <input type="date" id="tmDateInput" aria-label="Дата">
+            <input type="month" id="tmMonthInput" aria-label="Месяц">
+          </label>
         </div>
-        <div class="tmNav">
-          <button type="button" id="tmPrev" aria-label="Назад"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
-          <div id="tmLabel" class="tmLabel"></div>
-          <button type="button" id="tmNext" aria-label="Вперёд"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
-        </div>
+        <button type="button" id="tmPrev" hidden></button><button type="button" id="tmNext" hidden></button>
         <select id="tmObjSel"><option value="">Все объекты</option></select>
         <div id="tmTiles" class="tmTiles"></div>
         <div id="tmList"></div>
@@ -4019,18 +4034,30 @@
   function tmToday_() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
   function tmRenderNav_() {
     if (!tmDate) tmDate = tmToday_();
-    var t = tmToday_(), lab = document.getElementById('tmLabel'), next = document.getElementById('tmNext');
+    var t = tmToday_(), lab = document.getElementById('tmLabel');
+    var di = document.getElementById('tmDateInput'), mi = document.getElementById('tmMonthInput');
+    di.hidden = tmPeriod !== 'day'; mi.hidden = tmPeriod !== 'month';
+    di.max = tmIso_(t); mi.max = tmIso_(t).slice(0, 7);
     if (tmPeriod === 'day') {
       var diff = Math.round((t - tmDate) / 86400000);
-      var dd = ('0' + tmDate.getDate()).slice(-2) + '.' + ('0' + (tmDate.getMonth() + 1)).slice(-2);
-      lab.innerHTML = (diff === 0 ? 'Сегодня' : diff === 1 ? 'Вчера' : dd) + '<small>' + (diff <= 1 ? dd + ', ' : '') + TM_DOW[tmDate.getDay()] + '</small>';
-      next.disabled = diff <= 0;
+      lab.textContent = diff === 0 ? 'Сегодня' : diff === 1 ? 'Вчера' : ('0' + tmDate.getDate()).slice(-2) + '.' + ('0' + (tmDate.getMonth() + 1)).slice(-2) + ', ' + TM_DOW[tmDate.getDay()];
+      di.value = tmIso_(tmDate);
     } else {
-      lab.innerHTML = TM_MON[tmDate.getMonth()] + '<small>' + tmDate.getFullYear() + '</small>';
-      next.disabled = tmDate.getFullYear() === t.getFullYear() && tmDate.getMonth() === t.getMonth();
+      lab.textContent = TM_MON[tmDate.getMonth()].toLowerCase() + (tmDate.getFullYear() !== t.getFullYear() ? ' ' + tmDate.getFullYear() : '');
+      mi.value = tmIso_(tmDate).slice(0, 7);
     }
     Array.prototype.forEach.call(document.getElementById('tmPeriodSeg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-p') === tmPeriod); });
   }
+  document.getElementById('tmDateInput').addEventListener('change', function () {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(this.value); if (!m) return;
+    tmDate = new Date(+m[1], +m[2] - 1, +m[3]); if (tmDate > tmToday_()) tmDate = tmToday_();
+    tmFilter = 'all'; loadTeam_();
+  });
+  document.getElementById('tmMonthInput').addEventListener('change', function () {
+    var m = /^(\d{4})-(\d{2})$/.exec(this.value); if (!m) return;
+    tmDate = new Date(+m[1], +m[2] - 1, 1); if (tmDate > tmToday_()) tmDate = tmToday_();
+    tmFilter = 'all'; loadTeam_();
+  });
   function loadTeam_() {
     tmRenderNav_();
     var body = { action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(tmDate), mode: tmPeriod };
