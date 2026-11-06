@@ -3578,6 +3578,38 @@
     if (document.visibilityState === 'visible') setTimeout(checkAppUpdate_, 1500);
   });
 
+  // ===== Свежая версия экранов =====
+  // Телефон держит страницу в кэше до 10 минут (так отдаёт GitHub Pages).
+  // При открытии/возврате в приложение (не чаще раза в минуту) сверяем дату
+  // страницы на сервере; если вышла новая — скачиваем её в обход кэша и
+  // перезагружаемся, когда человек ничего не вводит и ничего не отправляется.
+  var pageCheckAt = 0, pageReloadPending = false;
+  function checkPageUpdate_() {
+    if (location.protocol === 'file:' || Date.now() - pageCheckAt < 60000) return;
+    pageCheckAt = Date.now();
+    var mine = new Date(document.lastModified).getTime();
+    if (!mine) return;
+    var url = location.href.split('#')[0];
+    fetch(url, { method: 'HEAD', cache: 'no-store' }).then(function (r) {
+      var lm = new Date(r.headers.get('last-modified') || 0).getTime();
+      if (!lm || lm <= mine + 1000) return;
+      // защита от зацикливания: за одну и ту же версию — одна перезагрузка
+      try { if (sessionStorage.getItem('sevmod_reload_for') === String(lm)) return; sessionStorage.setItem('sevmod_reload_for', String(lm)); } catch (e) {}
+      // обновляем кэш браузера свежей страницей, потом перезагрузка
+      return fetch(url, { cache: 'reload' }).then(function () { pageReloadPending = true; tryPageReload_(); });
+    }).catch(function () {});
+  }
+  function tryPageReload_() {
+    if (!pageReloadPending) return;
+    var a = document.activeElement, typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+    var busy = (typeof writesInFlight !== 'undefined' && writesInFlight > 0) || (pvEl && pvEl.classList.contains('open')) ||
+      document.querySelector('.modalOverlay.open, .calSheet:not([hidden])');
+    if (typing || busy) { setTimeout(tryPageReload_, 5000); return; }
+    location.reload();
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') checkPageUpdate_(); });
+  setTimeout(checkPageUpdate_, 8000);
+
   // ===== Строка версий внизу «Профиля» =====
   // Приложение (сборка Android-оболочки) · сервер (CODE_VERSION) · экраны
   // (время выкладки сайта — заголовок Last-Modified от GitHub Pages).
