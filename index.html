@@ -750,6 +750,33 @@
   .tmShHead { margin: 14px 2px 8px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   .tmSh .tmName { font-size: 14.5px; }
   .tmMore { margin: 6px 0 0; background: var(--blue); }
+  /* ===== Инфографика сотрудника ===== */
+  .tiBox { border: 1px solid var(--border); border-radius: 16px; padding: 16px 14px 14px; margin-bottom: 8px; }
+  .tiHero { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+  .tiBig { font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .tiBig small { font-size: 16px; font-weight: 700; color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+  .tiCap { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .tiRings { display: flex; gap: 12px; }
+  .tiRing { text-align: center; width: 64px; }
+  .tiRing svg { width: 56px; height: 56px; display: block; margin: 0 auto; transform: rotate(-90deg); }
+  .tiRing .trk { stroke: var(--border); }
+  .tiRing .val { transition: stroke-dasharray .4s ease; }
+  .tiRing b { display: block; font-size: 13px; margin-top: -38px; height: 38px; line-height: 20px; font-variant-numeric: tabular-nums; }
+  .tiRing span { display: block; font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 2px; }
+  .tiBars { display: flex; align-items: flex-end; gap: 2px; height: 72px; margin: 18px 0 4px; }
+  .tiBars i { flex: 1; min-width: 2px; border-radius: 3px 3px 0 0; background: var(--blue); cursor: pointer; position: relative; }
+  .tiBars i.late { background: #F29900; }
+  .tiBars i.miss { background: var(--muted); opacity: .45; height: 3px !important; border-radius: 2px; }
+  .tiBars i.off { background: transparent; }
+  .tiBars i.sel { outline: 2px solid var(--text); outline-offset: 1px; }
+  .tiAxis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tiDay { min-height: 18px; font-size: 12.5px; color: var(--text); margin-top: 8px; }
+  .tiLegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+  .tiLegend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .tiStats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .tiStats div { text-align: center; }
+  .tiStats b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .tiStats span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.2; }
   .verLine { margin-top: 12px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
   .segCtl { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
   .segCtl button {
@@ -4281,8 +4308,11 @@
       return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(r.name) + '</span>' +
         '<span class="tmPill ' + (r.days ? 'b' : '') + '">' + escapeHtml(r.hours) + ' ч</span></div><div class="tmSub">' + sub.join('') + '</div></div>';
     }).join('');
-    // выбран сотрудник — все его смены за период
-    if (tmPerson && rows.length === 1) list.innerHTML += tmShiftsHtml_(rows[0].shifts || []);
+    // выбран сотрудник — инфографика и все его смены за период
+    if (tmPerson && rows.length === 1) {
+      tiles.innerHTML = '';
+      list.innerHTML = tmInfoHtml_(rows[0], res.from || tmIso_(tmFrom), res.to || tmIso_(tmTo), res.workdays) + tmShiftsHtml_(rows[0].shifts || []);
+    }
   }
   // Выбран сотрудник в режиме дня: сразу подгружаем его месяц (с 1-го числа
   // по выбранный день; если выбрано 1-е — с 1-го прошлого месяца) — итоги и
@@ -4304,10 +4334,71 @@
       if (r.absenceDays) sub.push('<span>отсутствия: <b>' + r.absenceDays + ' дн.</b></span>');
       if (r.autoClosed) sub.push('<span class="warn">не отметил уход: ' + r.autoClosed + '</span>');
       box.innerHTML = '<div class="tmShHead">' + escapeHtml(tmRangeLabel_(from, to)) + '</div>' +
-        '<div class="tmRow"><div class="tmTop"><span class="tmName">Итого за период</span><span class="tmPill b">' + escapeHtml(r.hours) + ' ч</span></div>' +
-        '<div class="tmSub">' + sub.join('') + '</div></div>' + tmShiftsHtml_(r.shifts || []);
+        tmInfoHtml_(r, res.from || tmIso_(from), res.to || tmIso_(to), res.workdays) + tmShiftsHtml_(r.shifts || []);
     }, function () { box.innerHTML = '<div class="statsEmpty">Не удалось загрузить месяц</div>'; });
   }
+  // Инфографика по сотруднику за период: часы, явка, пунктуальность,
+  // столбики по дням, средние значения.
+  function tmMin_(hhmm) { var m = /^(\d{1,2}):(\d{2})/.exec(hhmm || ''); return m ? +m[1] * 60 + +m[2] : null; }
+  function tmHM_(min) { return Math.floor(min / 60) + ':' + ('0' + Math.round(min % 60)).slice(-2); }
+  function tmRing_(frac, color, big, label) {
+    var c = 2 * Math.PI * 22, v = Math.max(0, Math.min(1, frac)) * c;
+    return '<div class="tiRing"><svg viewBox="0 0 56 56"><circle class="trk" cx="28" cy="28" r="22" fill="none" stroke-width="6"/>' +
+      '<circle class="val" cx="28" cy="28" r="22" fill="none" stroke="' + color + '" stroke-width="6" stroke-linecap="round" stroke-dasharray="' + v.toFixed(1) + ' ' + c.toFixed(1) + '"/></svg>' +
+      '<b>' + big + '</b><span>' + label + '</span></div>';
+  }
+  function tmInfoHtml_(r, fromIso, toIso, workdays) {
+    var sh = (r.shifts || []).filter(function (x) { return !tmObj || x.object === tmObj || (x.objects || []).indexOf(tmObj) >= 0; });
+    var byDate = {}; sh.forEach(function (x) { byDate[x.date] = x; });
+    var worked = sh.filter(function (x) { return x.arrival; }), late = worked.filter(function (x) { return x.late > 0; });
+    var mins = sh.map(function (x) { return tmMin_(x.hours); }).filter(function (v) { return v; });
+    var totalMin = mins.reduce(function (a, b) { return a + b; }, 0);
+    var arr = worked.map(function (x) { return tmMin_(x.arrival); }).filter(function (v) { return v !== null; });
+    var avgArr = arr.length ? arr.reduce(function (a, b) { return a + b; }, 0) / arr.length : null;
+    var lateMin = late.reduce(function (a, x) { return a + x.late; }, 0);
+    var miss = sh.filter(function (x) { return x.closeNote === 'auto'; }).length;
+    // дни периода (не дальше сегодня) — столбики
+    var p = fromIso.split('-'), q = (toIso < tmIso_(tmToday_()) ? toIso : tmIso_(tmToday_())).split('-');
+    var d = new Date(+p[0], +p[1] - 1, +p[2]), end = new Date(+q[0], +q[1] - 1, +q[2]), days = [];
+    while (d <= end && days.length < 120) { days.push(new Date(d)); d.setDate(d.getDate() + 1); }
+    var maxMin = Math.max(540, Math.max.apply(null, mins.concat([0])));
+    var bars = days.map(function (dt) {
+      var iso = tmIso_(dt), x = byDate[iso], we = dt.getDay() === 0 || dt.getDay() === 6;
+      var info = tmFmt_(dt) + ', ' + TM_DOW[dt.getDay()];
+      if (x && x.arrival) {
+        var m = tmMin_(x.hours) || 60;
+        info += ' · ' + (x.object || '') + ' · ' + (x.arrival || '—') + '–' + (x.departure || (x.onShift ? 'сейчас' : '—')) + (x.hours ? ' · ' + x.hours + ' ч' : '') + (x.late > 0 ? ' · опоздание ' + x.late + ' мин' : '');
+        return '<i class="' + (x.late > 0 ? 'late' : '') + '" style="height:' + Math.max(8, Math.round(m / maxMin * 100)) + '%" data-i="' + escapeHtml(info) + '"></i>';
+      }
+      return '<i class="' + (we ? 'off' : 'miss') + '" data-i="' + escapeHtml(info + (we ? ' · выходной' : ' · нет отметок')) + '"></i>';
+    }).join('');
+    var wdTotal = workdays || days.filter(function (dt) { return dt.getDay() % 6 !== 0; }).length;
+    var attend = Math.min(worked.length, wdTotal);
+    var onTime = worked.length ? (worked.length - late.length) / worked.length : 0;
+    var label = tmRangeLabel_(new Date(+p[0], +p[1] - 1, +p[2]), new Date(+toIso.slice(0, 4), +toIso.slice(5, 7) - 1, +toIso.slice(8, 10)));
+    return '<div class="tiBox">' +
+      '<div class="tiHero"><div><div class="tiBig">' + tmHM_(totalMin) + '<small>ч</small></div>' +
+        '<div class="tiCap">' + escapeHtml(label) + (tmObj ? ' · ' + escapeHtml(tmObj) : '') + '</div></div>' +
+        '<div class="tiRings">' + tmRing_(wdTotal ? attend / wdTotal : 0, 'var(--blue)', attend + '/' + wdTotal, 'явка') +
+          tmRing_(onTime, 'var(--green)', Math.round(onTime * 100) + '%', 'вовремя') + '</div></div>' +
+      '<div class="tiBars" role="img" aria-label="Часы по дням">' + bars + '</div>' +
+      '<div class="tiAxis"><span>' + tmFmt_(days[0] || tmToday_()) + '</span><span>' + tmFmt_(days[days.length - 1] || tmToday_()) + '</span></div>' +
+      '<div class="tiDay" aria-live="polite">Нажмите на день</div>' +
+      '<div class="tiLegend"><span><i style="background:var(--blue)"></i>смена</span><span><i style="background:#F29900"></i>с опозданием</span><span><i style="background:var(--muted);opacity:.45"></i>нет отметок</span></div>' +
+      '<div class="tiStats">' +
+        '<div><b>' + (avgArr === null ? '—' : tmHM_(avgArr)) + '</b><span>средний приход</span></div>' +
+        '<div><b>' + (mins.length ? tmHM_(totalMin / mins.length) : '—') + '</b><span>средняя смена</span></div>' +
+        '<div><b>' + (lateMin >= 60 ? Math.floor(lateMin / 60) + 'ч ' + (lateMin % 60) + 'м' : lateMin + 'м') + '</b><span>опоздания, ' + late.length + ' раз</span></div>' +
+        '<div><b>' + miss + '</b><span>без отметки ухода</span></div>' +
+      '</div></div>';
+  }
+  document.getElementById('tmList').addEventListener('click', function (e) {
+    var b = e.target.closest('.tiBars i'); if (!b) return;
+    var box = b.closest('.tiBox');
+    Array.prototype.forEach.call(box.querySelectorAll('.tiBars i.sel'), function (x) { x.classList.remove('sel'); });
+    b.classList.add('sel');
+    box.querySelector('.tiDay').textContent = b.getAttribute('data-i');
+  });
   function tmShiftsHtml_(shifts) {
     var sh = shifts.filter(function (x) { return !tmObj || x.object === tmObj || (x.objects || []).indexOf(tmObj) >= 0; });
     if (!sh.length) return '<div class="statsEmpty">Смен за этот период нет</div>';

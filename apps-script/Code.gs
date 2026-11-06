@@ -1,3 +1,4 @@
+// v89: «Общий кабинет» — число рабочих дней периода (для инфографики сотрудника).
 // v88: опоздания — от смены объекта, иначе от 10:00; согласованное «Приду позже» учитывается.
 // v87: «Общий кабинет» — за период у каждого сотрудника список всех смен.
 // v86: «Общий кабинет» — произвольный период (mode 'range', dateTo).
@@ -4463,7 +4464,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v88';
+var CODE_VERSION = 'v89';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5506,7 +5507,12 @@ function adminAttendance(adminPhone, dateIso, mode, dateTo) {
       }, {}) };
   });
   rows.sort(function (a, b) { return b.hoursNum - a.hoursNum || a.name.localeCompare(b.name); });
-  return { status: 'ok', mode: 'month', month: monthKey, from: fromIso, to: toIso, today: todayIso, items: rows };
+  // рабочие дни периода (по производственному календарю, не дальше сегодня)
+  var workdays = 0;
+  for (var wd = parseIsoDate_(fromIso), wEnd = parseIsoDate_(toIso < todayIso ? toIso : todayIso); wd && wEnd && wd <= wEnd; wd.setDate(wd.getDate() + 1)) {
+    if (isRuWorkday_(wd)) workdays++;
+  }
+  return { status: 'ok', mode: 'month', month: monthKey, from: fromIso, to: toIso, today: todayIso, workdays: workdays, items: rows };
 }
 
 
