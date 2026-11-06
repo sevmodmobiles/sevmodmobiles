@@ -680,9 +680,44 @@
   .tmHead { display: flex; gap: 8px; align-items: stretch; margin-bottom: 12px; }
   .tmHead .segCtl { flex: 1; margin: 0; }
   .tmCal {
-    position: relative; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 12px; margin: 0;
-    border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-weight: 700; font-size: 14px; color: var(--text); cursor: pointer;
+    position: relative; width: 100%; display: flex; align-items: center; gap: 8px; padding: 12px 14px; margin: 0 0 10px;
+    border-radius: 12px; background: var(--bg); border: 1px solid var(--border); font-weight: 700; font-size: 16px; color: var(--text); cursor: pointer;
   }
+  .tmCal #tmLabel { flex: 1; text-align: left; }
+  .tmCal .chev { width: 18px; height: 18px; color: var(--muted); }
+  /* панель выбора дня / периода */
+  .calSheet { position: fixed; inset: 0; z-index: 250; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; justify-content: center; }
+  .calSheet[hidden] { display: none; }
+  .calBox {
+    width: 100%; max-width: 440px; background: var(--card); border-radius: 18px 18px 0 0; padding: 14px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -6px 24px rgba(0,0,0,.3); animation: calUp .18s ease-out;
+  }
+  @keyframes calUp { from { transform: translateY(30px); opacity: .6; } to { transform: none; opacity: 1; } }
+  .calPresets { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: none; }
+  .calPresets::-webkit-scrollbar { display: none; }
+  .calPresets button { flex: none; width: auto; margin: 0; padding: 7px 12px; font-size: 13px; font-weight: 600; border-radius: 999px; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+  .calPresets button.on { background: var(--text); color: var(--card); border-color: var(--text); }
+  .calHead { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 6px; }
+  .calHead b { font-size: 16px; }
+  .calHead button { width: 38px; height: 38px; padding: 0; margin: 0; border-radius: 50%; background: var(--bg); color: var(--text); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
+  .calHead button:disabled { opacity: .3; }
+  .calHead svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .calGrid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 3px; }
+  .calDow span { text-align: center; font-size: 11.5px; font-weight: 700; color: var(--muted); padding: 4px 0; }
+  .calDays, #calDays button { }
+  #calDays button {
+    margin: 0; padding: 0; height: 40px; border-radius: 0; background: transparent; color: var(--text); font-size: 15px; font-weight: 500; position: relative;
+  }
+  #calDays button:disabled { color: var(--muted); opacity: .35; }
+  #calDays button.we { color: var(--red); }
+  #calDays button.today { font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+  #calDays button.in { background: rgba(66,133,244,.16); }
+  #calDays button.s, #calDays button.e { background: var(--blue); color: #fff; font-weight: 700; }
+  #calDays button.s { border-radius: 10px 0 0 10px; } #calDays button.e { border-radius: 0 10px 10px 0; }
+  #calDays button.s.e { border-radius: 10px; }
+  .calFoot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .calFoot span { flex: 1; font-size: 14px; color: var(--muted); }
+  .calFoot button { width: auto; margin: 0; padding: 11px 20px; background: var(--blue); }
   .tmCal svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
   .tmCal input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; padding: 0; border: 0; cursor: pointer; }
   .tmCal input[hidden] { display: none; }
@@ -1906,24 +1941,28 @@
 
     <div id="statsTeam" style="display:none;">
       <div class="card tmCard">
-        <div class="tmHead">
-          <div class="segCtl" id="tmPeriodSeg">
-            <button type="button" data-p="day" class="on">День</button>
-            <button type="button" data-p="month">Месяц</button>
-          </div>
-          <!-- календарь: поверх кнопки — прозрачное поле даты/месяца, нажатие
-               открывает системный выбор (работает и в Android-приложении) -->
-          <label class="tmCal" title="Выбрать дату">
-            <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/><path d="M8.5 14h.01M12 14h.01M15.5 14h.01M8.5 17h.01M12 17h.01"/></svg>
-            <span id="tmLabel"></span>
-            <input type="date" id="tmDateInput" aria-label="Дата">
-            <input type="month" id="tmMonthInput" aria-label="Месяц">
-          </label>
-        </div>
-        <button type="button" id="tmPrev" hidden></button><button type="button" id="tmNext" hidden></button>
+        <!-- Кнопка-календарь: день или период (выбор в панели снизу) -->
+        <button type="button" class="tmCal" id="tmCalBtn">
+          <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/><path d="M8.5 14h.01M12 14h.01M15.5 14h.01M8.5 17h.01M12 17h.01"/></svg>
+          <span id="tmLabel"></span>
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
         <select id="tmObjSel"><option value="">Все объекты</option></select>
         <div id="tmTiles" class="tmTiles"></div>
         <div id="tmList"></div>
+      </div>
+      <div class="calSheet" id="calSheet" hidden>
+        <div class="calBox" role="dialog" aria-label="Выбор периода">
+          <div class="calPresets" id="calPresets"></div>
+          <div class="calHead">
+            <button type="button" id="calPrev" aria-label="Предыдущий месяц"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <b id="calTitle"></b>
+            <button type="button" id="calNext" aria-label="Следующий месяц"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+          </div>
+          <div class="calGrid calDow"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div>
+          <div class="calGrid" id="calDays"></div>
+          <div class="calFoot"><span id="calSel"></span><button type="button" id="calDone">Показать</button></div>
+        </div>
       </div>
     </div>
 
@@ -4032,40 +4071,97 @@
   var TM_MON = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
   function tmIso_(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function tmToday_() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
-  function tmRenderNav_() {
-    if (!tmDate) tmDate = tmToday_();
-    var t = tmToday_(), lab = document.getElementById('tmLabel');
-    var di = document.getElementById('tmDateInput'), mi = document.getElementById('tmMonthInput');
-    di.hidden = tmPeriod !== 'day'; mi.hidden = tmPeriod !== 'month';
-    di.max = tmIso_(t); mi.max = tmIso_(t).slice(0, 7);
-    if (tmPeriod === 'day') {
-      var diff = Math.round((t - tmDate) / 86400000);
-      lab.textContent = diff === 0 ? 'Сегодня' : diff === 1 ? 'Вчера' : ('0' + tmDate.getDate()).slice(-2) + '.' + ('0' + (tmDate.getMonth() + 1)).slice(-2) + ', ' + TM_DOW[tmDate.getDay()];
-      di.value = tmIso_(tmDate);
-    } else {
-      lab.textContent = TM_MON[tmDate.getMonth()].toLowerCase() + (tmDate.getFullYear() !== t.getFullYear() ? ' ' + tmDate.getFullYear() : '');
-      mi.value = tmIso_(tmDate).slice(0, 7);
+  // выбранный день или период: tmFrom..tmTo (даты без времени)
+  var tmFrom = null, tmTo = null;
+  function tmFmt_(d) { return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2); }
+  function tmSameDay_(a, b) { return a && b && a.getTime() === b.getTime(); }
+  function tmRangeLabel_(f, t) {
+    var td = tmToday_();
+    if (tmSameDay_(f, t)) {
+      var diff = Math.round((td - f) / 86400000);
+      return diff === 0 ? 'Сегодня, ' + tmFmt_(f) : diff === 1 ? 'Вчера, ' + tmFmt_(f) : tmFmt_(f) + ', ' + TM_DOW[f.getDay()];
     }
-    Array.prototype.forEach.call(document.getElementById('tmPeriodSeg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-p') === tmPeriod); });
+    var whole = f.getDate() === 1 && new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate() === t.getDate() && f.getMonth() === t.getMonth() && f.getFullYear() === t.getFullYear();
+    if (whole) return TM_MON[f.getMonth()] + ' ' + f.getFullYear();
+    return tmFmt_(f) + ' – ' + tmFmt_(t) + (f.getFullYear() !== td.getFullYear() ? '.' + f.getFullYear() : '');
   }
-  document.getElementById('tmDateInput').addEventListener('change', function () {
-    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(this.value); if (!m) return;
-    tmDate = new Date(+m[1], +m[2] - 1, +m[3]); if (tmDate > tmToday_()) tmDate = tmToday_();
-    tmFilter = 'all'; loadTeam_();
+  function tmRenderNav_() {
+    if (!tmFrom) { tmFrom = tmToday_(); tmTo = tmToday_(); }
+    tmDate = tmFrom;
+    document.getElementById('tmLabel').textContent = tmRangeLabel_(tmFrom, tmTo);
+  }
+  // ----- панель календаря -----
+  var calF = null, calT = null, calView = null, calPreset = '';
+  function calPresets_() {
+    var t = tmToday_(), y = new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1);
+    var wd = (t.getDay() + 6) % 7, mon = new Date(t.getFullYear(), t.getMonth(), t.getDate() - wd);
+    var pmon = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 7), psun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 1);
+    var m1 = new Date(t.getFullYear(), t.getMonth(), 1), pm1 = new Date(t.getFullYear(), t.getMonth() - 1, 1), pmEnd = new Date(t.getFullYear(), t.getMonth(), 0);
+    return [['today', 'Сегодня', t, t], ['yest', 'Вчера', y, y], ['week', 'Эта неделя', mon, t], ['pweek', 'Прошлая неделя', pmon, psun],
+      ['month', 'Этот месяц', m1, t], ['pmonth', 'Прошлый месяц', pm1, pmEnd], ['d30', '30 дней', new Date(t.getFullYear(), t.getMonth(), t.getDate() - 29), t]];
+  }
+  function calRender_() {
+    var t = tmToday_();
+    document.getElementById('calPresets').innerHTML = calPresets_().map(function (p) {
+      var on = tmSameDay_(calF, p[2]) && tmSameDay_(calT || calF, p[3]);
+      return '<button type="button" data-p="' + p[0] + '"' + (on ? ' class="on"' : '') + '>' + p[1] + '</button>';
+    }).join('');
+    document.getElementById('calTitle').textContent = TM_MON[calView.getMonth()] + ' ' + calView.getFullYear();
+    document.getElementById('calNext').disabled = calView.getFullYear() === t.getFullYear() && calView.getMonth() === t.getMonth();
+    var first = new Date(calView.getFullYear(), calView.getMonth(), 1), lead = (first.getDay() + 6) % 7;
+    var n = new Date(calView.getFullYear(), calView.getMonth() + 1, 0).getDate(), html = '';
+    for (var i = 0; i < lead; i++) html += '<span></span>';
+    var e = calT || calF;
+    for (var d = 1; d <= n; d++) {
+      var dt = new Date(calView.getFullYear(), calView.getMonth(), d), c = [];
+      var dow = dt.getDay();
+      if (dow === 0 || dow === 6) c.push('we');
+      if (tmSameDay_(dt, t)) c.push('today');
+      if (calF && dt >= calF && dt <= e) c.push('in');
+      if (tmSameDay_(dt, calF)) c.push('s');
+      if (tmSameDay_(dt, e)) c.push('e');
+      html += '<button type="button" data-d="' + d + '" class="' + c.join(' ') + '"' + (dt > t ? ' disabled' : '') + '>' + d + '</button>';
+    }
+    document.getElementById('calDays').innerHTML = html;
+    document.getElementById('calSel').textContent = calF ? (calT ? tmRangeLabel_(calF, calT) : tmRangeLabel_(calF, calF) + ' — выберите конец или «Показать»') : '';
+  }
+  function openCal_() {
+    calF = tmFrom; calT = tmTo; calView = new Date(tmTo.getFullYear(), tmTo.getMonth(), 1);
+    calRender_();
+    document.getElementById('calSheet').hidden = false;
+  }
+  function closeCal_(apply) {
+    document.getElementById('calSheet').hidden = true;
+    if (apply && calF) { tmFrom = calF; tmTo = calT || calF; tmFilter = 'all'; loadTeam_(); }
+  }
+  document.getElementById('tmCalBtn').addEventListener('click', openCal_);
+  document.getElementById('calSheet').addEventListener('click', function (e) { if (e.target === this) closeCal_(false); });
+  document.getElementById('calPrev').addEventListener('click', function () { calView = new Date(calView.getFullYear(), calView.getMonth() - 1, 1); calRender_(); });
+  document.getElementById('calNext').addEventListener('click', function () { calView = new Date(calView.getFullYear(), calView.getMonth() + 1, 1); calRender_(); });
+  document.getElementById('calPresets').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-p]'); if (!b) return;
+    var p = calPresets_().filter(function (x) { return x[0] === b.getAttribute('data-p'); })[0];
+    calF = p[2]; calT = p[3]; closeCal_(true);
   });
-  document.getElementById('tmMonthInput').addEventListener('change', function () {
-    var m = /^(\d{4})-(\d{2})$/.exec(this.value); if (!m) return;
-    tmDate = new Date(+m[1], +m[2] - 1, 1); if (tmDate > tmToday_()) tmDate = tmToday_();
-    tmFilter = 'all'; loadTeam_();
+  document.getElementById('calDays').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-d]'); if (!b || b.disabled) return;
+    var dt = new Date(calView.getFullYear(), calView.getMonth(), +b.getAttribute('data-d'));
+    // 1-е нажатие — начало, 2-е — конец (если раньше начала — новое начало)
+    if (!calF || calT) { calF = dt; calT = null; }
+    else if (dt < calF) { calF = dt; }
+    else calT = dt;
+    calRender_();
   });
+  document.getElementById('calDone').addEventListener('click', function () { closeCal_(true); });
   function loadTeam_() {
     tmRenderNav_();
-    var body = { action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(tmDate), mode: tmPeriod };
+    var single = tmSameDay_(tmFrom, tmTo);
+    var body = { action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(tmFrom), mode: single ? 'day' : 'range', dateTo: tmIso_(tmTo) };
     var list = document.getElementById('tmList');
     if (!swrHas_(body)) { list.innerHTML = skeletonHtml_(4); document.getElementById('tmTiles').innerHTML = ''; }
     var key = JSON.stringify(body);
     swrLoad_(body, function (res) {
-      if (JSON.stringify({ action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(tmDate), mode: tmPeriod }) !== key) return;
+      if (JSON.stringify({ action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(tmFrom), mode: tmSameDay_(tmFrom, tmTo) ? 'day' : 'range', dateTo: tmIso_(tmTo) }) !== key) return;
       if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
       tmLast = res; renderTeam_();
     }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
@@ -4151,18 +4247,7 @@
     try { localStorage.setItem('sevmod_tm_obj', tmObj); } catch (e) {}
     renderTeam_();
   });
-  document.getElementById('tmPeriodSeg').addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-p]'); if (!b) return;
-    tmPeriod = b.getAttribute('data-p'); tmFilter = 'all'; tmDate = tmToday_(); loadTeam_();
-  });
-  function tmShift_(k) {
-    if (tmPeriod === 'day') tmDate = new Date(tmDate.getFullYear(), tmDate.getMonth(), tmDate.getDate() + k);
-    else tmDate = new Date(tmDate.getFullYear(), tmDate.getMonth() + k, 1);
-    if (tmDate > tmToday_()) tmDate = tmToday_();
-    tmFilter = 'all'; loadTeam_();
-  }
-  document.getElementById('tmPrev').addEventListener('click', function () { tmShift_(-1); });
-  document.getElementById('tmNext').addEventListener('click', function () { tmShift_(1); });
+
 
   // --- Мои задачи (разовые поручения) ---
   function showTasksScreen() {

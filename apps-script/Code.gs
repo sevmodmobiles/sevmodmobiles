@@ -1,3 +1,4 @@
+// v86: «Общий кабинет» — произвольный период (mode 'range', dateTo).
 // v85: «Общий кабинет» — итоги месяца по каждому объекту (для фильтра по объектам).
 // v84: adminAttendance — «Общий кабинет» (посещение объектов сотрудниками, день/месяц).
 // v83: удаление расходов сдвигом строк вверх, если deleteRows не срабатывает.
@@ -488,7 +489,7 @@ function doPost(e) {
       return jsonOutput(getShiftStatus(data.phone));
     }
     if (data.action === 'adminAttendance') {
-      return jsonOutput(adminAttendance(data.phone, data.date, data.mode));
+      return jsonOutput(adminAttendance(data.phone, data.date, data.mode, data.dateTo));
     }
     if (data.action === 'uploadPhoto') {
       return jsonOutput(uploadPhoto(data.phone, data.photo, data.label));
@@ -4457,7 +4458,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v85';
+var CODE_VERSION = 'v86';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5349,15 +5350,27 @@ function setupPush() {
 // Для администратора: как сотрудники посещают объекты. mode 'day' — за
 // дату (кто пришёл/ушёл, где, опоздания, кто сейчас на смене, кто в
 // отгуле, кто не отмечался); 'month' — итоги за месяц по каждому.
-function adminAttendance(adminPhone, dateIso, mode) {
+// mode 'range' — период dateIso..dateTo (итоги, как за месяц).
+function adminAttendance(adminPhone, dateIso, mode, dateTo) {
   var auth = adminAuth_(adminPhone);
   if (!auth.ok) return { status: 'error', message: auth.error };
-  mode = mode === 'month' ? 'month' : 'day';
+  mode = mode === 'month' || mode === 'range' ? mode : 'day';
   var tz = 'Europe/Moscow';
   var day = parseIsoDate_(dateIso) || startOfDay_(new Date());
   var todayIso = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   var dayIso = Utilities.formatDate(day, tz, 'yyyy-MM-dd');
   var monthKey = dayIso.slice(0, 7);
+  var fromIso = dayIso, toIso = dayIso;
+  if (mode === 'month') {
+    fromIso = monthKey + '-01';
+    var lastDay = new Date(day.getFullYear(), day.getMonth() + 1, 0);
+    toIso = Utilities.formatDate(lastDay, tz, 'yyyy-MM-dd');
+  } else if (mode === 'range') {
+    var t2 = parseIsoDate_(dateTo) || day;
+    toIso = Utilities.formatDate(t2, tz, 'yyyy-MM-dd');
+    if (toIso < fromIso) { var sw = toIso; toIso = fromIso; fromIso = sw; }
+  }
+  if (mode !== 'day' && fromIso === toIso && mode === 'range') mode = 'day';
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // сотрудники
@@ -5380,7 +5393,7 @@ function adminAttendance(adminPhone, dateIso, mode) {
       var ts = r[0];
       if (!(ts instanceof Date)) return;
       var iso = Utilities.formatDate(ts, tz, 'yyyy-MM-dd');
-      if (mode === 'day' ? iso !== dayIso : iso.slice(0, 7) !== monthKey) return;
+      if (mode === 'day' ? iso !== dayIso : (iso < fromIso || iso > toIso)) return;
       var o = byPhone[normalizePhone_(r[2])] || byName[String(r[1] || '').trim()];
       if (!o) return;
       var d = o.days[iso] || (o.days[iso] = { arrival: null, departure: null, object: '', late: null, note: '', objects: {} });
@@ -5465,7 +5478,8 @@ function adminAttendance(adminPhone, dateIso, mode) {
     (absMap[o.phone] || []).forEach(function (a) {
       if (a.type === 'Приду позже' || a.type === 'Уйду раньше') return;
       for (var dt = parseIsoDate_(a.from), end = parseIsoDate_(a.to); dt && dt <= end; dt.setDate(dt.getDate() + 1)) {
-        if (Utilities.formatDate(dt, tz, 'yyyy-MM') === monthKey && isRuWorkday_(dt)) absDays++;
+        var di = Utilities.formatDate(dt, tz, 'yyyy-MM-dd');
+        if (di >= fromIso && di <= toIso && isRuWorkday_(dt)) absDays++;
       }
     });
     return { name: o.name, phone: o.phone, days: worked, hours: hoursFractionToStr(frac), hoursNum: Math.round(frac * 24 * 10) / 10,
@@ -5478,5 +5492,5 @@ function adminAttendance(adminPhone, dateIso, mode) {
       }, {}) };
   });
   rows.sort(function (a, b) { return b.hoursNum - a.hoursNum || a.name.localeCompare(b.name); });
-  return { status: 'ok', mode: 'month', month: monthKey, today: todayIso, items: rows };
+  return { status: 'ok', mode: 'month', month: monthKey, from: fromIso, to: toIso, today: todayIso, items: rows };
 }
