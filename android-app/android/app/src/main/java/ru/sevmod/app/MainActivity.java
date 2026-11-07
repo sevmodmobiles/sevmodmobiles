@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ApkUpdaterPlugin.class);
         registerPlugin(SevmodSessionPlugin.class);
+        registerPlugin(WifiPresencePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

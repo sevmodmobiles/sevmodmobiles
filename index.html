@@ -2162,6 +2162,11 @@
     <div class="card" id="profileAdminCard" style="display:none;">
       <h2 style="margin-top:0;">Администрирование</h2>
       <button id="profileAdminPanelBtn" type="button" class="hasDot" style="background:var(--blue);">Админ-панель</button>
+      <!-- Автоотметка по Wi-Fi офиса (тест, только в Android-приложении) -->
+      <label class="checkRow" id="wifiAutoRow" for="wifiAutoInput" style="display:none;">
+        <input id="wifiAutoInput" type="checkbox">
+        <span>Автоотметка по Wi-Fi офиса <small id="wifiAutoHint">тест: приход — при подключении к Wi-Fi офиса, уход — по последнему присутствию в сети (закрытие дня в 22:00)</small></span>
+      </label>
     </div>
     <div class="card">
       <h2 style="margin-top:0;">Отсутствия</h2>
@@ -2941,7 +2946,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: []
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: []
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -3639,6 +3644,33 @@
   }
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') checkPageUpdate_(); });
   setTimeout(checkPageUpdate_, 8000);
+
+  // ===== Автоотметка по Wi-Fi офиса (тест) =====
+  function renderWifiAuto_() {
+    var WP = nativePlugin_('WifiPresence'), row = document.getElementById('wifiAutoRow');
+    var isAdm = !!(currentUser && loadAdminStatusCache(currentUser.phone));
+    row.style.display = WP && isAdm ? 'flex' : 'none';
+    if (!WP || !isAdm) return;
+    var SS = nativePlugin_('SevmodSession');
+    if (SS) SS.setSession({ phone: currentUser.phone, apiUrl: API_URL }).catch(function () {});
+    apiPost({ action: 'getWifiAuto', phone: currentUser.phone }).then(function (r) {
+      var on = !!(r && r.enabled);
+      document.getElementById('wifiAutoInput').checked = on;
+      // сервер помнит «включено» — убедимся, что фоновая проверка на телефоне идёт
+      (on ? WP.start() : WP.stop()).catch(function () {});
+    }).catch(function () {});
+  }
+  document.getElementById('wifiAutoInput').addEventListener('change', function () {
+    var box = this, want = box.checked, WP = nativePlugin_('WifiPresence');
+    if (!WP) return;
+    box.disabled = true;
+    apiPost({ action: 'setWifiAuto', phone: currentUser.phone, enabled: want }).then(function (r) {
+      box.disabled = false;
+      if (!r || r.status !== 'ok') { box.checked = !want; toast_((r && r.message) || 'Не удалось сохранить', 'error'); return; }
+      (want ? WP.start() : WP.stop()).catch(function () {});
+      toast_(want ? 'Автоотметка включена: приход отметится при подключении к Wi-Fi офиса' : 'Автоотметка выключена', 'ok');
+    }).catch(function () { box.disabled = false; box.checked = !want; toast_('Нет связи с сервером', 'error'); });
+  });
 
   // ===== Строка версий внизу «Профиля» =====
   // Приложение (сборка Android-оболочки) · сервер (CODE_VERSION) · экраны
@@ -4759,6 +4791,7 @@
     setActiveNav('profile');
     pushScreenState('profile');
     renderVersionLine_();
+    renderWifiAuto_();
   }
 
   // Единое отображение статуса — переиспользуется и в списке у сотрудника,

@@ -56,6 +56,8 @@ dependencies {
     implementation project(':capacitor-cordova-android-plugins')
     // для своего приёмника push-сообщений (SevmodMessagingService)
     implementation "com.google.firebase:firebase-messaging:25.0.1"
+    // фоновая проверка сети для автоотметки по Wi-Fi офиса
+    implementation "androidx.work:work-runtime:2.10.0"
 }
 
 apply from: 'capacitor.build.gradle'

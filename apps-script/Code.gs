@@ -1,3 +1,4 @@
+// v90: автоотметка по Wi-Fi офиса (тест): wifiPresence, журнал «Wi-Fi присутствие», закрытие дня по последнему присутствию.
 // v89: «Общий кабинет» — число рабочих дней периода (для инфографики сотрудника).
 // v88: опоздания — от смены объекта, иначе от 10:00; согласованное «Приду позже» учитывается.
 // v87: «Общий кабинет» — за период у каждого сотрудника список всех смен.
@@ -490,6 +491,15 @@ function doPost(e) {
     }
     if (data.action === 'status') {
       return jsonOutput(getShiftStatus(data.phone));
+    }
+    if (data.action === 'wifiPresence') {
+      return jsonOutput(wifiPresence(data.phone, data.ip, data.onWifi === true, data.reason));
+    }
+    if (data.action === 'setWifiAuto') {
+      return jsonOutput(setWifiAuto(data.phone, data.enabled === true));
+    }
+    if (data.action === 'getWifiAuto') {
+      return jsonOutput(getWifiAuto(data.phone));
     }
     if (data.action === 'adminAttendance') {
       return jsonOutput(adminAttendance(data.phone, data.date, data.mode, data.dateTo));
@@ -4464,7 +4474,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v89';
+var CODE_VERSION = 'v90';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4643,6 +4653,7 @@ function adminServerVersion(adminPhone) {
 
 // Резервная проверка раз в час (на случай, если вызов от GitHub не дошёл).
 function autoUpdateHourly() {
+  try { wifiCloseDay_(); } catch (e) { /* не мешаем автообновлению */ }
   try { autoCloseStaleShifts_(); } catch (e) { /* не мешаем автообновлению */ }
   selfUpdate_('проверка раз в час', '');
 }
@@ -5550,4 +5561,138 @@ function computeLate_(ts, objectName, phone) {
   var n = findNearestShift(ts, c.shifts[String(objectName || '').trim()]);
   if (n) return Math.max(0, n.lateMinutes);
   return Math.max(0, arr - timeStrToMinutes(OFFICE_START));
+}
+
+// ===================== АВТООТМЕТКА ПО Wi-Fi ОФИСА (v90, тест) =====================
+// Android-приложение (если включено) при каждой смене сети и раз в ~15 минут
+// сообщает свой внешний IP и подключён ли телефон к Wi-Fi (wifiPresence).
+// Сервер узнаёт офис по IP (колонка «Wi-Fi офиса (IP)» в «Объекты»):
+//  • первое появление в сети офиса за день → приход (если сегодня прихода не было);
+//  • уходы из сети днём (обед, перекур) смену не закрывают — пишутся в журнал;
+//  • в 22:00 открытая смена закрывается временем последнего присутствия в сети.
+// Журнал: лист «Wi-Fi присутствие». Кто включил: свойство wifiAuto_v1.
+var WIFI_LOG_SHEET = 'Wi-Fi присутствие';
+var WIFI_AUTO_KEY = 'wifiAuto_v1', WIFI_STATE_KEY = 'wifiPresence_v1';
+var WIFI_DAY_CLOSE_HOUR = 22;
+function wifiProps_(key) { try { return JSON.parse(PropertiesService.getScriptProperties().getProperty(key) || '{}') || {}; } catch (e) { return {}; } }
+function wifiSave_(key, v) { PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(v)); }
+function wifiLog_(name, phone, event, object, ip, note, at) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(WIFI_LOG_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(WIFI_LOG_SHEET);
+    sh.getRange(1, 1, 1, 7).setValues([['Время', 'ФИО', 'Телефон', 'Событие', 'Объект', 'IP', 'Примечание']]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.getRange('C:C').setNumberFormat('@');
+  }
+  sh.appendRow([at || new Date(), name, String(phone), event, object || '', ip || '', note || '']);
+  sh.getRange(sh.getLastRow(), 1).setNumberFormat('dd.MM.yyyy HH:mm:ss');
+}
+// Объект, в Wi-Fi которого этот IP (или '').
+function officeByIp_(ip) {
+  ip = cleanIp_(ip);
+  if (!ip) return '';
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
+  if (!sheet || sheet.getLastRow() < 2 || sheet.getLastColumn() < OBJ_COL.WIFI) return '';
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, OBJ_COL.WIFI).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (splitIps_(data[i][OBJ_COL.WIFI - 1]).indexOf(ip) >= 0) return String(data[i][0]).trim();
+  }
+  return '';
+}
+
+// Включить/выключить автоотметку для себя (пока — только администраторы, тест).
+function setWifiAuto(phone, enabled) {
+  var p = normalizePhone_(phone);
+  var emp = p && findEmployeeByPhone(p);
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
+  if (!isAdminPhone_(p)) return { status: 'error', message: 'Пока доступно только для теста администраторам' };
+  var m = wifiProps_(WIFI_AUTO_KEY);
+  if (enabled) m[p] = true; else delete m[p];
+  wifiSave_(WIFI_AUTO_KEY, m);
+  wifiLog_(emp.name, p, enabled ? 'автоотметка включена' : 'автоотметка выключена', '', '', '');
+  return { status: 'ok', enabled: !!enabled };
+}
+function getWifiAuto(phone) {
+  return { status: 'ok', enabled: !!wifiProps_(WIFI_AUTO_KEY)[normalizePhone_(phone)] };
+}
+
+function wifiPresence(phone, ip, onWifi, reason) {
+  var p = normalizePhone_(phone);
+  if (!wifiProps_(WIFI_AUTO_KEY)[p]) return { status: 'ok', enabled: false };
+  var emp = findEmployeeByPhone(p);
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
+  ip = cleanIp_(ip);
+  var office = onWifi ? officeByIp_(ip) : '';
+  var now = new Date(), st = wifiProps_(WIFI_STATE_KEY), cur = st[p] || {};
+  var res = { status: 'ok', enabled: true, inOffice: !!office, office: office };
+  if (office) {
+    if (!cur.in || cur.object !== office) wifiLog_(emp.name, p, 'в сети офиса', office, ip, reason || '');
+    cur = { in: true, object: office, since: cur.in ? cur.since : now.getTime(), lastSeen: now.getTime(), ip: ip };
+    st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
+    // авто-приход: первый за день, в разумное время
+    var h = Number(Utilities.formatDate(now, 'Europe/Moscow', 'H'));
+    var os = getOpenShift(p);
+    if (!os.open && h >= 6 && h < WIFI_DAY_CLOSE_HOUR && !hadArrivalToday_(p)) {
+      var r = logEvent(emp.name, p, office, 'Приход', null, now.getTime(), 'wifi' + p + toIsoDate_(now).replace(/-/g, ''), ip);
+      wifiLog_(emp.name, p, r && r.status === 'ok' ? 'авто-приход' : 'авто-приход не принят', office, ip, r && r.status === 'ok' ? '' : (r && r.message || ''));
+      res.checkedIn = !!(r && r.status === 'ok');
+      if (res.checkedIn) sendPush_([p], 'Приход отмечен автоматически', office + ', ' + clockStr_(now) + ' — по Wi-Fi офиса', { screen: 'scan', tag: 'shift' });
+    }
+  } else if (cur.in) {
+    // время — последнее присутствие в сети; когда заметили выход — в примечании
+    wifiLog_(emp.name, p, 'вышел из сети офиса', cur.object, ip, (onWifi ? 'другая сеть Wi-Fi' : 'Wi-Fi отключён') + ', замечено в ' + clockStr_(now), new Date(cur.lastSeen || now));
+    cur.in = false; st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
+  }
+  return res;
+}
+
+function hadArrivalToday_(phone) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
+  if (!sh || sh.getLastRow() < 2) return false;
+  var n = Math.min(sh.getLastRow() - 1, 400), today = toIsoDate_(new Date());
+  var rows = sh.getRange(sh.getLastRow() - n + 1, 1, n, 5).getValues();
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var ts = rows[i][0];
+    if (!(ts instanceof Date)) continue;
+    if (toIsoDate_(ts) !== today) { if (ts < startOfDay_(new Date())) break; else continue; }
+    if (normalizePhone_(rows[i][2]) === phone && rows[i][4] === 'Приход') return true;
+  }
+  return false;
+}
+
+// Раз в час: в 22:00 (и позже) — закрыть открытые смены тех, у кого включена
+// автоотметка, временем последнего присутствия в сети офиса.
+function wifiCloseDay_() {
+  var auto = wifiProps_(WIFI_AUTO_KEY), phones = Object.keys(auto);
+  if (!phones.length) return 0;
+  var now = new Date(), h = Number(Utilities.formatDate(now, 'Europe/Moscow', 'H')), today = startOfDay_(now);
+  var st = wifiProps_(WIFI_STATE_KEY), closed = 0;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return 0;
+  try {
+    var map = getOpenShiftsMap_(), sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
+    phones.forEach(function (p) {
+      var e = map[p], s = st[p];
+      if (!e || !s || !s.lastSeen) return;
+      var since = e.since || openShiftSinceFromLog_(p);
+      if (!since) return;
+      var sinceDay = startOfDay_(new Date(since));
+      // сегодняшняя смена — только после 22:00; вчерашняя и раньше — сразу
+      if (sinceDay >= today && h < WIFI_DAY_CLOSE_HOUR) return;
+      var last = new Date(s.lastSeen);
+      if (last <= new Date(since) || startOfDay_(last).getTime() !== sinceDay.getTime()) return; // в этот день в сети не был
+      var emp = findEmployeeByPhone(p);
+      sheet.appendRow([last, emp ? emp.name : '', p, e.objectName, 'Уход', '', '', '', 'авто: последний раз в Wi-Fi офиса', now]);
+      var row = sheet.getLastRow();
+      sheet.getRange(row, 3).setNumberFormat('@').setValue(String(p));
+      sheet.getRange(row, 10).setNumberFormat('dd.MM.yyyy HH:mm:ss');
+      delete map[p]; closed++;
+      wifiLog_(emp ? emp.name : '', p, 'авто-уход', e.objectName, s.ip || '', 'смена закрыта в ' + clockStr_(last));
+      sendPush_([p], 'Смена закрыта автоматически', e.objectName + ': уход в ' + clockStr_(last) + ' — последний раз в Wi-Fi офиса. Если ушли в другое время — сообщите руководителю.', { screen: 'stats', tag: 'shift' });
+    });
+    if (closed) saveOpenShiftsMap_(map);
+  } finally {
+    lock.releaseLock();
+  }
+  return closed;
 }
