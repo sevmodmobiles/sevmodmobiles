@@ -761,6 +761,17 @@
   .tmSh .tmName { font-size: 14.5px; }
   .tmMore { margin: 6px 0 0; background: var(--blue); }
   .tmViewSeg { margin: 0 0 4px; }
+  /* ===== Отсутствия в общем кабинете ===== */
+  .tmPill.o { color: #F29900; background: rgba(242,153,0,.14); }
+  .tmRow.tap { cursor: pointer; }
+  .abBar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--bg); margin: 14px 0 8px; }
+  .abBar i { display: block; height: 100%; }
+  .abLeg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); }
+  .abLeg span::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; background: var(--c); vertical-align: 0; }
+  .abYear { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+  .abYear b { color: var(--text); }
+  .abCmt { margin-top: 5px; font-size: 13px; color: var(--text); opacity: .85; }
+  .abBack { margin: 0 0 8px; padding: 0; background: none; color: var(--blue); font-size: 14px; font-weight: 600; width: auto; }
   /* ===== Инфографика сотрудника ===== */
   .tiBox { border: 1px solid var(--border); border-radius: 16px; padding: 16px 14px 14px; margin-bottom: 8px; }
   .tiHero { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
@@ -2011,6 +2022,10 @@
 
     <div id="statsTeam" style="display:none;">
       <div class="card tmCard">
+        <div class="segCtl" id="tmSecSeg">
+          <button type="button" data-s="shifts" class="on">Смены</button>
+          <button type="button" data-s="abs">Отсутствия</button>
+        </div>
         <!-- Кнопка-календарь: день или период (выбор в панели снизу) -->
         <button type="button" class="tmCal" id="tmCalBtn">
           <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/><path d="M8.5 14h.01M12 14h.01M15.5 14h.01M8.5 17h.01M12 17h.01"/></svg>
@@ -4714,6 +4729,8 @@
   }
 
   // ===== «Мой кабинет» / «Общий» (для администратора) =====
+  var tmSection = 'shifts', tmAbsF = '', tmAbsItems = null;
+  try { tmSection = localStorage.getItem('sevmod_tm_section') || 'shifts'; } catch (e) {}
   var statsMode = 'mine', tmPeriod = 'day', tmDate = null, tmFilter = 'came', tmLast = null, tmObj = '', tmPerson = '', tmView = 'feed';
   try { tmObj = localStorage.getItem('sevmod_tm_obj') || ''; } catch (e) {}
   // список объектов в фильтре — из данных выбранного дня/месяца
@@ -4787,7 +4804,7 @@
     var pmon = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 7), psun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 1);
     var m1 = new Date(t.getFullYear(), t.getMonth(), 1), pm1 = new Date(t.getFullYear(), t.getMonth() - 1, 1), pmEnd = new Date(t.getFullYear(), t.getMonth(), 0);
     return [['today', 'Сегодня', t, t], ['yest', 'Вчера', y, y], ['week', 'Эта неделя', mon, t], ['pweek', 'Прошлая неделя', pmon, psun],
-      ['month', 'Этот месяц', m1, t], ['pmonth', 'Прошлый месяц', pm1, pmEnd], ['d30', '30 дней', new Date(t.getFullYear(), t.getMonth(), t.getDate() - 29), t]];
+      ['month', 'Этот месяц', m1, t], ['pmonth', 'Прошлый месяц', pm1, pmEnd], ['d30', '30 дней', new Date(t.getFullYear(), t.getMonth(), t.getDate() - 29), t], ['year', 'Этот год', new Date(t.getFullYear(), 0, 1), t]];
   }
   function calRender_() {
     var t = tmToday_();
@@ -4844,6 +4861,8 @@
   document.getElementById('calDone').addEventListener('click', function () { closeCal_(true); });
   function loadTeam_() {
     tmRenderNav_();
+    tmApplySection_();
+    if (tmSection === 'abs') { loadTeamAbs_(); return; }
     var single = tmSameDay_(tmFrom, tmTo);
     var body = { action: 'adminAttendance', phone: currentUser && currentUser.phone, date: tmIso_(tmFrom), mode: single ? 'day' : 'range', dateTo: tmIso_(tmTo) };
     var list = document.getElementById('tmList');
@@ -4859,6 +4878,7 @@
     return '<button type="button" class="tmTile ' + (cls || '') + (tmFilter === f ? ' on' : '') + '" data-f="' + f + '"><b>' + n + '</b><span>' + label + '</span></button>';
   }
   function renderTeam_() {
+    if (tmSection === 'abs') { renderTeamAbs_(); return; }
     var res = tmLast, list = document.getElementById('tmList'), tiles = document.getElementById('tmTiles');
     if (!res) return;
     tmFillObjects_(res);
@@ -4936,6 +4956,139 @@
       list.innerHTML = tmInfoHtml_(rows[0], res.from || tmIso_(tmFrom), res.to || tmIso_(tmTo), res.workdays) + tmShiftsHtml_(rows[0].shifts || []);
     }
   }
+  // ===== Общий кабинет → «Отсутствия»: отгулы, больничные, отлучки за период =====
+  // Данные — все заявки (adminGetAbsences); период и сотрудник — общие с «Сменами».
+  // В итоги идут только согласованные; дни отгула/больничного считаются рабочими
+  // днями внутри выбранного периода (заявка может выходить за его границы).
+  var AB_TYPES = { 'Отгул': { k: 'leave', c: 'var(--blue)' }, 'Больничный': { k: 'sick', c: 'var(--red)' }, 'Приду позже': { k: 'part', c: '#F29900' }, 'Уйду раньше': { k: 'part', c: '#F29900' } };
+  function tmApplySection_() {
+    Array.prototype.forEach.call(document.getElementById('tmSecSeg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-s') === tmSection); });
+    document.getElementById('tmObjSel').style.display = tmSection === 'abs' ? 'none' : '';
+  }
+  document.getElementById('tmSecSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-s]'); if (!b) return;
+    tmSection = b.getAttribute('data-s');
+    try { localStorage.setItem('sevmod_tm_section', tmSection); } catch (err) {}
+    tmAbsF = '';
+    loadTeam_();
+  });
+  function abDate_(iso) { var p = String(iso || '').split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function abWorkdays_(f, t) { var n = 0, d = new Date(f.getTime()); while (d <= t) { var w = d.getDay(); if (w && w !== 6) n++; d.setDate(d.getDate() + 1); } return n; }
+  function abNum_(x) { return String(Math.round(x * 10) / 10).replace('.', ','); }
+  // Часть заявки, попадающая в период [f, t]: дни (отгул/больничный) или часы (отлучки)
+  function abClip_(it, f, t) {
+    var a = abDate_(it.dateFrom), b = abDate_(it.dateTo || it.dateFrom);
+    if (b < f || a > t) return null;
+    var k = (AB_TYPES[it.type] || {}).k || 'leave';
+    if (k === 'part') return { k: k, days: 0, hours: it.hours || 0 };
+    var cf = a < f ? f : a, ct = b > t ? t : b, all = abWorkdays_(a, b), part = abWorkdays_(cf, ct);
+    var days = all ? (it.days || all) * part / all : 0;
+    return { k: k, days: days, hours: all ? (it.hours || 0) * part / all : 0 };
+  }
+  function abSum_(items, f, t) {
+    var s = { leave: 0, sick: 0, part: 0, pending: 0, rejected: 0, n: 0 };
+    items.forEach(function (it) {
+      var c = abClip_(it, f, t); if (!c) return;
+      s.n++;
+      if (it.status === 'На согласовании') { s.pending++; return; }
+      if (it.status !== 'Согласовано') { s.rejected++; return; }
+      if (c.k === 'part') s.part += c.hours; else s[c.k] += c.days;
+    });
+    return s;
+  }
+  function loadTeamAbs_() {
+    var body = { action: 'adminGetAbsences', phone: currentUser && currentUser.phone };
+    var list = document.getElementById('tmList');
+    if (!tmAbsItems && !swrHas_(body)) { list.innerHTML = skeletonHtml_(4); document.getElementById('tmTiles').innerHTML = ''; }
+    else renderTeamAbs_();
+    swrLoad_(body, function (res) {
+      if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
+      tmAbsItems = res.items || [];
+      if (tmSection === 'abs') renderTeamAbs_();
+    }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+  }
+  function abStatusPill_(st) {
+    return '<span class="tmPill ' + (st === 'Согласовано' ? 'g' : st === 'На согласовании' ? 'o' : 'r') + '">' + escapeHtml(st === 'Согласовано' ? 'согласовано' : st === 'На согласовании' ? 'ждёт решения' : 'отклонено') + '</span>';
+  }
+  function abItemHtml_(it) {
+    var a = abDate_(it.dateFrom), b = abDate_(it.dateTo || it.dateFrom), k = (AB_TYPES[it.type] || {}).k;
+    var when = tmSameDay_(a, b) ? tmFmt_(a) + ', ' + TM_DOW[a.getDay()] : tmFmt_(a) + ' – ' + tmFmt_(b);
+    var amount = k === 'part' ? escapeHtml((it.timeFrom || '') + '–' + (it.timeTo || '')) + ' · <b>' + abNum_(it.hours) + ' ч</b>' : '<b>' + abNum_(it.days) + ' дн.</b>';
+    return '<div class="tmRow"><div class="tmTop"><span class="tmName" style="color:' + ((AB_TYPES[it.type] || {}).c || 'inherit') + '">' + escapeHtml(it.type) + '</span>' + abStatusPill_(it.status) + '</div>' +
+      '<div class="tmSub"><span class="tmTime">' + when + '</span><span>' + amount + '</span>' + (it.decidedBy ? '<span>решил: ' + escapeHtml(personShort_(it.decidedBy) || it.decidedBy) + '</span>' : '') + '</div>' +
+      (it.comment ? '<div class="abCmt">' + escapeHtml(it.comment) + '</div>' : '') + '</div>';
+  }
+  function renderTeamAbs_() {
+    var list = document.getElementById('tmList'), tiles = document.getElementById('tmTiles');
+    if (!tmAbsItems) return;
+    var f = tmFrom, t = tmTo, items = tmAbsItems;
+    // сотрудники в фильтре: из заявок + из смен
+    var names = {}; items.forEach(function (x) { if (x.name) names[x.name] = 1; });
+    if (tmLast) (tmLast.items || []).forEach(function (x) { if (x.name) names[x.name] = 1; });
+    if (tmPerson) names[tmPerson] = 1;
+    document.getElementById('tmPersonSel').innerHTML = '<option value="">Все сотрудники</option>' + Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'ru'); }).map(function (n) {
+      return '<option value="' + escapeHtml(n) + '"' + (n === tmPerson ? ' selected' : '') + '>' + escapeHtml(personShort_(n) || n) + '</option>';
+    }).join('');
+    var mine = tmPerson ? items.filter(function (x) { return x.name === tmPerson; }) : items;
+    var tot = abSum_(mine, f, t);
+    var tile = function (af, n, label, cls) { return '<button type="button" class="tmTile ' + cls + (tmAbsF === af ? ' on' : '') + '" data-af="' + af + '"><b>' + n + '</b><span>' + label + '</span></button>'; };
+    tiles.innerHTML = tile('leave', abNum_(tot.leave), 'дн. отгулов', 'b') + tile('sick', abNum_(tot.sick), 'дн. больничных', 'r') +
+      tile('part', abNum_(tot.part), 'ч отлучек', 'o') + tile('pending', tot.pending, 'ждут решения', '');
+    var match = function (it) {
+      if (!tmAbsF) return true;
+      if (tmAbsF === 'pending') return it.status === 'На согласовании';
+      return (AB_TYPES[it.type] || {}).k === tmAbsF;
+    };
+    if (!tmPerson) {
+      // сводка по сотрудникам: у кого были заявки в периоде
+      var by = {};
+      items.forEach(function (it) { if (abClip_(it, f, t) && match(it)) (by[it.name] = by[it.name] || []).push(it); });
+      var rows = Object.keys(by).map(function (n) { var s = abSum_(by[n], f, t); return { name: n, s: s, total: s.leave + s.sick + s.part / 8 }; })
+        .sort(function (a, b) { return b.total - a.total || b.s.pending - a.s.pending || a.name.localeCompare(b.name, 'ru'); });
+      list.innerHTML = rows.length ? '<div class="tmShHead">Сотрудники · ' + rows.length + '</div>' + rows.map(function (r) {
+        var s = r.s, sub = [];
+        if (s.leave) sub.push('<span>отгулы <b>' + abNum_(s.leave) + ' дн.</b></span>');
+        if (s.sick) sub.push('<span>больничные <b>' + abNum_(s.sick) + ' дн.</b></span>');
+        if (s.part) sub.push('<span>отлучки <b>' + abNum_(s.part) + ' ч</b></span>');
+        if (s.pending) sub.push('<span class="late">ждут решения: ' + s.pending + '</span>');
+        if (s.rejected) sub.push('<span>отклонено: ' + s.rejected + '</span>');
+        var days = s.leave + s.sick;
+        return '<div class="tmRow tap" data-person="' + escapeHtml(r.name) + '"><div class="tmTop"><span class="tmName">' + escapeHtml(r.name) + '</span>' +
+          '<span class="tmPill ' + (days ? 'b' : '') + '">' + (days ? abNum_(days) + ' дн.' : s.part ? abNum_(s.part) + ' ч' : '—') + '</span></div>' +
+          (sub.length ? '<div class="tmSub">' + sub.join('') + '</div>' : '') + '</div>';
+      }).join('') : '<div class="statsEmpty">За этот период заявок на отсутствие нет</div>';
+      return;
+    }
+    // выбран сотрудник: инфографика + все его заявки
+    tiles.innerHTML = '';
+    var total = tot.leave + tot.sick, yr = t.getFullYear(), ys = abSum_(mine, new Date(yr, 0, 1), new Date(yr, 11, 31));
+    var seg = function (v, c) { return v > 0 ? '<i style="width:' + v + '%;background:' + c + '"></i>' : ''; };
+    var sumAll = tot.leave + tot.sick + tot.part / 8 || 1;
+    var html = '<button type="button" class="abBack" id="abBack">← Все сотрудники</button>' +
+      '<div class="tiBox"><div class="tiHero"><div><div class="tiBig">' + abNum_(total) + '<small>дн.</small></div>' +
+      '<div class="tiCap">отсутствовал(а) · ' + escapeHtml(tmRangeLabel_(f, t)) + (tot.part ? ' · плюс отлучки ' + abNum_(tot.part) + ' ч' : '') + '</div></div></div>' +
+      '<div class="abBar">' + seg(tot.leave / sumAll * 100, 'var(--blue)') + seg(tot.sick / sumAll * 100, 'var(--red)') + seg(tot.part / 8 / sumAll * 100, '#F29900') + '</div>' +
+      '<div class="abLeg">' + [[tot.leave, 'var(--blue)', 'отгулы ', ' дн.'], [tot.sick, 'var(--red)', 'больничные ', ' дн.'], [tot.part, '#F29900', 'отлучки ', ' ч']].filter(function (x) { return x[0] > 0; })
+        .map(function (x) { return '<span style="--c:' + x[1] + '">' + x[2] + abNum_(x[0]) + x[3] + '</span>'; }).join('') + '</div>' +
+      '<div class="tiStats"><div><b>' + tot.n + '</b><span>заявок</span></div><div><b style="color:var(--green)">' + (tot.n - tot.pending - tot.rejected) + '</b><span>согласовано</span></div>' +
+      '<div><b style="color:#F29900">' + tot.pending + '</b><span>ждут решения</span></div><div><b style="color:var(--red)">' + tot.rejected + '</b><span>отклонено</span></div></div>' +
+      '<div class="abYear">За ' + yr + ' год всего: отгулы <b>' + abNum_(ys.leave) + ' дн.</b> · больничные <b>' + abNum_(ys.sick) + ' дн.</b> · отлучки <b>' + abNum_(ys.part) + ' ч</b></div></div>';
+    var today = tmToday_();
+    var ahead = mine.filter(function (it) { return abDate_(it.dateFrom) > t && abDate_(it.dateFrom) > today && it.status !== 'Не согласовано' && match(it); })
+      .sort(function (a, b) { return a.dateFrom.localeCompare(b.dateFrom); });
+    var inP = mine.filter(function (it) { return abClip_(it, f, t) && match(it); }).sort(function (a, b) { return b.dateFrom.localeCompare(a.dateFrom); });
+    if (ahead.length) html += '<div class="tmShHead">Впереди · ' + ahead.length + '</div>' + ahead.map(abItemHtml_).join('');
+    html += '<div class="tmShHead">Заявки за период · ' + inP.length + '</div>' + (inP.length ? inP.map(abItemHtml_).join('') : '<div class="statsEmpty">В этом периоде заявок нет</div>');
+    list.innerHTML = html;
+  }
+  document.getElementById('tmList').addEventListener('click', function (e) {
+    if (tmSection !== 'abs') return;
+    if (e.target.closest('#abBack')) { tmPerson = ''; renderTeamAbs_(); return; }
+    var r = e.target.closest('.tmRow[data-person]'); if (!r) return;
+    tmPerson = r.getAttribute('data-person'); tmAbsF = '';
+    renderTeamAbs_();
+    document.getElementById('tmList').scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
   // Лента отметок за период: все смены всех сотрудников, сверху самые свежие,
   // с разделителями по дням.
   function tmFeedHtml_(items) {
@@ -5078,6 +5231,8 @@
     }).join('');
   }
   document.getElementById('tmTiles').addEventListener('click', function (e) {
+    var ab = e.target.closest('.tmTile[data-af]');
+    if (ab) { var af = ab.getAttribute('data-af'); tmAbsF = tmAbsF === af ? '' : af; renderTeamAbs_(); return; }
     var b = e.target.closest('.tmTile[data-f]'); if (!b) return;
     var f = b.getAttribute('data-f');
     tmFilter = tmFilter === f ? 'all' : f;
