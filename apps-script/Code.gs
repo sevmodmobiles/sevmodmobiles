@@ -1,3 +1,4 @@
+// v100: приглашение на установку — не привязано к сотруднику (для новых людей), необязательная пометка «кому».
 // v99: APK на Google Диске (apkUpload от сборки, apkInfo для обновления), одноразовые приглашения на установку.
 // v98: справочник — столбец «Быстрый поиск» (ПП 60×27, ПН 50×40, ГД-35, ГКЛВ…); лист обновляется из catalog-seed.json.
 // v97: справочник материалов («Справочник материалов», whCatalog) — подсказки при вводе позиции на складе.
@@ -4504,7 +4505,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v99';
+var CODE_VERSION = 'v100';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6102,7 +6103,7 @@ function apkInvitesSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(APK_INVITES_SHEET);
   if (!sh) {
     sh = ss.insertSheet(APK_INVITES_SHEET);
-    sh.getRange(1, 1, 1, 7).setValues([['Код', 'Сотрудник', 'Телефон', 'Выдано', 'Действует до', 'Использовано', 'Кто выдал']]).setFontWeight('bold');
+    sh.getRange(1, 1, 1, 7).setValues([['Код', 'Кому', 'Телефон', 'Выдано', 'Действует до', 'Использовано', 'Кто выдал']]).setFontWeight('bold');
     sh.setFrozenRows(1);
   }
   return sh;
@@ -6110,17 +6111,17 @@ function apkInvitesSheet_() {
 function adminCreateInvite(phone, employee) {
   var auth = adminAuth_(phone); if (!auth.ok) return { status: 'error', message: auth.error };
   if (!apkProps_().getProperty('APK_FILE_ID')) return { status: 'error', message: 'Файла приложения на Диске ещё нет — дождитесь первой сборки' };
-  var emp = findEmployeeByPhone_(employee);
-  if (!emp) return { status: 'error', message: 'Сотрудник не найден в листе «Сотрудники»' };
+  // Ссылка для любого нового человека; employee — необязательная пометка «кому».
+  var who = String(employee || '').trim().slice(0, 80);
   var abc = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', tok = '';
   var rnd = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
   for (var i = 0; i < 16; i++) tok += abc.charAt(parseInt(rnd.substr(i * 2, 2), 16) % abc.length);
   var now = new Date(), until = new Date(now.getTime() + APK_INVITE_HOURS * 3600000);
   var admin = findEmployeeByPhone_(phone);
   var sh = apkInvitesSheet_();
-  sh.appendRow([tok, emp.name, "'" + emp.phone, now, until, '', admin ? admin.name : phone]);
+  sh.appendRow([tok, who || '—', '', now, until, '', admin ? admin.name : phone]);
   sh.getRange(sh.getLastRow(), 4, 1, 2).setNumberFormat('dd.MM.yyyy HH:mm');
-  return { status: 'ok', token: tok, name: emp.name, until: Utilities.formatDate(until, 'Europe/Moscow', 'dd.MM HH:mm') };
+  return { status: 'ok', token: tok, name: who, until: Utilities.formatDate(until, 'Europe/Moscow', 'dd.MM HH:mm') };
 }
 function apkInviteRow_(tok) {
   if (!/^[A-Za-z0-9]{16}$/.test(tok)) return null;
@@ -6140,7 +6141,7 @@ function apkInviteCheck_(tok) {
 // Страница приглашения. Ссылку «съедает» не открытие страницы (её заранее
 // открывают превью мессенджеров), а нажатие «Скачать» в браузере человека.
 function apkInvitePage_(tok) {
-  var c = apkInviteCheck_(tok), name = c.ok ? String(c.r.v[1]) : '';
+  var c = apkInviteCheck_(tok), name = c.ok ? String(c.r.v[1]).replace(/^—$/, '') : '';
   var esc = function (x) { return String(x).replace(/[&<>"]/g, function (ch) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]; }); };
   var html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<style>body{font-family:-apple-system,Roboto,Arial,sans-serif;background:#f4f5f7;color:#1c1c1e;margin:0;padding:24px 16px}' +
@@ -6150,9 +6151,9 @@ function apkInvitePage_(tok) {
     'button:disabled{opacity:.6}ol{text-align:left;color:#555;font-size:14px;line-height:1.5;padding-left:20px}.e{color:#EA4335}</style></head><body><div class="c">' +
     '<h1>SEVMOD для Android</h1>' +
     (c.ok
-      ? '<p>Приглашение для: <b>' + esc(name) + '</b></p><button id="go" onclick="go()">Скачать приложение</button><div id="out"></div>' +
+      ? (name ? '<p>Приглашение для: <b>' + esc(name) + '</b></p>' : '<p>Вас пригласили установить приложение SEVMOD.</p>') + '<button id="go" onclick="go()">Скачать приложение</button><div id="out"></div>' +
         '<ol><li>Нажмите «Скачать приложение».</li><li>Откройте скачанный файл <b>sevmod.apk</b> (из уведомления или «Загрузок»).</li>' +
-        '<li>Если телефон спросит — разрешите установку из этого источника.</li><li>Войдите в приложение по своему номеру телефона.</li></ol>' +
+        '<li>Если телефон спросит — разрешите установку из этого источника.</li><li>Откройте приложение и зарегистрируйтесь по своему номеру телефона.</li></ol>' +
         '<p style="font-size:13px">Ссылка одноразовая: после скачивания она перестанет работать.</p>' +
         '<script>function go(){var b=document.getElementById("go");b.disabled=true;b.textContent="Готовлю файл…";' +
         'google.script.run.withSuccessHandler(function(r){if(!r||!r.ok){b.style.display="none";document.getElementById("out").innerHTML="<p class=e>"+((r&&r.why)||"Ошибка")+"</p>";return;}' +

@@ -764,6 +764,11 @@
   .apkHead { font-weight: 800; font-size: 17px; margin-bottom: 4px; }
   .apkSteps { margin: 8px 0; padding-left: 20px; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
   .apkSteps b { color: var(--text); }
+  .apkSend { display: flex; gap: 8px; margin-top: 8px; }
+  .apkSend button { flex: 1; margin: 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .apkSend svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .apkSend .tg { background: #229ED9; }
+  .apkSend .mx { background: #7B4DFF; }
   .apkMini { display: inline-block; width: auto; margin: 2px 0; padding: 5px 10px; font-size: 13px; background: var(--blue); }
   /* ===== Отсутствия в общем кабинете ===== */
   .tmPill.o { color: #F29900; background: rgba(242,153,0,.14); }
@@ -2132,12 +2137,15 @@
       <div class="card" id="apkCard">
         <div class="apkHead">Приложение Android</div>
         <div id="apkState" class="ctHint"><span class="spinner"></span> Проверяю…</div>
-        <label for="apkInvEmp" style="margin-top:12px;">Пригласить сотрудника</label>
-        <select id="apkInvEmp"><option value="">— выберите сотрудника —</option></select>
+        <label for="apkInvWho" style="margin-top:12px;">Пригласить нового человека</label>
+        <input id="apkInvWho" type="text" autocomplete="off" placeholder="Кому — для себя (необязательно)">
         <button id="apkInvBtn" type="button">Создать ссылку на установку</button>
         <div id="apkInvOut" style="display:none; margin-top:10px;">
           <input id="apkInvLink" class="installLink" readonly>
-          <button id="apkInvShare" type="button" style="background: var(--blue); margin-top: 8px;">Отправить ссылку</button>
+          <div class="apkSend">
+            <button id="apkSendTg" type="button" class="tg"><svg viewBox="0 0 24 24"><path d="M21 4L3 11l6 2 2 6 3-4 5 4z"/><path d="M9 13l12-9"/></svg>Telegram</button>
+            <button id="apkSendMax" type="button" class="mx"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 3.3 6.5L4 20l1.2-3.4A8 8 0 0 1 4 12z"/></svg>MAX</button>
+          </div>
           <div id="apkInvHint" class="ctHint" style="margin-top:6px;"></div>
         </div>
         <details class="timingBox" id="apkSetup">
@@ -7360,14 +7368,6 @@
         : 'Файла на Диске ещё нет. Сделайте «Настройку сборки» ниже — после неё новая сборка сама попадёт на Диск.';
       document.getElementById('apkSetup').open = !r.build;
     }).catch(function () { st.textContent = 'Нет связи с сервером'; });
-    var sel = document.getElementById('apkInvEmp');
-    swrLoad_({ action: 'adminGetEmployees', phone: currentUser && currentUser.phone }, function (res) {
-      if (!res || res.status !== 'ok') return;
-      var cur = sel.value;
-      sel.innerHTML = '<option value="">— выберите сотрудника —</option>' + (res.employees || []).slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'ru'); }).map(function (e) {
-        return '<option value="' + escapeHtml(e.phone) + '"' + (e.phone === cur ? ' selected' : '') + '>' + escapeHtml(e.name) + '</option>';
-      }).join('');
-    }, function () {});
   }
   function apkCopy_(text, btn, okText) {
     function done() { var t = btn.textContent; btn.textContent = okText || 'Скопировано'; setTimeout(function () { btn.textContent = t; }, 2000); }
@@ -7376,8 +7376,7 @@
   }
   document.getElementById('apkSecretCopy').addEventListener('click', function () { if (apkSecretVal) apkCopy_(apkSecretVal, this, 'Ключ скопирован'); });
   document.getElementById('apkInvBtn').addEventListener('click', function () {
-    var emp = document.getElementById('apkInvEmp').value, btn = this;
-    if (!emp) { toast_('Выберите сотрудника', 'error'); return; }
+    var emp = document.getElementById('apkInvWho').value.trim(), btn = this;
     btn.disabled = true; btn.textContent = 'Создаю…';
     apiPost({ action: 'adminCreateInvite', phone: currentUser && currentUser.phone, employee: emp }).then(function (r) {
       btn.disabled = false; btn.textContent = 'Создать ссылку на установку';
@@ -7385,15 +7384,26 @@
       var link = API_URL + '?invite=' + r.token;
       document.getElementById('apkInvOut').style.display = 'block';
       document.getElementById('apkInvLink').value = link;
-      document.getElementById('apkInvHint').textContent = 'Для: ' + r.name + '. Одноразовая, действует до ' + r.until + '. Повторное открытие — «ссылка уже использована».';
-      document.getElementById('apkInvShare').setAttribute('data-name', r.name);
+      document.getElementById('apkInvHint').textContent = (r.name ? 'Для: ' + r.name + '. ' : '') + 'Одноразовая, действует до ' + r.until + '. Повторное открытие — «ссылка уже использована».';
     }).catch(function () { btn.disabled = false; btn.textContent = 'Создать ссылку на установку'; toast_('Нет связи с сервером', 'error'); });
   });
-  document.getElementById('apkInvShare').addEventListener('click', function () {
-    var link = document.getElementById('apkInvLink').value, btn = this;
-    var text = 'Установка приложения SEVMOD: откройте ссылку на телефоне Android и нажмите «Скачать приложение». Ссылка одноразовая.';
-    if (navigator.share) navigator.share({ title: 'SEVMOD', text: text, url: link }).catch(function () {});
-    else apkCopy_(text + '\n' + link, btn, 'Скопировано — вставьте в мессенджер');
+  var APK_INV_TEXT = 'Приглашение установить приложение SEVMOD (Android): откройте ссылку на телефоне и нажмите «Скачать приложение». Ссылка одноразовая, действует 24 часа.';
+  function apkOpen_(url) { var BR = nativePlugin_('Browser'); if (BR) BR.open({ url: url }); else window.open(url, '_blank'); }
+  // Telegram — своя ссылка «поделиться» (откроет выбор чата в приложении Telegram)
+  document.getElementById('apkSendTg').addEventListener('click', function () {
+    var link = document.getElementById('apkInvLink').value;
+    apkOpen_('https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(APK_INV_TEXT));
+  });
+  // MAX открытой ссылки «поделиться» не даёт — системное окно «Поделиться» (там есть MAX);
+  // если его нет — копируем текст и открываем MAX.
+  document.getElementById('apkSendMax').addEventListener('click', function () {
+    var link = document.getElementById('apkInvLink').value, text = APK_INV_TEXT + '\n' + link, btn = this;
+    var SH = nativePlugin_('Share');
+    if (SH) { SH.share({ title: 'SEVMOD', text: text, dialogTitle: 'Отправить в MAX' }).catch(function () {}); return; }
+    if (navigator.share) { navigator.share({ title: 'SEVMOD', text: text }).catch(function () {}); return; }
+    apkCopy_(text, btn, 'Скопировано');
+    toast_('Текст со ссылкой скопирован — вставьте его в чат MAX', 'ok');
+    setTimeout(function () { apkOpen_('https://max.ru/'); }, 600);
   });
   function loadServerVersion_() {
     var box = document.getElementById('serverVersionInfo');
