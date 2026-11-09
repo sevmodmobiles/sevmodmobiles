@@ -1,3 +1,4 @@
+// v98: справочник — столбец «Быстрый поиск» (ПП 60×27, ПН 50×40, ГД-35, ГКЛВ…); лист обновляется из catalog-seed.json.
 // v97: справочник материалов («Справочник материалов», whCatalog) — подсказки при вводе позиции на складе.
 // v96: роли (Сотрудники J «Роли»), склад: «Склад» и «Склад — движения», ввод при инвентаризации.
 // v95: adminLearnWifi принимает список сетей (выбранная сеть со всеми точками доступа).
@@ -4495,7 +4496,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v97';
+var CODE_VERSION = 'v98';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5924,20 +5925,22 @@ function whGetItems(phone) {
 // Лист «Справочник материалов» можно править руками; при первом обращении
 // заполняется из catalog-seed.json (обработанный прайс поставщика).
 var WH_CAT_SHEET = 'Справочник материалов';
-var WH_CAT_HEADERS = ['Наименование', 'Ед.', 'Категория', 'Позиций в прайсе', 'Пример из прайса'];
+var WH_CAT_HEADERS = ['Наименование', 'Ед.', 'Категория', 'Позиций в прайсе', 'Пример из прайса', 'Быстрый поиск'];
 var WH_CAT_SEED = 'https://sevmodmobiles.github.io/sevmodmobiles/catalog-seed.json';
 function whCatalogSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(WH_CAT_SHEET);
-  if (sh) return sh;
+  // Лист первой версии (без «Быстрого поиска») пересоздаётся из нового файла.
+  if (sh && sh.getLastColumn() >= WH_CAT_HEADERS.length && String(sh.getRange(1, WH_CAT_HEADERS.length).getValue()) === WH_CAT_HEADERS[WH_CAT_HEADERS.length - 1]) return sh;
+  if (sh) ss.deleteSheet(sh);
   var resp = UrlFetchApp.fetch(WH_CAT_SEED + '?t=' + Date.now(), { muteHttpExceptions: true });
   if (resp.getResponseCode() !== 200) throw new Error('Не удалось загрузить справочник: HTTP ' + resp.getResponseCode());
-  var rows = JSON.parse(resp.getContentText()).map(function (r) { return [String(r[0]), String(r[1]), String(r[2]), Number(r[3]) || 1, String(r[4] || '')]; });
+  var rows = JSON.parse(resp.getContentText()).map(function (r) { return [String(r[0]), String(r[1]), String(r[2]), Number(r[3]) || 1, String(r[4] || ''), String(r[5] || '')]; });
   sh = ss.insertSheet(WH_CAT_SHEET);
   sh.getRange(1, 1, 1, WH_CAT_HEADERS.length).setValues([WH_CAT_HEADERS]).setFontWeight('bold');
   sh.setFrozenRows(1);
   if (rows.length) sh.getRange(2, 1, rows.length, WH_CAT_HEADERS.length).setNumberFormat('@').setValues(rows);
   sh.getRange(2, 4, Math.max(rows.length, 1), 1).setNumberFormat('0');
-  sh.setColumnWidth(1, 420); sh.setColumnWidth(5, 420);
+  sh.setColumnWidth(1, 420); sh.setColumnWidth(5, 420); sh.setColumnWidth(6, 220);
   return sh;
 }
 function whCatalog(phone, rev) {
@@ -5946,9 +5949,14 @@ function whCatalog(phone, rev) {
   var sh;
   try { sh = whCatalogSheet_(); } catch (e) { return { status: 'error', message: String(e.message || e) }; } finally { lock.releaseLock(); }
   var n = sh.getLastRow() - 1;
-  var vals = n > 0 ? sh.getRange(2, 1, n, 3).getDisplayValues() : [];
+  var vals = n > 0 ? sh.getRange(2, 1, n, WH_CAT_HEADERS.length).getDisplayValues() : [];
   var items = [];
-  vals.forEach(function (r) { var nm = String(r[0]).trim(); if (nm) items.push([nm, String(r[1]).trim() || 'шт', String(r[2]).trim()]); });
+  vals.forEach(function (r) {
+    var nm = String(r[0]).trim(); if (!nm) return;
+    var row = [nm, String(r[1]).trim() || 'шт', String(r[2]).trim()], al = String(r[5] || '').trim();
+    if (al) row.push(al);
+    items.push(row);
+  });
   var h = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(items), Utilities.Charset.UTF_8)).slice(0, 12);
   if (rev && rev === h) return { status: 'ok', rev: h, same: true };
   return { status: 'ok', rev: h, items: items };
