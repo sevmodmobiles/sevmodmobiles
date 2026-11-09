@@ -2165,10 +2165,10 @@
     <div class="card" id="profileAdminCard" style="display:none;">
       <h2 style="margin-top:0;">Администрирование</h2>
       <button id="profileAdminPanelBtn" type="button" class="hasDot" style="background:var(--blue);">Админ-панель</button>
-      <!-- Автоотметка по Wi-Fi офиса (тест, только в Android-приложении) -->
+      <!-- Автоотметка по Wi-Fi объекта (тест, только в Android-приложении) -->
       <label class="checkRow" id="wifiAutoRow" for="wifiAutoInput" style="display:none;">
         <input id="wifiAutoInput" type="checkbox">
-        <span>Автоотметка по Wi-Fi офиса <small id="wifiAutoHint">тест: приход — при подключении к Wi-Fi офиса, уход — по последнему присутствию в сети (закрытие дня в 22:00)</small></span>
+        <span>Автоотметка по Wi-Fi объекта <small id="wifiAutoHint">тест: приход — при подключении к Wi-Fi объекта, уход — по последнему присутствию в сети (закрытие дня в 22:00)</small></span>
       </label>
       <div id="wifiPerm" class="wifiPerm" style="display:none;">
         <div id="wifiPermText"></div>
@@ -2176,7 +2176,7 @@
       </div>
       <div id="wifiLearn" style="display:none; margin-top:8px;">
         <div class="tmFilters" style="margin-bottom:6px;"><select id="wifiLearnObj"></select></div>
-        <button type="button" id="wifiLearnBtn" style="background:var(--blue);">Это Wi-Fi офиса — запомнить</button>
+        <button type="button" id="wifiLearnBtn" style="background:var(--blue);">Это Wi-Fi объекта — запомнить</button>
       </div>
     </div>
     <div class="card">
@@ -2957,7 +2957,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: []
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -3161,10 +3161,14 @@
     });
     return ipPromise;
   }
-  function objWifiListHtml_(ips) {
-    if (!ips.length) return '<div class="ctHint">Сеть не задана</div>';
-    return ips.map(function (ip) {
-      return '<span class="objWifiChip">' + escapeHtml(ip) + '<button type="button" class="objWifiRemove" data-ip="' + escapeHtml(ip) + '" aria-label="Удалить">×</button></span>';
+  function objWifiListHtml_(ips, nets) {
+    nets = nets || [];
+    if (!ips.length && !nets.length) return '<div class="ctHint">Сеть не задана</div>';
+    return nets.map(function (n) {
+      return '<span class="objWifiChip" title="' + escapeHtml(n.bssid || '') + '">' + escapeHtml(n.ssid || 'Wi-Fi') + (n.bssid ? ' · ' + escapeHtml(n.bssid.slice(-5)) : '') +
+        '<button type="button" class="objWifiRemove" data-ssid="' + escapeHtml(n.ssid || '') + '" data-bssid="' + escapeHtml(n.bssid || '') + '" aria-label="Удалить">×</button></span>';
+    }).join('') + ips.map(function (ip) {
+      return '<span class="objWifiChip">IP ' + escapeHtml(ip) + '<button type="button" class="objWifiRemove" data-ip="' + escapeHtml(ip) + '" aria-label="Удалить">×</button></span>';
     }).join('');
   }
   // Ключ для сравнения названий объектов из QR: без лишних пробелов, регистра и «ё».
@@ -3661,7 +3665,7 @@
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') checkPageUpdate_(); });
   setTimeout(checkPageUpdate_, 8000);
 
-  // ===== Автоотметка по Wi-Fi офиса (тест) =====
+  // ===== Автоотметка по Wi-Fi объекта (тест) =====
   function renderWifiAuto_() {
     var WP = nativePlugin_('WifiPresence'), row = document.getElementById('wifiAutoRow');
     var isAdm = !!(currentUser && loadAdminStatusCache(currentUser.phone));
@@ -3673,20 +3677,23 @@
       var on = !!(r && r.enabled);
       document.getElementById('wifiAutoInput').checked = on;
       var hint = document.getElementById('wifiAutoHint'), l = r && r.last;
-      hint.textContent = !on ? 'тест: приход — при подключении к Wi-Fi офиса, уход — по последнему присутствию в сети (закрытие дня в 22:00)'
+      hint.textContent = !on ? 'тест: приход — при подключении к Wi-Fi объекта, уход — по последнему присутствию в сети (закрытие дня в 22:00)'
         : !l ? 'Последняя проверка: ещё не было — телефон проверяет сеть раз в ~15 минут и при смене сети'
         : 'Последняя проверка: ' + l.at + ' · ' + (l.onWifi ? 'Wi-Fi' + (l.ssid ? ' «' + l.ssid + '»' : '') + ', IP ' + (l.ip || '—') + ' · ' +
-            (l.office ? 'офис «' + l.office + '»' + (l.by ? ' (по ' + (l.by === 'роутер' ? 'роутеру' : l.by === 'имя сети' ? 'имени сети' : 'IP') + ')' : '') : 'не офис') : 'не на Wi-Fi');
+            (l.office ? '«' + l.office + '»' + (l.by ? ' (по ' + (l.by === 'роутер' ? 'роутеру' : l.by === 'имя сети' ? 'имени сети' : 'IP') + ')' : '') : 'сеть не узнана') : 'не на Wi-Fi');
       wifiLastIp = l && l.ip || '';
       wifiCheckPerm_(on);
       // на Wi-Fi, но сеть не узнана — можно запомнить её как Wi-Fi офиса
       var learn = document.getElementById('wifiLearn');
-      var canLearn = on && l && l.onWifi && !l.office && l.ip && (r.offices || []).length;
+      var canLearn = on && l && l.onWifi && !l.office && (l.ip || l.bssid || l.ssid) && ((r.offices || []).length || (r.objects || []).length);
       learn.style.display = canLearn ? 'block' : 'none';
       if (canLearn) {
         learn.setAttribute('data-ip', l.ip);
         learn.setAttribute('data-ssid', l.ssid || ''); learn.setAttribute('data-bssid', l.bssid || '');
-        document.getElementById('wifiLearnObj').innerHTML = r.offices.map(function (o) { return '<option>' + escapeHtml(o) + '</option>'; }).join('');
+        var rest = (r.objects || []).filter(function (o) { return r.offices.indexOf(o) < 0; });
+        document.getElementById('wifiLearnObj').innerHTML =
+          (r.offices.length ? '<optgroup label="Уже с Wi-Fi">' + r.offices.map(function (o) { return '<option>' + escapeHtml(o) + '</option>'; }).join('') + '</optgroup>' : '') +
+          (rest.length ? '<optgroup label="Все объекты">' + rest.map(function (o) { return '<option>' + escapeHtml(o) + '</option>'; }).join('') + '</optgroup>' : '');
       }
       // сервер помнит «включено» — убедимся, что фоновая проверка на телефоне идёт
       (on ? WP.start() : WP.stop()).catch(function () {});
@@ -3722,13 +3729,13 @@
       if (st.fine && st.background && st.locationOn) { box.style.display = 'none'; return; }
       box.style.display = 'block';
       if (!st.locationOn) {
-        txt.textContent = 'Включите геолокацию на телефоне — без неё Android не сообщает имя сети Wi-Fi, и офис узнаётся только по IP.';
+        txt.textContent = 'Включите геолокацию на телефоне — без неё Android не сообщает имя сети Wi-Fi, и объект узнаётся только по IP.';
         btn.textContent = 'Включить геолокацию'; btn.setAttribute('data-a', 'loc');
       } else if (!st.fine) {
-        txt.textContent = 'Нужен доступ к геолокации — по нему телефон видит имя сети Wi-Fi офиса. Нажмите и выберите «Разрешить».';
+        txt.textContent = 'Нужен доступ к геолокации — по нему телефон видит имя сети Wi-Fi объекта. Нажмите и выберите «Разрешить».';
         btn.textContent = 'Разрешить геолокацию'; btn.setAttribute('data-a', 'perm');
       } else {
-        txt.textContent = 'Чтобы офис узнавался, даже когда приложение закрыто: откроются настройки SEVMOD → «Разрешения» → «Местоположение» → выберите «Разрешить в любом режиме» (или «Всегда»), затем вернитесь.';
+        txt.textContent = 'Чтобы объект узнавался, даже когда приложение закрыто: откроются настройки SEVMOD → «Разрешения» → «Местоположение» → выберите «Разрешить в любом режиме» (или «Всегда»), затем вернитесь.';
         btn.textContent = 'Открыть настройки'; btn.setAttribute('data-a', 'perm');
       }
     }).catch(function () { box.style.display = 'none'; });
@@ -3748,7 +3755,7 @@
       box.disabled = false;
       if (!r || r.status !== 'ok') { box.checked = !want; toast_((r && r.message) || 'Не удалось сохранить', 'error'); return; }
       (want ? WP.start() : WP.stop()).catch(function () {});
-      toast_(want ? 'Автоотметка включена: приход отметится при подключении к Wi-Fi офиса' : 'Автоотметка выключена', 'ok');
+      toast_(want ? 'Автоотметка включена: приход отметится при подключении к Wi-Fi объекта' : 'Автоотметка выключена', 'ok');
     }).catch(function () { box.disabled = false; box.checked = !want; toast_('Нет связи с сервером', 'error'); });
   });
 
@@ -5987,8 +5994,8 @@
             '<label for="' + fId + '" style="margin-top:8px;">Ответственный прораб</label>' +
             '<input id="' + fId + '" type="text" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
             '<div class="objWifi" data-name="' + escapeHtml(obj.name) + '">' +
-              '<div class="objWifiHead"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.2" r="1"/></svg><span>Wi-Fi офиса</span></div>' +
-              '<div class="objWifiList">' + objWifiListHtml_(obj.wifiIps || []) + '</div>' +
+              '<div class="objWifiHead"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.2" r="1"/></svg><span>Wi-Fi объекта</span></div>' +
+              '<div class="objWifiList">' + objWifiListHtml_(obj.wifiIps || [], obj.wifiNets || []) + '</div>' +
               '<button type="button" class="objWifiAdd">Запомнить текущую сеть телефона</button>' +
               '<div class="ctHint objWifiHint">Нажмите, находясь на объекте и подключившись к его Wi-Fi. Тогда отметка пройдёт по сети, даже если GPS телефона ошибается.</div>' +
             '</div>' +
@@ -6008,9 +6015,20 @@
 
     listEl.querySelectorAll('.objWifi').forEach(function (box) {
       var name = box.getAttribute('data-name');
-      function setList(ips) { box.querySelector('.objWifiList').innerHTML = objWifiListHtml_(ips); }
+      var curIps = null, curNets = null;
+      function setList(ips, nets) {
+        if (ips) curIps = ips; if (nets) curNets = nets;
+        box.querySelector('.objWifiList').innerHTML = objWifiListHtml_(curIps || [], curNets || []);
+      }
       box.addEventListener('click', function (e) {
         var rm = e.target.closest('.objWifiRemove');
+        if (rm && !rm.getAttribute('data-ip')) {
+          rm.parentNode.remove();
+          bgWrite_({ action: 'adminLearnWifi', phone: currentUser && currentUser.phone, objectName: name, ssid: rm.getAttribute('data-ssid'), bssid: rm.getAttribute('data-bssid'), mode: 'remove' }, {
+            ok: 'Сеть удалена', failPrefix: 'Не удалилось', done: function (res) { if (res.nets) setList(null, res.nets); }
+          });
+          return;
+        }
         if (rm) {
           var ip = rm.getAttribute('data-ip');
           rm.parentNode.remove();
@@ -6022,9 +6040,19 @@
         var add = e.target.closest('.objWifiAdd');
         if (!add) return;
         add.disabled = true; add.textContent = 'Определяю сеть…';
-        getPublicIp_(true).then(function (ip) {
+        // в Android-приложении — ещё имя сети и роутер (надёжнее IP)
+        var WPa = nativePlugin_('WifiPresence');
+        Promise.all([getPublicIp_(true), WPa && WPa.locStatus ? WPa.locStatus().catch(function () { return {}; }) : Promise.resolve({})]).then(function (v) {
+          var ip = v[0], st = v[1] || {};
           add.disabled = false; add.textContent = 'Запомнить текущую сеть телефона';
-          if (!ip) { toast_('Не удалось определить сеть — проверьте интернет', 'error'); return; }
+          if (!ip && !st.bssid && !st.ssid) { toast_('Не удалось определить сеть — проверьте интернет', 'error'); return; }
+          if (st.bssid || st.ssid) {
+            bgWrite_({ action: 'adminLearnWifi', phone: currentUser && currentUser.phone, objectName: name, ip: ip, ssid: st.ssid || '', bssid: st.bssid || '' }, {
+              ok: '✓ Сеть «' + (st.ssid || 'Wi-Fi') + '» запомнена для «' + name + '»', failPrefix: 'Не сохранилось',
+              done: function (res) { if (res.nets) setList(ip && (curIps || []).indexOf(ip) < 0 ? (curIps || []).concat([ip]) : null, res.nets); }
+            });
+            return;
+          }
           bgWrite_({ action: 'adminSetObjectWifi', phone: currentUser && currentUser.phone, objectName: name, ip: ip, mode: 'add' }, {
             ok: '✓ Сеть ' + ip + ' запомнена для «' + name + '»', failPrefix: 'Не сохранилось',
             done: function (res) { if (res.wifiIps) setList(res.wifiIps); }
@@ -10256,10 +10284,13 @@
       if (!cur || cur.id !== ev.id) return;   // уже дослана другим путём
       ev.geo = geo || null;
       // IP сети (для Wi-Fi офиса) — обычно уже известен; ждём не больше 1,5 с.
-      Promise.race([getPublicIp_(false), new Promise(function (r) { setTimeout(function () { r(''); }, 1500); })]).then(function (ip) {
+      var WPl = nativePlugin_('WifiPresence');
+      var netP = WPl && WPl.locStatus ? WPl.locStatus().catch(function () { return {}; }) : Promise.resolve({});
+      Promise.race([Promise.all([getPublicIp_(false), netP]), new Promise(function (r) { setTimeout(function () { r(['', {}]); }, 1500); })]).then(function (v) {
+        var ip = v[0], st = v[1] || {};
         var cur2 = loadPending_();
         if (!cur2 || cur2.id !== ev.id) return;
-        ev.ip = ip || '';
+        ev.ip = ip || ''; ev.ssid = st.ssid || ''; ev.bssid = st.bssid || '';
         savePending_(ev);
         postPendingEvent_(ev, false);
       });
@@ -10271,7 +10302,7 @@
     pendingInFlight = true;
     apiPost({
       action: 'log', name: ev.name, phone: ev.phone, objectName: ev.objectName,
-      eventType: ev.eventType, geo: ev.geo || null, clientTime: ev.clientTime, eventId: ev.id, ip: ev.ip || ''
+      eventType: ev.eventType, geo: ev.geo || null, clientTime: ev.clientTime, eventId: ev.id, ip: ev.ip || '', ssid: ev.ssid || '', bssid: ev.bssid || ''
     }, { keepalive: true })
       .then(function (res) {
         pendingInFlight = false;
@@ -10355,7 +10386,7 @@
         : '<li>Разрешите сайту точное местоположение и включите Wi-Fi.</li>';
     return '<div class="geoAlertHint">' + accLine +
       '<p>Если вы на объекте, а отметка не проходит:</p><ol>' + steps +
-      '<li><b>Подключитесь к Wi-Fi офиса</b> и повторите — если сеть офиса запомнена администратором, отметка пройдёт по ней.</li>' +
+      '<li><b>Подключитесь к Wi-Fi объекта</b> и повторите — если сеть объекта запомнена администратором, отметка пройдёт по ней.</li>' +
       '<li>Подойдите ближе к окну или выйдите на улицу и повторите через 10–20 секунд.</li></ol></div>';
   }
   function showGeoBlockedAlert(message, geo) {

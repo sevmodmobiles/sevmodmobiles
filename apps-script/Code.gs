@@ -1,3 +1,4 @@
+// v94: Wi-Fi для любого объекта (не только офиса): переезд между объектами, сеть в ручных отметках, «Wi-Fi объекта».
 // v93: офис по сети Wi-Fi (роутер BSSID / имя SSID, колонка L «Wi-Fi офиса (сеть)»), IP — запасной; adminLearnWifi.
 // v92: getWifiAuto отдаёт объекты с Wi-Fi (кнопка «Запомнить эту сеть» в «Профиле»).
 // v91: автоотметка по Wi-Fi — последняя проверка (время, Wi-Fi, IP, офис) для диагностики.
@@ -484,7 +485,7 @@ function doPost(e) {
       return jsonOutput(loginUser(data.phone));
     }
     if (data.action === 'log') {
-      return jsonOutput(logEvent(data.name, data.phone, data.objectName, data.eventType, data.geo, data.clientTime, data.eventId, data.ip));
+      return jsonOutput(logEvent(data.name, data.phone, data.objectName, data.eventType, data.geo, data.clientTime, data.eventId, data.ip, data.ssid, data.bssid));
     }
     if (data.action === 'adminSetObjectWifi') {
       return jsonOutput(adminSetObjectWifi(data.phone, data.objectName, data.ip, data.mode));
@@ -499,7 +500,7 @@ function doPost(e) {
       return jsonOutput(wifiPresence(data.phone, data.ip, data.onWifi === true, data.reason, data.ssid, data.bssid));
     }
     if (data.action === 'adminLearnWifi') {
-      return jsonOutput(adminLearnWifi(data.phone, data.objectName, data.ssid, data.bssid, data.ip));
+      return jsonOutput(adminLearnWifi(data.phone, data.objectName, data.ssid, data.bssid, data.ip, data.mode));
     }
     if (data.action === 'setWifiAuto') {
       return jsonOutput(setWifiAuto(data.phone, data.enabled === true));
@@ -1691,7 +1692,7 @@ function adminGetObjects(phone) {
   ensureObjectGeoColumns_(sheet);
 
   var lastRow = sheet.getLastRow();
-  var data = sheet.getRange(2, 1, lastRow - 1, OBJ_COL.WIFI).getValues();
+  var data = sheet.getRange(2, 1, lastRow - 1, OBJ_COL.WIFINET).getValues();
   var objects = data
     .filter(function (row) { return String(row[OBJ_COL.NAME - 1]).trim(); })
     .map(function (row) {
@@ -1709,7 +1710,8 @@ function adminGetObjects(phone) {
         geoStatus: String(row[OBJ_COL.GEO_STATUS - 1] || '').trim(),
         foremanPhone: foremanPhone || '',
         foremanName: foreman ? foreman.name : '',
-        wifiIps: splitIps_(row[OBJ_COL.WIFI - 1])
+        wifiIps: splitIps_(row[OBJ_COL.WIFI - 1]),
+        wifiNets: parseWifiNets_(row[OBJ_COL.WIFINET - 1])
       };
     });
   return { status: 'ok', objects: objects };
@@ -2325,7 +2327,7 @@ var LOG_MAX_DELAY_MS = 72 * 3600 * 1000;
 function objKey_(s) {
   return String(s || '').replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase().replace(/ё/g, 'е');
 }
-function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId, ip) {
+function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId, ip, ssid, bssid) {
   phone = normalizePhone_(phone);
   // Повтор той же отметки (досылка/повтор запроса) — отдаём прежний результат, без дубля.
   var evKey = /^[A-Za-z0-9_-]{8,64}$/.test(String(eventId || '')) ? 'logev_' + eventId : '';
@@ -2374,9 +2376,13 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId, 
   var geoDistance = objCoords ? '' : 'нет координат объекта';
   var hasGeo = !!(geo && typeof geo.lat === 'number' && typeof geo.lng === 'number');
   var clientIp = cleanIp_(ip);
+  // в Wi-Fi объекта: по сети (роутер / имя) или по внешнему IP
   var onOfficeWifi = !!(clientIp && objectWifiIps_(trimmedObject).indexOf(clientIp) >= 0);
+  if (!onOfficeWifi && (ssid || bssid)) {
+    try { onOfficeWifi = officeByWifi_(ssid, bssid, '').office === trimmedObject; } catch (e) {}
+  }
   if (objCoords && !hasGeo && onOfficeWifi) {
-    geoDistance = 'без GPS, принято по Wi-Fi офиса';
+    geoDistance = 'без GPS, принято по Wi-Fi объекта';
   } else if (objCoords && !hasGeo) {
     if (!delayed) {
       return {
@@ -2396,7 +2402,7 @@ function logEvent(name, phone, objectName, eventType, geo, clientTime, eventId, 
     var acc = Math.min(Math.max(Number(geo.accuracy) || 0, 0), 300);
     if (distance - acc > GEO_RADIUS_METERS && onOfficeWifi) {
       // GPS «улетел», но телефон в офисной сети — принимаем.
-      geoDistance = geoDistance + ' (принято по Wi-Fi офиса)';
+      geoDistance = geoDistance + ' (принято по Wi-Fi объекта)';
     } else if (distance - acc > GEO_RADIUS_METERS) {
       logGeoBlockedAttempt_(name, phone, trimmedObject, eventType, geo, geoDistance, clientIp);
       return {
@@ -4481,7 +4487,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v93';
+var CODE_VERSION = 'v94';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5058,7 +5064,7 @@ function adminSetObjectWifi(adminPhone, objectName, ip, mode) {
   if (!auth.ok) return { status: 'error', message: auth.error };
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
   if (!sheet || sheet.getLastRow() < 2) return { status: 'error', message: 'Объект не найден' };
-  if (String(sheet.getRange(1, OBJ_COL.WIFI).getValue()).trim() !== 'Wi-Fi офиса (IP)') sheet.getRange(1, OBJ_COL.WIFI).setValue('Wi-Fi офиса (IP)');
+  if (String(sheet.getRange(1, OBJ_COL.WIFI).getValue()).trim() !== 'Wi-Fi объекта (IP)') sheet.getRange(1, OBJ_COL.WIFI).setValue('Wi-Fi объекта (IP)');
   var name = String(objectName || '').trim(), addr = cleanIp_(ip);
   if (mode !== 'clear' && !addr) return { status: 'error', message: 'Не удалось определить IP сети' };
   var names = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
@@ -5626,18 +5632,25 @@ function officeByWifi_(ssid, bssid, ip) {
   return { office: byIp, by: byIp ? 'IP' : '' };
 }
 // Запомнить сеть (имя + роутер, и IP) как Wi-Fi объекта.
-function adminLearnWifi(adminPhone, objectName, ssid, bssid, ip) {
+// mode 'remove' — забыть сеть (по роутеру, а если его нет — по имени).
+function adminLearnWifi(adminPhone, objectName, ssid, bssid, ip, mode) {
   var auth = adminAuth_(adminPhone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   ssid = cleanSsid_(ssid); bssid = cleanBssid_(bssid);
   if (!ssid && !bssid && !cleanIp_(ip)) return { status: 'error', message: 'Нет данных о сети' };
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
   if (!sheet || sheet.getLastRow() < 2) return { status: 'error', message: 'Объект не найден' };
-  if (String(sheet.getRange(1, OBJ_COL.WIFINET).getValue()).trim() !== 'Wi-Fi офиса (сеть)') sheet.getRange(1, OBJ_COL.WIFINET).setValue('Wi-Fi офиса (сеть)');
+  if (String(sheet.getRange(1, OBJ_COL.WIFINET).getValue()).trim() !== 'Wi-Fi объекта (сеть)') sheet.getRange(1, OBJ_COL.WIFINET).setValue('Wi-Fi объекта (сеть)');
   var names = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
   for (var i = 0; i < names.length; i++) {
     if (String(names[i][0]).trim() !== String(objectName || '').trim()) continue;
     var cell = sheet.getRange(i + 2, OBJ_COL.WIFINET), nets = parseWifiNets_(cell.getValue());
+    var fmt = function (list) { return list.map(function (n) { return (n.ssid || 'Wi-Fi') + (n.bssid ? ' (' + n.bssid + ')' : ''); }).join('; '); };
+    if (mode === 'remove') {
+      nets = nets.filter(function (n) { return bssid ? n.bssid !== bssid : n.ssid !== ssid; });
+      cell.setNumberFormat('@').setValue(fmt(nets));
+      return { status: 'ok', nets: nets };
+    }
     if ((ssid || bssid) && !nets.some(function (n) { return (bssid && n.bssid === bssid) || (!bssid && n.ssid === ssid); })) {
       nets.push({ ssid: ssid, bssid: bssid });
       cell.setNumberFormat('@').setValue(nets.map(function (n) { return (n.ssid || 'Wi-Fi') + (n.bssid ? ' (' + n.bssid + ')' : ''); }).join('; '));
@@ -5690,7 +5703,9 @@ function getWifiAuto(phone) {
       });
     }
   } catch (e) {}
-  return { status: 'ok', enabled: !!wifiProps_(WIFI_AUTO_KEY)[p], last: last, offices: offices };
+  var all = [];
+  try { all = getValidObjects(); } catch (e2) {}
+  return { status: 'ok', enabled: !!wifiProps_(WIFI_AUTO_KEY)[p], last: last, offices: offices, objects: all };
 }
 
 function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
@@ -5706,21 +5721,32 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
   // последняя проверка — для диагностики в «Профиле»
   var lastReport = { at: now.getTime(), ip: ip, onWifi: !!onWifi, office: office, by: found.by, ssid: ssid, bssid: bssid, reason: String(reason || '').slice(0, 20) };
   if (office) {
-    if (!cur.in || cur.object !== office) wifiLog_(emp.name, p, 'в сети офиса', office, ip, (ssid ? '«' + ssid + '» ' : '') + 'узнан по: ' + found.by + (reason ? ', ' + reason : ''));
-    cur = { in: true, object: office, since: cur.in ? cur.since : now.getTime(), lastSeen: now.getTime(), ip: ip, last: lastReport };
+    var prevObj = cur.in ? cur.object : '', prevSeen = cur.lastSeen;
+    if (prevObj && prevObj !== office) wifiLog_(emp.name, p, 'вышел из сети объекта', prevObj, ip, 'перешёл в сеть «' + office + '»', new Date(prevSeen || now));
+    if (!cur.in || cur.object !== office) wifiLog_(emp.name, p, 'в сети объекта', office, ip, (ssid ? '«' + ssid + '» ' : '') + 'узнан по: ' + found.by + (reason ? ', ' + reason : ''));
+    cur = { in: true, object: office, since: (cur.in && cur.object === office) ? cur.since : now.getTime(), lastSeen: now.getTime(), ip: ip, last: lastReport };
     st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
     // авто-приход: первый за день, в разумное время
     var h = Number(Utilities.formatDate(now, 'Europe/Moscow', 'H'));
     var os = getOpenShift(p);
-    if (!os.open && h >= 6 && h < WIFI_DAY_CLOSE_HOUR && !hadArrivalToday_(p)) {
+    // переезд: смена открыта на другом объекте — закрываем её временем
+    // последнего присутствия в его сети (если он был сегодня в той сети)
+    if (os.open && objKey_(os.objectName) !== objKey_(office) && prevObj && objKey_(prevObj) === objKey_(os.objectName) && prevSeen &&
+        toIsoDate_(new Date(prevSeen)) === toIsoDate_(now)) {
+      if (wifiCloseShiftAt_(p, emp.name, os.objectName, new Date(prevSeen), 'авто: перешёл на «' + office + '» (по Wi-Fi)')) {
+        wifiLog_(emp.name, p, 'авто-уход', os.objectName, ip, 'переход на «' + office + '», уход в ' + clockStr_(new Date(prevSeen)));
+        os = getOpenShift(p);
+      }
+    }
+    if (!os.open && h >= 6 && h < WIFI_DAY_CLOSE_HOUR && !hadArrivalToday_(p, office)) {
       var r = logEvent(emp.name, p, office, 'Приход', null, now.getTime(), 'wifi' + p + toIsoDate_(now).replace(/-/g, ''), ip);
       wifiLog_(emp.name, p, r && r.status === 'ok' ? 'авто-приход' : 'авто-приход не принят', office, ip, r && r.status === 'ok' ? '' : (r && r.message || ''));
       res.checkedIn = !!(r && r.status === 'ok');
-      if (res.checkedIn) sendPush_([p], 'Приход отмечен автоматически', office + ', ' + clockStr_(now) + ' — по Wi-Fi офиса', { screen: 'scan', tag: 'shift' });
+      if (res.checkedIn) sendPush_([p], 'Приход отмечен автоматически', office + ', ' + clockStr_(now) + ' — по Wi-Fi объекта', { screen: 'scan', tag: 'shift' });
     }
   } else if (cur.in) {
     // время — последнее присутствие в сети; когда заметили выход — в примечании
-    wifiLog_(emp.name, p, 'вышел из сети офиса', cur.object, ip, (onWifi ? 'другая сеть Wi-Fi' : 'Wi-Fi отключён') + ', замечено в ' + clockStr_(now), new Date(cur.lastSeen || now));
+    wifiLog_(emp.name, p, 'вышел из сети объекта', cur.object, ip, (onWifi ? 'другая сеть Wi-Fi' : 'Wi-Fi отключён') + ', замечено в ' + clockStr_(now), new Date(cur.lastSeen || now));
     cur.in = false; cur.last = lastReport; st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
   } else {
     cur.last = lastReport; st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
@@ -5728,7 +5754,8 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
   return res;
 }
 
-function hadArrivalToday_(phone) {
+// Был ли сегодня приход (на объекте object, если указан).
+function hadArrivalToday_(phone, object) {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
   if (!sh || sh.getLastRow() < 2) return false;
   var n = Math.min(sh.getLastRow() - 1, 400), today = toIsoDate_(new Date());
@@ -5737,9 +5764,28 @@ function hadArrivalToday_(phone) {
     var ts = rows[i][0];
     if (!(ts instanceof Date)) continue;
     if (toIsoDate_(ts) !== today) { if (ts < startOfDay_(new Date())) break; else continue; }
-    if (normalizePhone_(rows[i][2]) === phone && rows[i][4] === 'Приход') return true;
+    if (normalizePhone_(rows[i][2]) === phone && rows[i][4] === 'Приход' && (!object || objKey_(rows[i][3]) === objKey_(object))) return true;
   }
   return false;
+}
+
+// Закрыть открытую смену уходом в момент at (с пометкой).
+function wifiCloseShiftAt_(phone, name, objectName, at, note) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) return false;
+  try {
+    var map = getOpenShiftsMap_();
+    if (!map[phone]) return false;
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
+    sheet.appendRow([at, name, phone, objectName, 'Уход', '', '', '', note, new Date()]);
+    var row = sheet.getLastRow();
+    sheet.getRange(row, 3).setNumberFormat('@').setValue(String(phone));
+    sheet.getRange(row, 10).setNumberFormat('dd.MM.yyyy HH:mm:ss');
+    delete map[phone]; saveOpenShiftsMap_(map);
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Раз в час: в 22:00 (и позже) — закрыть открытые смены тех, у кого включена
@@ -5764,13 +5810,13 @@ function wifiCloseDay_() {
       var last = new Date(s.lastSeen);
       if (last <= new Date(since) || startOfDay_(last).getTime() !== sinceDay.getTime()) return; // в этот день в сети не был
       var emp = findEmployeeByPhone(p);
-      sheet.appendRow([last, emp ? emp.name : '', p, e.objectName, 'Уход', '', '', '', 'авто: последний раз в Wi-Fi офиса', now]);
+      sheet.appendRow([last, emp ? emp.name : '', p, e.objectName, 'Уход', '', '', '', 'авто: последний раз в Wi-Fi объекта', now]);
       var row = sheet.getLastRow();
       sheet.getRange(row, 3).setNumberFormat('@').setValue(String(p));
       sheet.getRange(row, 10).setNumberFormat('dd.MM.yyyy HH:mm:ss');
       delete map[p]; closed++;
       wifiLog_(emp ? emp.name : '', p, 'авто-уход', e.objectName, s.ip || '', 'смена закрыта в ' + clockStr_(last));
-      sendPush_([p], 'Смена закрыта автоматически', e.objectName + ': уход в ' + clockStr_(last) + ' — последний раз в Wi-Fi офиса. Если ушли в другое время — сообщите руководителю.', { screen: 'stats', tag: 'shift' });
+      sendPush_([p], 'Смена закрыта автоматически', e.objectName + ': уход в ' + clockStr_(last) + ' — последний раз в Wi-Fi объекта. Если ушли в другое время — сообщите руководителю.', { screen: 'stats', tag: 'shift' });
     });
     if (closed) saveOpenShiftsMap_(map);
   } finally {
