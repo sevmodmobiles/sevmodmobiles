@@ -86,6 +86,61 @@ public class WifiPresencePlugin extends Plugin {
         call.resolve();
     }
 
+    /** Сети Wi-Fi вокруг (для выбора сети объекта): по имени, с точками доступа и сигналом. */
+    @SuppressWarnings({"deprecation", "MissingPermission"})
+    @PluginMethod
+    public void scanWifi(PluginCall call) {
+        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            call.reject("no_permission");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) getContext().getApplicationContext().getSystemService(android.content.Context.WIFI_SERVICE);
+                if (wm == null) { call.reject("no_wifi"); return; }
+                try { wm.startScan(); } catch (Exception e) { /* частые сканирования Android ограничивает — возьмём последние */ }
+                Thread.sleep(2500);
+                java.util.List<android.net.wifi.ScanResult> res = wm.getScanResults();
+                String[] cur = PresenceWorker.wifiId(getContext());
+                java.util.LinkedHashMap<String, JSObject> bySsid = new java.util.LinkedHashMap<>();
+                if (res != null) for (android.net.wifi.ScanResult r : res) {
+                    String ssid = r.SSID == null ? "" : r.SSID;
+                    if (ssid.isEmpty()) continue; // скрытые сети
+                    JSObject g = bySsid.get(ssid);
+                    if (g == null) {
+                        g = new JSObject();
+                        g.put("ssid", ssid);
+                        g.put("level", r.level);
+                        g.put("bssids", new com.getcapacitor.JSArray());
+                        g.put("connected", false);
+                        bySsid.put(ssid, g);
+                    }
+                    if (r.level > g.getInteger("level", -200)) g.put("level", r.level);
+                    try { g.getJSONArray("bssids").put(r.BSSID == null ? "" : r.BSSID.toLowerCase()); } catch (Exception e) { /* пропуск */ }
+                    if (ssid.equals(cur[0])) g.put("connected", true);
+                }
+                // подключённая сеть — даже если её нет в последнем сканировании
+                if (!cur[0].isEmpty() && !bySsid.containsKey(cur[0])) {
+                    JSObject g = new JSObject();
+                    g.put("ssid", cur[0]); g.put("level", -50); g.put("connected", true);
+                    com.getcapacitor.JSArray a = new com.getcapacitor.JSArray();
+                    if (!cur[1].isEmpty()) a.put(cur[1].toLowerCase());
+                    g.put("bssids", a);
+                    bySsid.put(cur[0], g);
+                }
+                com.getcapacitor.JSArray list = new com.getcapacitor.JSArray();
+                for (JSObject g : bySsid.values()) list.put(g);
+                JSObject out = new JSObject();
+                out.put("networks", list);
+                out.put("connectedSsid", cur[0]);
+                out.put("connectedBssid", cur[1]);
+                call.resolve(out);
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        }).start();
+    }
+
     @PluginMethod
     public void openLocationSettings(PluginCall call) {
         Intent i = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);

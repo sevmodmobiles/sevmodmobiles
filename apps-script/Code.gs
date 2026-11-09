@@ -1,3 +1,4 @@
+// v95: adminLearnWifi принимает список сетей (выбранная сеть со всеми точками доступа).
 // v94: Wi-Fi для любого объекта (не только офиса): переезд между объектами, сеть в ручных отметках, «Wi-Fi объекта».
 // v93: офис по сети Wi-Fi (роутер BSSID / имя SSID, колонка L «Wi-Fi офиса (сеть)»), IP — запасной; adminLearnWifi.
 // v92: getWifiAuto отдаёт объекты с Wi-Fi (кнопка «Запомнить эту сеть» в «Профиле»).
@@ -500,7 +501,7 @@ function doPost(e) {
       return jsonOutput(wifiPresence(data.phone, data.ip, data.onWifi === true, data.reason, data.ssid, data.bssid));
     }
     if (data.action === 'adminLearnWifi') {
-      return jsonOutput(adminLearnWifi(data.phone, data.objectName, data.ssid, data.bssid, data.ip, data.mode));
+      return jsonOutput(adminLearnWifi(data.phone, data.objectName, data.ssid, data.bssid, data.ip, data.mode, data.nets));
     }
     if (data.action === 'setWifiAuto') {
       return jsonOutput(setWifiAuto(data.phone, data.enabled === true));
@@ -4487,7 +4488,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v94';
+var CODE_VERSION = 'v95';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5633,11 +5634,18 @@ function officeByWifi_(ssid, bssid, ip) {
 }
 // Запомнить сеть (имя + роутер, и IP) как Wi-Fi объекта.
 // mode 'remove' — забыть сеть (по роутеру, а если его нет — по имени).
-function adminLearnWifi(adminPhone, objectName, ssid, bssid, ip, mode) {
+// many — список [{ssid, bssid}] (выбранная сеть со всеми точками доступа).
+function adminLearnWifi(adminPhone, objectName, ssid, bssid, ip, mode, many) {
   var auth = adminAuth_(adminPhone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   ssid = cleanSsid_(ssid); bssid = cleanBssid_(bssid);
-  if (!ssid && !bssid && !cleanIp_(ip)) return { status: 'error', message: 'Нет данных о сети' };
+  var add = [];
+  if (ssid || bssid) add.push({ ssid: ssid, bssid: bssid });
+  (Array.isArray(many) ? many : []).slice(0, 30).forEach(function (n) {
+    var s2 = cleanSsid_(n && n.ssid), b2 = cleanBssid_(n && n.bssid);
+    if (s2 || b2) add.push({ ssid: s2, bssid: b2 });
+  });
+  if (!add.length && !cleanIp_(ip)) return { status: 'error', message: 'Нет данных о сети' };
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
   if (!sheet || sheet.getLastRow() < 2) return { status: 'error', message: 'Объект не найден' };
   if (String(sheet.getRange(1, OBJ_COL.WIFINET).getValue()).trim() !== 'Wi-Fi объекта (сеть)') sheet.getRange(1, OBJ_COL.WIFINET).setValue('Wi-Fi объекта (сеть)');
@@ -5651,10 +5659,12 @@ function adminLearnWifi(adminPhone, objectName, ssid, bssid, ip, mode) {
       cell.setNumberFormat('@').setValue(fmt(nets));
       return { status: 'ok', nets: nets };
     }
-    if ((ssid || bssid) && !nets.some(function (n) { return (bssid && n.bssid === bssid) || (!bssid && n.ssid === ssid); })) {
-      nets.push({ ssid: ssid, bssid: bssid });
-      cell.setNumberFormat('@').setValue(nets.map(function (n) { return (n.ssid || 'Wi-Fi') + (n.bssid ? ' (' + n.bssid + ')' : ''); }).join('; '));
-    }
+    var changed = false;
+    add.forEach(function (a) {
+      if (nets.some(function (n) { return (a.bssid && n.bssid === a.bssid) || (!a.bssid && !n.bssid && n.ssid === a.ssid); })) return;
+      nets.push(a); changed = true;
+    });
+    if (changed) cell.setNumberFormat('@').setValue(fmt(nets));
     if (cleanIp_(ip)) adminSetObjectWifi(adminPhone, objectName, ip, 'add');
     return { status: 'ok', nets: nets };
   }

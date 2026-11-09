@@ -597,6 +597,16 @@
   .objWifiChip button { width: 24px; height: 24px; margin: 0; padding: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
   .objWifi .objWifiAdd { margin: 0; padding: 9px 10px; font-size: 13px; background: transparent; color: var(--blue); border: 1px solid var(--border); }
   .objWifiHint { margin-top: 6px; }
+  .wpList { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .wpItem { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0; padding: 11px 12px; border-radius: 12px; text-align: left;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .wpItem.sel { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+  .wpItem.known { opacity: .55; }
+  .wpItem svg { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  .wpItem svg .off { opacity: .25; }
+  .wpItem .wpName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wpItem small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
+  .wpTag { flex: none; font-size: 11.5px; font-weight: 700; color: var(--green); }
   .serverVer { font-size: 14px; line-height: 1.45; margin-bottom: 10px; }
   .serverVer .verRow { display: flex; justify-content: space-between; gap: 10px; }
   .serverVer .verNum { font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -2176,7 +2186,7 @@
       </div>
       <div id="wifiLearn" style="display:none; margin-top:8px;">
         <div class="tmFilters" style="margin-bottom:6px;"><select id="wifiLearnObj"></select></div>
-        <button type="button" id="wifiLearnBtn" style="background:var(--blue);">Это Wi-Fi объекта — запомнить</button>
+        <button type="button" id="wifiLearnBtn" style="background:var(--blue);">Выбрать сеть Wi-Fi для объекта</button>
       </div>
     </div>
     <div class="card">
@@ -2666,6 +2676,20 @@
       <div class="calBtns">
         <button id="cfCancel" type="button" class="calCancel">Отмена</button>
         <button id="cfOk" type="button" style="background: var(--red);">Удалить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Выбор сети Wi-Fi объекта: список сетей вокруг (Android-приложение) -->
+  <div id="wifiPickModal" class="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="wpTitle">
+    <div class="modalBox">
+      <h2 id="wpTitle" style="margin-top:0; color: var(--text);">Сеть Wi-Fi объекта</h2>
+      <div id="wpSub" class="ctHint" style="margin:-4px 0 10px;"></div>
+      <div id="wpList" class="wpList"></div>
+      <div id="wpStatus" class="ctHint" style="margin-top:8px;"></div>
+      <div class="calBtns">
+        <button id="wpCancel" type="button" class="calCancel">Отмена</button>
+        <button id="wpOk" type="button" style="background: var(--blue);" disabled>Добавить</button>
       </div>
     </div>
   </div>
@@ -3161,12 +3185,98 @@
     });
     return ipPromise;
   }
+  var WIFI_ICO_SMALL = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;margin-right:2px;vertical-align:-2px"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1"/></svg>';
+  function wifiBars_(level) {
+    var n = level >= -55 ? 3 : level >= -70 ? 2 : 1;
+    return '<svg viewBox="0 0 24 24"><path' + (n < 3 ? ' class="off"' : '') + ' d="M2.5 9a14 14 0 0 1 19 0"/><path' + (n < 2 ? ' class="off"' : '') + ' d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.2" r="1"/></svg>';
+  }
+  // Окно выбора сети. onAdded(res) — после сохранения. known — уже добавленные имена.
+  var wpModal = null, wpState = null;
+  function openWifiPicker_(objectName, known, onAdded) {
+    var WP = nativePlugin_('WifiPresence');
+    if (!WP || !WP.scanWifi) {
+      // в браузере списка сетей нет — запоминаем текущий интернет-адрес
+      getPublicIp_(true).then(function (ip) {
+        if (!ip) { toast_('Не удалось определить сеть — проверьте интернет', 'error'); return; }
+        askConfirm('Запомнить сеть?', 'Телефон сейчас в интернете через адрес <b>' + escapeHtml(ip) + '</b>. Запомнить его для «' + escapeHtml(objectName) + '»?<br><br>Выбор сети Wi-Fi по имени доступен в Android-приложении SEVMOD.', 'Запомнить', function () {
+          closeConfirm();
+          bgWrite_({ action: 'adminSetObjectWifi', phone: currentUser && currentUser.phone, objectName: objectName, ip: ip, mode: 'add' }, {
+            ok: '✓ Адрес ' + ip + ' запомнен для «' + objectName + '»', failPrefix: 'Не сохранилось', done: function (res) { onAdded && onAdded(res); }
+          });
+        });
+        document.getElementById('cfOk').style.background = 'var(--blue)';
+      });
+      return;
+    }
+    wpModal = wpModal || document.getElementById('wifiPickModal');
+    wpState = { object: objectName, known: known || [], nets: [], sel: -1, onAdded: onAdded };
+    document.getElementById('wpSub').textContent = 'Объект: ' + objectName + '. Выберите сеть, к которой подключаются на этом объекте.';
+    document.getElementById('wpList').innerHTML = '<div class="statsEmpty"><span class="spinner"></span> Ищу сети Wi-Fi…</div>';
+    document.getElementById('wpStatus').textContent = '';
+    var ok = document.getElementById('wpOk'); ok.disabled = true; ok.textContent = 'Добавить';
+    wpModal.classList.add('open');
+    WP.scanWifi().then(function (r) {
+      var list = (r && r.networks) || [];
+      list.sort(function (a, b) { return (b.connected ? 1 : 0) - (a.connected ? 1 : 0) || b.level - a.level; });
+      wpState.nets = list;
+      if (!list.length) { document.getElementById('wpList').innerHTML = '<div class="statsEmpty">Сетей не найдено. Проверьте, что Wi-Fi и геолокация на телефоне включены.</div>'; return; }
+      document.getElementById('wpList').innerHTML = list.map(function (n, i) {
+        var isKnown = wpState.known.indexOf(n.ssid) >= 0, pts = (n.bssids || []).length;
+        return '<button type="button" class="wpItem' + (isKnown ? ' known' : '') + '" data-i="' + i + '"' + (isKnown ? ' disabled' : '') + '>' + wifiBars_(n.level) +
+          '<span class="wpName">' + escapeHtml(n.ssid) + '<small>' + (isKnown ? 'уже добавлена' : (pts > 1 ? pts + ' точки доступа' : '1 точка доступа')) + '</small></span>' +
+          (n.connected ? '<span class="wpTag">подключено</span>' : '') + '</button>';
+      }).join('');
+      var firstFree = list.findIndex(function (n) { return n.connected && wpState.known.indexOf(n.ssid) < 0; });
+      if (firstFree >= 0) wpSelect_(firstFree);
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (/no_permission/.test(msg)) {
+        document.getElementById('wpList').innerHTML = '<div class="statsEmpty">Чтобы увидеть сети вокруг, Android просит доступ к геолокации.</div>';
+        ok.disabled = false; ok.textContent = 'Разрешить';
+        wpState.needPerm = true;
+      } else {
+        document.getElementById('wpList').innerHTML = '<div class="statsEmpty">Не удалось получить список сетей: ' + escapeHtml(msg) + '</div>';
+      }
+    });
+  }
+  function wpSelect_(i) {
+    wpState.sel = i;
+    Array.prototype.forEach.call(document.querySelectorAll('#wpList .wpItem'), function (b) { b.classList.toggle('sel', +b.getAttribute('data-i') === i); });
+    var n = wpState.nets[i], ok = document.getElementById('wpOk');
+    ok.disabled = false; ok.textContent = 'Добавить «' + n.ssid + '»';
+    document.getElementById('wpStatus').textContent = n.connected ? '' : 'Телефон сейчас не подключён к этой сети — она будет узнаваться по имени и точкам доступа.';
+  }
+  document.getElementById('wpList').addEventListener('click', function (e) {
+    var b = e.target.closest('.wpItem'); if (!b || b.disabled) return;
+    wpSelect_(+b.getAttribute('data-i'));
+  });
+  document.getElementById('wpCancel').addEventListener('click', function () { wpModal.classList.remove('open'); });
+  document.getElementById('wifiPickModal').addEventListener('click', function (e) { if (e.target === this) this.classList.remove('open'); });
+  document.getElementById('wpOk').addEventListener('click', function () {
+    var WP = nativePlugin_('WifiPresence');
+    if (wpState.needPerm) { wpModal.classList.remove('open'); if (WP) WP.requestLocationAlways().catch(function () {}); return; }
+    var n = wpState.nets[wpState.sel]; if (!n) return;
+    var nets = (n.bssids || []).map(function (b) { return { ssid: n.ssid, bssid: b }; });
+    if (!nets.length) nets = [{ ssid: n.ssid, bssid: '' }];
+    var st = wpState;
+    wpModal.classList.remove('open');
+    // если это подключённая сеть — заодно и текущий интернет-адрес
+    (n.connected ? getPublicIp_(true) : Promise.resolve('')).then(function (ip) {
+      bgWrite_({ action: 'adminLearnWifi', phone: currentUser && currentUser.phone, objectName: st.object, ip: ip || '', nets: nets }, {
+        ok: '✓ Сеть «' + n.ssid + '» добавлена для «' + st.object + '»', failPrefix: 'Не сохранилось',
+        done: function (res) { st.onAdded && st.onAdded(res, ip); }
+      });
+    });
+  });
   function objWifiListHtml_(ips, nets) {
     nets = nets || [];
     if (!ips.length && !nets.length) return '<div class="ctHint">Сеть не задана</div>';
-    return nets.map(function (n) {
-      return '<span class="objWifiChip" title="' + escapeHtml(n.bssid || '') + '">' + escapeHtml(n.ssid || 'Wi-Fi') + (n.bssid ? ' · ' + escapeHtml(n.bssid.slice(-5)) : '') +
-        '<button type="button" class="objWifiRemove" data-ssid="' + escapeHtml(n.ssid || '') + '" data-bssid="' + escapeHtml(n.bssid || '') + '" aria-label="Удалить">×</button></span>';
+    // сети — по имени (у одной сети бывает несколько точек доступа)
+    var groups = {}, order = [];
+    nets.forEach(function (n) { var k = n.ssid || 'Wi-Fi'; if (!groups[k]) { groups[k] = 0; order.push(k); } groups[k]++; });
+    return order.map(function (k) {
+      return '<span class="objWifiChip">' + WIFI_ICO_SMALL + escapeHtml(k) + (groups[k] > 1 ? ' · ' + groups[k] + ' точ.' : '') +
+        '<button type="button" class="objWifiRemove" data-ssid="' + escapeHtml(k === 'Wi-Fi' ? '' : k) + '" data-bssid="" aria-label="Удалить">×</button></span>';
     }).join('') + ips.map(function (ip) {
       return '<span class="objWifiChip">IP ' + escapeHtml(ip) + '<button type="button" class="objWifiRemove" data-ip="' + escapeHtml(ip) + '" aria-label="Удалить">×</button></span>';
     }).join('');
@@ -3700,24 +3810,13 @@
     }).catch(function () {});
   }
   document.getElementById('wifiLearnBtn').addEventListener('click', function () {
-    var btn = this, ip = document.getElementById('wifiLearn').getAttribute('data-ip'), obj = document.getElementById('wifiLearnObj').value;
-    if (!ip || !obj) return;
-    btn.disabled = true;
-    var WP0 = nativePlugin_('WifiPresence');
-    // имя сети и роутер — свежие с телефона (если Android даёт), иначе из последней проверки
-    var idP = WP0 && WP0.locStatus ? WP0.locStatus().catch(function () { return {}; }) : Promise.resolve({});
-    idP.then(function (st) {
-      var lr = document.getElementById('wifiLearn');
-      return apiPost({ action: 'adminLearnWifi', phone: currentUser.phone, objectName: obj, ip: ip,
-        ssid: (st && st.ssid) || lr.getAttribute('data-ssid') || '', bssid: (st && st.bssid) || lr.getAttribute('data-bssid') || '' });
-    }).then(function (r) {
-      btn.disabled = false;
-      if (!r || r.status !== 'ok') { toast_((r && r.message) || 'Не удалось сохранить', 'error'); return; }
-      toast_('Сеть запомнена как Wi-Fi «' + obj + '»', 'ok');
+    var obj = document.getElementById('wifiLearnObj').value;
+    if (!obj) return;
+    openWifiPicker_(obj, [], function () {
       document.getElementById('wifiLearn').style.display = 'none';
       var WP = nativePlugin_('WifiPresence'); if (WP) WP.start().catch(function () {}); // сразу перепроверить
       setTimeout(renderWifiAuto_, 15000);
-    }).catch(function () { btn.disabled = false; toast_('Нет связи с сервером', 'error'); });
+    });
   });
   // Имя сети Wi-Fi в фоне Android отдаёт только с геолокацией «Всегда».
   var wifiLastIp = '';
@@ -5993,11 +6092,11 @@
             '</div>' +
             '<label for="' + fId + '" style="margin-top:8px;">Ответственный прораб</label>' +
             '<input id="' + fId + '" type="text" autocomplete="off" value="' + escapeHtml(foremanValue) + '">' +
-            '<div class="objWifi" data-name="' + escapeHtml(obj.name) + '">' +
+            '<div class="objWifi" data-name="' + escapeHtml(obj.name) + '" data-ips="' + escapeHtml(JSON.stringify(obj.wifiIps || [])) + '" data-nets="' + escapeHtml(JSON.stringify(obj.wifiNets || [])) + '">' +
               '<div class="objWifiHead"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.2" r="1"/></svg><span>Wi-Fi объекта</span></div>' +
               '<div class="objWifiList">' + objWifiListHtml_(obj.wifiIps || [], obj.wifiNets || []) + '</div>' +
-              '<button type="button" class="objWifiAdd">Запомнить текущую сеть телефона</button>' +
-              '<div class="ctHint objWifiHint">Нажмите, находясь на объекте и подключившись к его Wi-Fi. Тогда отметка пройдёт по сети, даже если GPS телефона ошибается.</div>' +
+              '<button type="button" class="objWifiAdd">+ Добавить сеть Wi-Fi</button>' +
+              '<div class="ctHint objWifiHint">Нажмите на объекте — телефон покажет сети вокруг, выберите нужную. Сетей у объекта может быть несколько. По ним работает отметка при неточном GPS и автоотметка.</div>' +
             '</div>' +
             '<div class="adminObjSaveRow">' +
               '<button type="button" class="adminObjSaveBtn" data-name="' + escapeHtml(obj.name) + '" data-idx="' + idx + '">Сохранить</button>' +
@@ -6015,7 +6114,7 @@
 
     listEl.querySelectorAll('.objWifi').forEach(function (box) {
       var name = box.getAttribute('data-name');
-      var curIps = null, curNets = null;
+      var curIps = JSON.parse(box.getAttribute('data-ips') || '[]'), curNets = JSON.parse(box.getAttribute('data-nets') || '[]');
       function setList(ips, nets) {
         if (ips) curIps = ips; if (nets) curNets = nets;
         box.querySelector('.objWifiList').innerHTML = objWifiListHtml_(curIps || [], curNets || []);
@@ -6039,24 +6138,10 @@
         }
         var add = e.target.closest('.objWifiAdd');
         if (!add) return;
-        add.disabled = true; add.textContent = 'Определяю сеть…';
-        // в Android-приложении — ещё имя сети и роутер (надёжнее IP)
-        var WPa = nativePlugin_('WifiPresence');
-        Promise.all([getPublicIp_(true), WPa && WPa.locStatus ? WPa.locStatus().catch(function () { return {}; }) : Promise.resolve({})]).then(function (v) {
-          var ip = v[0], st = v[1] || {};
-          add.disabled = false; add.textContent = 'Запомнить текущую сеть телефона';
-          if (!ip && !st.bssid && !st.ssid) { toast_('Не удалось определить сеть — проверьте интернет', 'error'); return; }
-          if (st.bssid || st.ssid) {
-            bgWrite_({ action: 'adminLearnWifi', phone: currentUser && currentUser.phone, objectName: name, ip: ip, ssid: st.ssid || '', bssid: st.bssid || '' }, {
-              ok: '✓ Сеть «' + (st.ssid || 'Wi-Fi') + '» запомнена для «' + name + '»', failPrefix: 'Не сохранилось',
-              done: function (res) { if (res.nets) setList(ip && (curIps || []).indexOf(ip) < 0 ? (curIps || []).concat([ip]) : null, res.nets); }
-            });
-            return;
-          }
-          bgWrite_({ action: 'adminSetObjectWifi', phone: currentUser && currentUser.phone, objectName: name, ip: ip, mode: 'add' }, {
-            ok: '✓ Сеть ' + ip + ' запомнена для «' + name + '»', failPrefix: 'Не сохранилось',
-            done: function (res) { if (res.wifiIps) setList(res.wifiIps); }
-          });
+        var knownNames = (curNets || []).map(function (n) { return n.ssid; });
+        openWifiPicker_(name, knownNames, function (res, ip) {
+          if (res && res.nets) setList(ip && (curIps || []).indexOf(ip) < 0 ? (curIps || []).concat([ip]) : null, res.nets);
+          else if (res && res.wifiIps) setList(res.wifiIps);
         });
       });
     });
