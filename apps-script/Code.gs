@@ -1,3 +1,4 @@
+// v99: APK на Google Диске (apkUpload от сборки, apkInfo для обновления), одноразовые приглашения на установку.
 // v98: справочник — столбец «Быстрый поиск» (ПП 60×27, ПН 50×40, ГД-35, ГКЛВ…); лист обновляется из catalog-seed.json.
 // v97: справочник материалов («Справочник материалов», whCatalog) — подсказки при вводе позиции на складе.
 // v96: роли (Сотрудники J «Роли»), склад: «Склад» и «Склад — движения», ввод при инвентаризации.
@@ -467,6 +468,9 @@ function doGet(e) {
 
   // Самообновление (v62): GitHub вызывает после каждой выкладки Code.gs.
   // Секрет не нужен — код берётся только из нашего репозитория.
+  // Приглашение на установку приложения: ?invite=ТОКЕН (одноразовое, 24 ч)
+  if (params.invite) return apkInvitePage_(String(params.invite));
+
   if (params.action === 'selfUpdate') {
     return jsonOutput(selfUpdate_(params.src === 'github' ? 'GitHub (выкладка)' : 'запрос по адресу', params.sha));
   }
@@ -517,6 +521,10 @@ function doPost(e) {
     }
     if (data.action === 'getMyRoles') return jsonOutput(getMyRoles(data.phone));
     if (data.action === 'whGetItems') return jsonOutput(whGetItems(data.phone));
+    if (data.action === 'apkUpload') return jsonOutput(apkUpload_(data.secret, data.build, data.data));
+    if (data.action === 'apkInfo') return jsonOutput(apkInfo(data.phone));
+    if (data.action === 'adminApkSetup') return jsonOutput(adminApkSetup(data.phone));
+    if (data.action === 'adminCreateInvite') return jsonOutput(adminCreateInvite(data.phone, data.employee));
     if (data.action === 'whCatalog') return jsonOutput(whCatalog(data.phone, data.rev));
     if (data.action === 'whAddItem') return jsonOutput(whAddItem(data.phone, data.item));
     if (data.action === 'whUpdateItem') return jsonOutput(whUpdateItem(data.phone, data.id, data.item, data.reason));
@@ -4496,7 +4504,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v98';
+var CODE_VERSION = 'v99';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4677,6 +4685,7 @@ function adminServerVersion(adminPhone) {
 function autoUpdateHourly() {
   try { wifiCloseDay_(); } catch (e) { /* не мешаем автообновлению */ }
   try { autoCloseStaleShifts_(); } catch (e) { /* не мешаем автообновлению */ }
+  try { apkCleanupInviteCopies_(); } catch (e) { /* не мешаем автообновлению */ }
   selfUpdate_('проверка раз в час', '');
 }
 
@@ -6030,4 +6039,150 @@ function whUpdateItem(phone, id, item, reason) {
     }
     return { status: 'error', message: 'Позиция не найдена' };
   } finally { lock.releaseLock(); }
+}
+
+
+// ===================== Приложение Android на Google Диске =====================
+// Сборка на GitHub больше не выкладывает APK в открытые релизы: она отправляет
+// файл сюда (apkUpload с секретом), он ложится в папку «SEVMOD — приложение»
+// на Диске владельца таблицы. Ссылку получают только сотрудники (apkInfo —
+// для обновления внутри приложения) и по одноразовому приглашению (?invite=).
+var APK_FOLDER = 'SEVMOD — приложение';
+var APK_INVITES_SHEET = 'Приглашения';
+var APK_INVITE_HOURS = 24;
+function apkProps_() { return PropertiesService.getScriptProperties(); }
+function apkFolder_() {
+  var it = DriveApp.getFoldersByName(APK_FOLDER);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(APK_FOLDER);
+}
+function apkDownloadUrl_(id) { return 'https://drive.usercontent.google.com/download?id=' + id + '&export=download&confirm=t'; }
+function apkSecretEq_(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (!a || a.length !== b.length) return false;
+  var x = 0; for (var i = 0; i < a.length; i++) x |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return x === 0;
+}
+function apkUpload_(secret, build, b64) {
+  var want = apkProps_().getProperty('APK_UPLOAD_SECRET');
+  if (!want) return { status: 'error', message: 'Секрет не создан: откройте «Приложение Android» в панели администратора' };
+  if (!apkSecretEq_(secret, want)) return { status: 'error', message: 'Неверный секрет' };
+  build = Number(build) || 0;
+  if (!build || !b64) return { status: 'error', message: 'Нет номера сборки или файла' };
+  var bytes = Utilities.base64Decode(String(b64));
+  if (bytes.length < 100000) return { status: 'error', message: 'Файл слишком маленький' };
+  var folder = apkFolder_();
+  var file = folder.createFile(Utilities.newBlob(bytes, 'application/vnd.android.package-archive', 'sevmod-' + build + '.apk'));
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  var p = apkProps_(), oldId = p.getProperty('APK_FILE_ID');
+  p.setProperties({ APK_FILE_ID: file.getId(), APK_BUILD: String(build), APK_UPLOADED: new Date().toISOString() });
+  // старые сборки — в корзину: их ссылки перестают работать
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var f = files.next();
+    if (f.getId() !== file.getId() && /^sevmod-\d+\.apk$/.test(f.getName())) { try { f.setTrashed(true); } catch (e) {} }
+  }
+  if (oldId && oldId !== file.getId()) { try { DriveApp.getFileById(oldId).setTrashed(true); } catch (e) {} }
+  return { status: 'ok', build: build, size: bytes.length };
+}
+// Для обновления внутри приложения: номер последней сборки и ссылка — только сотрудникам.
+function apkInfo(phone) {
+  if (!findEmployeeByPhone_(phone)) return { status: 'error', message: 'Сотрудник не найден' };
+  var p = apkProps_(), id = p.getProperty('APK_FILE_ID');
+  if (!id) return { status: 'ok', build: 0 };
+  return { status: 'ok', build: Number(p.getProperty('APK_BUILD')) || 0, url: apkDownloadUrl_(id) };
+}
+// Панель администратора: секрет для GitHub (создаётся при первом открытии) и состояние.
+function adminApkSetup(phone) {
+  var auth = adminAuth_(phone); if (!auth.ok) return { status: 'error', message: auth.error };
+  var p = apkProps_(), secret = p.getProperty('APK_UPLOAD_SECRET');
+  if (!secret) { secret = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, ''); p.setProperty('APK_UPLOAD_SECRET', secret); }
+  return { status: 'ok', secret: secret, build: Number(p.getProperty('APK_BUILD')) || 0, uploaded: p.getProperty('APK_UPLOADED') || '' };
+}
+function apkInvitesSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(APK_INVITES_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(APK_INVITES_SHEET);
+    sh.getRange(1, 1, 1, 7).setValues([['Код', 'Сотрудник', 'Телефон', 'Выдано', 'Действует до', 'Использовано', 'Кто выдал']]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function adminCreateInvite(phone, employee) {
+  var auth = adminAuth_(phone); if (!auth.ok) return { status: 'error', message: auth.error };
+  if (!apkProps_().getProperty('APK_FILE_ID')) return { status: 'error', message: 'Файла приложения на Диске ещё нет — дождитесь первой сборки' };
+  var emp = findEmployeeByPhone_(employee);
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден в листе «Сотрудники»' };
+  var abc = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', tok = '';
+  var rnd = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  for (var i = 0; i < 16; i++) tok += abc.charAt(parseInt(rnd.substr(i * 2, 2), 16) % abc.length);
+  var now = new Date(), until = new Date(now.getTime() + APK_INVITE_HOURS * 3600000);
+  var admin = findEmployeeByPhone_(phone);
+  var sh = apkInvitesSheet_();
+  sh.appendRow([tok, emp.name, "'" + emp.phone, now, until, '', admin ? admin.name : phone]);
+  sh.getRange(sh.getLastRow(), 4, 1, 2).setNumberFormat('dd.MM.yyyy HH:mm');
+  return { status: 'ok', token: tok, name: emp.name, until: Utilities.formatDate(until, 'Europe/Moscow', 'dd.MM HH:mm') };
+}
+function apkInviteRow_(tok) {
+  if (!/^[A-Za-z0-9]{16}$/.test(tok)) return null;
+  var sh = apkInvitesSheet_(), n = sh.getLastRow() - 1;
+  if (n < 1) return null;
+  var v = sh.getRange(2, 1, n, 7).getValues();
+  for (var i = 0; i < v.length; i++) if (String(v[i][0]) === tok) return { sh: sh, row: i + 2, v: v[i] };
+  return null;
+}
+function apkInviteCheck_(tok) {
+  var r = apkInviteRow_(tok);
+  if (!r) return { ok: false, why: 'Ссылка недействительна.' };
+  if (r.v[5]) return { ok: false, why: 'Эта ссылка уже использована.' };
+  if (!(r.v[4] instanceof Date) || r.v[4].getTime() < Date.now()) return { ok: false, why: 'Срок действия ссылки истёк.' };
+  return { ok: true, r: r };
+}
+// Страница приглашения. Ссылку «съедает» не открытие страницы (её заранее
+// открывают превью мессенджеров), а нажатие «Скачать» в браузере человека.
+function apkInvitePage_(tok) {
+  var c = apkInviteCheck_(tok), name = c.ok ? String(c.r.v[1]) : '';
+  var esc = function (x) { return String(x).replace(/[&<>"]/g, function (ch) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]; }); };
+  var html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<style>body{font-family:-apple-system,Roboto,Arial,sans-serif;background:#f4f5f7;color:#1c1c1e;margin:0;padding:24px 16px}' +
+    '.c{max-width:420px;margin:40px auto;background:#fff;border-radius:20px;padding:28px 22px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.06)}' +
+    'h1{font-size:22px;margin:0 0 8px}p{color:#555;font-size:15px;line-height:1.45}' +
+    'button,a.b{display:block;width:100%;box-sizing:border-box;margin:18px 0 0;padding:15px;border:0;border-radius:14px;background:#34A853;color:#fff;font-size:17px;font-weight:700;text-decoration:none}' +
+    'button:disabled{opacity:.6}ol{text-align:left;color:#555;font-size:14px;line-height:1.5;padding-left:20px}.e{color:#EA4335}</style></head><body><div class="c">' +
+    '<h1>SEVMOD для Android</h1>' +
+    (c.ok
+      ? '<p>Приглашение для: <b>' + esc(name) + '</b></p><button id="go" onclick="go()">Скачать приложение</button><div id="out"></div>' +
+        '<ol><li>Нажмите «Скачать приложение».</li><li>Откройте скачанный файл <b>sevmod.apk</b> (из уведомления или «Загрузок»).</li>' +
+        '<li>Если телефон спросит — разрешите установку из этого источника.</li><li>Войдите в приложение по своему номеру телефона.</li></ol>' +
+        '<p style="font-size:13px">Ссылка одноразовая: после скачивания она перестанет работать.</p>' +
+        '<script>function go(){var b=document.getElementById("go");b.disabled=true;b.textContent="Готовлю файл…";' +
+        'google.script.run.withSuccessHandler(function(r){if(!r||!r.ok){b.style.display="none";document.getElementById("out").innerHTML="<p class=e>"+((r&&r.why)||"Ошибка")+"</p>";return;}' +
+        'b.style.display="none";document.getElementById("out").innerHTML="<a class=b href=\\""+r.url+"\\" target=\\"_top\\">Скачать sevmod.apk</a>";' +
+        'try{window.top.location.href=r.url;}catch(e){}}).withFailureHandler(function(e){b.disabled=false;b.textContent="Скачать приложение";alert("Ошибка: "+e.message);}).apkUseInvite("' + esc(tok) + '");}</script>'
+      : '<p class="e">' + esc(c.why) + '</p><p>Попросите у администратора новую ссылку.</p>') +
+    '</div></body></html>';
+  return HtmlService.createHtmlOutput(html).setTitle('SEVMOD — установка').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+// Вызывается со страницы приглашения (google.script.run): отмечает ссылку
+// использованной и выдаёт личную копию файла, которая удаляется через ~2 часа.
+function apkUseInvite(tok) {
+  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    var c = apkInviteCheck_(String(tok || ''));
+    if (!c.ok) return { ok: false, why: c.why + ' Попросите у администратора новую ссылку.' };
+    var id = apkProps_().getProperty('APK_FILE_ID');
+    if (!id) return { ok: false, why: 'Файл приложения ещё не готов.' };
+    var copy = DriveApp.getFileById(id).makeCopy('sevmod.apk', apkFolder_());
+    copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    copy.setDescription('invite-copy ' + Date.now());
+    c.r.sh.getRange(c.r.row, 6).setValue(new Date()).setNumberFormat('dd.MM.yyyy HH:mm');
+    return { ok: true, url: apkDownloadUrl_(copy.getId()) };
+  } finally { lock.releaseLock(); }
+}
+function apkCleanupInviteCopies_() {
+  var it = DriveApp.getFoldersByName(APK_FOLDER); if (!it.hasNext()) return;
+  var files = it.next().getFilesByName('sevmod.apk');
+  while (files.hasNext()) {
+    var f = files.next(), m = /invite-copy (\d+)/.exec(f.getDescription() || '');
+    if (m && Date.now() - Number(m[1]) > 2 * 3600000) { try { f.setTrashed(true); } catch (e) {} }
+  }
 }

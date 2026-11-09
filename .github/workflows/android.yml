@@ -1,8 +1,10 @@
 # Сборка Android-приложения SEVMOD (Capacitor-оболочка, открывает
 # https://sevmodmobiles.github.io/sevmodmobiles/). Запускается при изменении
-# android-app/ или вручную. Готовый APK выкладывается в GitHub Releases;
-# постоянная ссылка на последнюю версию:
-# https://github.com/sevmodmobiles/sevmodmobiles/releases/latest/download/sevmod.apk
+# android-app/ или вручную. Готовый APK отправляется на сервер (Apps Script),
+# он кладёт его на Google Диск — ссылку получают только сотрудники; в открытые
+# GitHub Releases он тогда не выкладывается. Нужен секрет APK_UPLOAD_SECRET
+# (ключ — в приложении: Панель администратора → Приложение Android). Пока
+# секрета нет, APK, как раньше, выкладывается в GitHub Releases.
 name: Android — сборка APK
 
 on:
@@ -93,7 +95,31 @@ jobs:
           ./gradlew --no-daemon assembleRelease
           cp app/build/outputs/apk/release/app-release.apk ../sevmod.apk
 
-      - name: Выложить в Releases
+      - name: Отправить на Google Диск (через сервер)
+        id: drive
+        env:
+          APK_UPLOAD_SECRET: ${{ secrets.APK_UPLOAD_SECRET }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          if [ -z "$APK_UPLOAD_SECRET" ]; then
+            echo "::warning::Нет секрета APK_UPLOAD_SECRET — APK будет выложен в GitHub Releases, как раньше"
+            echo "uploaded=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          API=$(grep -o "https://script.google.com/macros/s/[A-Za-z0-9_-]*/exec" ../index.html | head -1)
+          [ -n "$API" ] || { echo "::error::Не найден адрес сервера в index.html"; exit 1; }
+          python3 -c "import base64,json,os;json.dump({'action':'apkUpload','secret':os.environ['APK_UPLOAD_SECRET'],'build':int(os.environ['BUILD']),'data':base64.b64encode(open('sevmod.apk','rb').read()).decode()},open('payload.json','w'))"
+          ok=0
+          for i in 1 2 3; do
+            if curl -sS -L --max-time 300 -H 'Content-Type: text/plain' --data-binary @payload.json "$API" -o resp.json && \
+               python3 -c "import json,sys;r=json.load(open('resp.json'));print(r);sys.exit(0 if r.get('status')=='ok' else 1)"; then ok=1; break; fi
+            sleep $((i * 10))
+          done
+          rm -f payload.json
+          [ $ok = 1 ] || { echo "::error::Сервер не принял APK"; head -c 500 resp.json || true; exit 1; }
+          echo "uploaded=1" >> "$GITHUB_OUTPUT"
+
+      - name: Выложить в Releases (пока нет секрета)
+        if: steps.drive.outputs.uploaded != '1'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-v${{ github.run_number }}

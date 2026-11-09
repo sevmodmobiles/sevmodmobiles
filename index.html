@@ -761,6 +761,10 @@
   .tmSh .tmName { font-size: 14.5px; }
   .tmMore { margin: 6px 0 0; background: var(--blue); }
   .tmViewSeg { margin: 0 0 4px; }
+  .apkHead { font-weight: 800; font-size: 17px; margin-bottom: 4px; }
+  .apkSteps { margin: 8px 0; padding-left: 20px; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+  .apkSteps b { color: var(--text); }
+  .apkMini { display: inline-block; width: auto; margin: 2px 0; padding: 5px 10px; font-size: 13px; background: var(--blue); }
   /* ===== Отсутствия в общем кабинете ===== */
   .tmPill.o { color: #F29900; background: rgba(242,153,0,.14); }
   .tmRow.tap { cursor: pointer; }
@@ -2124,6 +2128,31 @@
         <div id="adminTestPushStatus" class="ctHint" style="margin-top:8px;">Отправит тестовое уведомление на ваш телефон (в Android-приложении SEVMOD).</div>
       </div>
 
+      <!-- Приложение Android: файл на Google Диске, приглашения на установку -->
+      <div class="card" id="apkCard">
+        <div class="apkHead">Приложение Android</div>
+        <div id="apkState" class="ctHint"><span class="spinner"></span> Проверяю…</div>
+        <label for="apkInvEmp" style="margin-top:12px;">Пригласить сотрудника</label>
+        <select id="apkInvEmp"><option value="">— выберите сотрудника —</option></select>
+        <button id="apkInvBtn" type="button">Создать ссылку на установку</button>
+        <div id="apkInvOut" style="display:none; margin-top:10px;">
+          <input id="apkInvLink" class="installLink" readonly>
+          <button id="apkInvShare" type="button" style="background: var(--blue); margin-top: 8px;">Отправить ссылку</button>
+          <div id="apkInvHint" class="ctHint" style="margin-top:6px;"></div>
+        </div>
+        <details class="timingBox" id="apkSetup">
+          <summary>Настройка сборки (один раз)</summary>
+          <div class="ctHint" style="margin-top:8px;">Чтобы новые сборки сами попадали на ваш Google Диск, а не в открытый доступ на GitHub:</div>
+          <ol class="apkSteps">
+            <li>Скопируйте ключ: <button type="button" id="apkSecretCopy" class="apkMini">Скопировать ключ</button></li>
+            <li>Откройте <b>github.com/sevmodmobiles/sevmodmobiles</b> → Settings → Secrets and variables → Actions → <b>New repository secret</b>.</li>
+            <li>Name: <b>APK_UPLOAD_SECRET</b>, Secret: вставьте ключ → Add secret.</li>
+            <li>Напишите Claude «ключ добавлен» — он запустит сборку.</li>
+          </ol>
+          <input id="apkSecret" class="installLink" readonly style="font-size:12px;">
+        </details>
+      </div>
+
       <!-- Сервер (Apps Script) обновляется сам после каждой выкладки на
            GitHub; кнопка — ручная проверка, если что-то пошло не так. -->
       <div class="card">
@@ -3069,6 +3098,7 @@
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
   var SWR_AFTER_WRITE = {
+    apkInfo: [], adminApkSetup: [], adminCreateInvite: [],
     log: ['adminSalaryReport', 'adminAttendance'], closeMissedShift: ['adminAttendance', 'stats', 'status'],
     adminSetExpenseStatus: ['adminExpenseOverview'], adminDeleteExpenseRows: ['adminExpenseOverview'],
     adminSplitExpenseRow: ['adminExpenseOverview'], adminAddExpense: ['adminExpenseOverview', 'adminExpenseLookups'],
@@ -3763,7 +3793,16 @@
   // Номер последней сборки берём из app-version.json в репозитории (его
   // пишет сборка на GitHub, у raw-файлов нет лимита запросов, как у API);
   // если файла нет — из GitHub API.
+  // С переносом на Google Диск номер сборки и ссылку выдаёт наш сервер (только
+  // сотрудникам). Пока файла на Диске нет — как раньше, из GitHub.
   function latestApkBuild_() {
+    if (!currentUser) return legacyApkBuild_();
+    return apiPost({ action: 'apkInfo', phone: currentUser.phone }).then(function (r) {
+      if (r && r.status === 'ok' && r.build && r.url) { APK_URL = r.url; return Number(r.build); }
+      return legacyApkBuild_();
+    }, legacyApkBuild_);
+  }
+  function legacyApkBuild_() {
     return fetch('https://raw.githubusercontent.com/sevmodmobiles/sevmodmobiles/main/app-version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
       if (!r.ok) throw new Error('no file');
       return r.json();
@@ -6309,6 +6348,7 @@
     pushScreenState('admin');
     loadServerVersion_();
     renderTiming_();
+    loadApkCard_();
   }
 
   // --- Экран "Поставить задачу" (вынесен из панели администратора на
@@ -7306,6 +7346,55 @@
   }
 
   // Версия сервера: работающая (CODE_VERSION в Code.gs) и последняя на GitHub.
+  // ===== Приложение Android: состояние файла на Диске и приглашения =====
+  var apkSecretVal = '';
+  function loadApkCard_() {
+    var st = document.getElementById('apkState');
+    apiPost({ action: 'adminApkSetup', phone: currentUser && currentUser.phone }).then(function (r) {
+      if (!r || r.status !== 'ok') { st.textContent = (r && r.message) || 'Не удалось получить состояние'; return; }
+      apkSecretVal = r.secret || '';
+      document.getElementById('apkSecret').value = apkSecretVal;
+      var when = r.uploaded ? new Date(r.uploaded) : null;
+      st.innerHTML = r.build
+        ? 'На вашем Google Диске (папка «SEVMOD — приложение»): <b>сборка ' + r.build + '</b>' + (when ? ' от ' + ('0' + when.getDate()).slice(-2) + '.' + ('0' + (when.getMonth() + 1)).slice(-2) : '') + '. Ссылка на файл выдаётся только сотрудникам.'
+        : 'Файла на Диске ещё нет. Сделайте «Настройку сборки» ниже — после неё новая сборка сама попадёт на Диск.';
+      document.getElementById('apkSetup').open = !r.build;
+    }).catch(function () { st.textContent = 'Нет связи с сервером'; });
+    var sel = document.getElementById('apkInvEmp');
+    swrLoad_({ action: 'adminGetEmployees', phone: currentUser && currentUser.phone }, function (res) {
+      if (!res || res.status !== 'ok') return;
+      var cur = sel.value;
+      sel.innerHTML = '<option value="">— выберите сотрудника —</option>' + (res.employees || []).slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'ru'); }).map(function (e) {
+        return '<option value="' + escapeHtml(e.phone) + '"' + (e.phone === cur ? ' selected' : '') + '>' + escapeHtml(e.name) + '</option>';
+      }).join('');
+    }, function () {});
+  }
+  function apkCopy_(text, btn, okText) {
+    function done() { var t = btn.textContent; btn.textContent = okText || 'Скопировано'; setTimeout(function () { btn.textContent = t; }, 2000); }
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, function () { toast_('Нажмите на поле и удерживайте → «Копировать»', 'ok'); });
+    else toast_('Нажмите на поле и удерживайте → «Копировать»', 'ok');
+  }
+  document.getElementById('apkSecretCopy').addEventListener('click', function () { if (apkSecretVal) apkCopy_(apkSecretVal, this, 'Ключ скопирован'); });
+  document.getElementById('apkInvBtn').addEventListener('click', function () {
+    var emp = document.getElementById('apkInvEmp').value, btn = this;
+    if (!emp) { toast_('Выберите сотрудника', 'error'); return; }
+    btn.disabled = true; btn.textContent = 'Создаю…';
+    apiPost({ action: 'adminCreateInvite', phone: currentUser && currentUser.phone, employee: emp }).then(function (r) {
+      btn.disabled = false; btn.textContent = 'Создать ссылку на установку';
+      if (!r || r.status !== 'ok') { toast_((r && r.message) || 'Не получилось', 'error'); return; }
+      var link = API_URL + '?invite=' + r.token;
+      document.getElementById('apkInvOut').style.display = 'block';
+      document.getElementById('apkInvLink').value = link;
+      document.getElementById('apkInvHint').textContent = 'Для: ' + r.name + '. Одноразовая, действует до ' + r.until + '. Повторное открытие — «ссылка уже использована».';
+      document.getElementById('apkInvShare').setAttribute('data-name', r.name);
+    }).catch(function () { btn.disabled = false; btn.textContent = 'Создать ссылку на установку'; toast_('Нет связи с сервером', 'error'); });
+  });
+  document.getElementById('apkInvShare').addEventListener('click', function () {
+    var link = document.getElementById('apkInvLink').value, btn = this;
+    var text = 'Установка приложения SEVMOD: откройте ссылку на телефоне Android и нажмите «Скачать приложение». Ссылка одноразовая.';
+    if (navigator.share) navigator.share({ title: 'SEVMOD', text: text, url: link }).catch(function () {});
+    else apkCopy_(text + '\n' + link, btn, 'Скопировано — вставьте в мессенджер');
+  });
   function loadServerVersion_() {
     var box = document.getElementById('serverVersionInfo');
     if (!box || !currentUser) return;
