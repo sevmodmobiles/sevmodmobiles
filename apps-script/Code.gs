@@ -1,3 +1,4 @@
+// v96: роли (Сотрудники J «Роли»), склад: «Склад» и «Склад — движения», ввод при инвентаризации.
 // v95: adminLearnWifi принимает список сетей (выбранная сеть со всеми точками доступа).
 // v94: Wi-Fi для любого объекта (не только офиса): переезд между объектами, сеть в ручных отметках, «Wi-Fi объекта».
 // v93: офис по сети Wi-Fi (роутер BSSID / имя SSID, колонка L «Wi-Fi офиса (сеть)»), IP — запасной; adminLearnWifi.
@@ -512,6 +513,10 @@ function doPost(e) {
     if (data.action === 'adminAttendance') {
       return jsonOutput(adminAttendance(data.phone, data.date, data.mode, data.dateTo));
     }
+    if (data.action === 'getMyRoles') return jsonOutput(getMyRoles(data.phone));
+    if (data.action === 'whGetItems') return jsonOutput(whGetItems(data.phone));
+    if (data.action === 'whAddItem') return jsonOutput(whAddItem(data.phone, data.item));
+    if (data.action === 'whUpdateItem') return jsonOutput(whUpdateItem(data.phone, data.id, data.item, data.reason));
     if (data.action === 'uploadPhoto') {
       return jsonOutput(uploadPhoto(data.phone, data.photo, data.label));
     }
@@ -2227,9 +2232,9 @@ function uploadPhoto(phone, photo, label) {
   if (typeof photo !== 'string' || photo.indexOf('data:image/') !== 0 || photo.length > 12000000) {
     return { status: 'error', message: 'Неверный файл фото' };
   }
-  var kind = { task: 'задача', before: 'до', after: 'после' }[label] || 'фото';
+  var kind = { task: 'задача', before: 'до', after: 'после', wh: 'склад' }[label] || 'фото';
   try {
-    return { status: 'ok', url: savePhoto(photo, emp.name + '_' + kind, 'Фото задач') };
+    return { status: 'ok', url: savePhoto(photo, emp.name + '_' + kind, label === 'wh' ? 'Фото склада' : 'Фото задач') };
   } catch (e) {
     return { status: 'error', message: 'Не удалось сохранить фото: ' + (e && e.message || e) };
   }
@@ -4488,7 +4493,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v95';
+var CODE_VERSION = 'v96';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5833,4 +5838,153 @@ function wifiCloseDay_() {
     lock.releaseLock();
   }
   return closed;
+}
+
+
+// ===================== РОЛИ (v96) =====================
+// «Сотрудники», колонка J «Роли»: прораб, кладовщик, снабжение (через запятую).
+// Администратор (галочка G) может работать в любой роли.
+var EMP_ROLES_COL = 10;
+var ROLE_KEYS = { 'прораб': 'foreman', 'кладовщик': 'storekeeper', 'снабжение': 'supply', 'снабженец': 'supply' };
+function rolesOf_(phone) {
+  var p = normalizePhone_(phone), out = [];
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
+  if (!sh || sh.getLastRow() < 2) return out;
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, Math.min(EMP_ROLES_COL, sh.getMaxColumns())).getValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (normalizePhone_(rows[i][1]) !== p) continue;
+    var adm = rows[i][6] === true || String(rows[i][6]).trim().toUpperCase() === 'TRUE';
+    if (adm) return ['admin', 'storekeeper', 'foreman', 'supply'];
+    String(rows[i][EMP_ROLES_COL - 1] || '').toLowerCase().split(/[,;\s]+/).forEach(function (x) {
+      var k = ROLE_KEYS[x.trim()]; if (k && out.indexOf(k) < 0) out.push(k);
+    });
+    return out;
+  }
+  return out;
+}
+function getMyRoles(phone) {
+  var p = normalizePhone_(phone);
+  if (!p || !findEmployeeByPhone(p)) return { status: 'error', message: 'Сотрудник не найден' };
+  try {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
+    if (sh && String(sh.getRange(1, EMP_ROLES_COL).getValue()).trim() !== 'Роли') sh.getRange(1, EMP_ROLES_COL).setValue('Роли');
+  } catch (e) {}
+  return { status: 'ok', roles: rolesOf_(p) };
+}
+function hasRole_(phone, role) { var r = rolesOf_(phone); return r.indexOf('admin') >= 0 || r.indexOf(role) >= 0; }
+
+// ===================== СКЛАД (v96) =====================
+// «Склад»: что есть и где лежит. «Склад — движения»: журнал операций.
+var WH_SHEET = 'Склад', WH_LOG_SHEET = 'Склад — движения';
+var WH_HEADERS = ['ID', 'Наименование', 'Категория', 'Ед.', 'Количество', 'Место хранения', 'Фото', 'Комментарий', 'Создано', 'Изменено', 'Кто изменил'];
+var WH = { ID: 1, NAME: 2, CAT: 3, UNIT: 4, QTY: 5, LOC: 6, PHOTOS: 7, COMMENT: 8, CREATED: 9, UPDATED: 10, BY: 11 };
+function whSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(WH_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(WH_SHEET);
+    sh.getRange(1, 1, 1, WH_HEADERS.length).setValues([WH_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function whLog_(who, item, op, delta, after, comment) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(WH_LOG_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(WH_LOG_SHEET);
+    sh.getRange(1, 1, 1, 9).setValues([['Дата', 'Кто', 'ID', 'Наименование', 'Ед.', 'Операция', 'Изменение', 'Остаток после', 'Комментарий']]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  sh.appendRow([new Date(), who, item.id, item.name, item.unit, op, delta, after, comment || '']);
+  sh.getRange(sh.getLastRow(), 1).setNumberFormat('dd.MM.yyyy HH:mm');
+}
+function whKey_(name, unit) { return String(name || '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ') + '|' + String(unit || '').trim().toLowerCase(); }
+function whRowToItem_(r) {
+  var fmt = function (d) { return d instanceof Date ? Utilities.formatDate(d, 'Europe/Moscow', 'dd.MM.yyyy HH:mm') : ''; };
+  return { id: String(r[WH.ID - 1]), name: String(r[WH.NAME - 1] || ''), category: String(r[WH.CAT - 1] || ''), unit: String(r[WH.UNIT - 1] || ''),
+    qty: Number(r[WH.QTY - 1]) || 0, location: String(r[WH.LOC - 1] || ''), photos: urlsToArray_(r[WH.PHOTOS - 1]),
+    comment: String(r[WH.COMMENT - 1] || ''), created: fmt(r[WH.CREATED - 1]), updated: fmt(r[WH.UPDATED - 1]), by: String(r[WH.BY - 1] || '') };
+}
+function whAuth_(phone) {
+  var p = normalizePhone_(phone), emp = p && findEmployeeByPhone(p);
+  if (!emp) return { ok: false, error: 'Сотрудник не найден' };
+  if (!hasRole_(p, 'storekeeper')) return { ok: false, error: 'Склад доступен кладовщику и администратору' };
+  return { ok: true, phone: p, name: emp.name };
+}
+function whGetItems(phone) {
+  var a = whAuth_(phone); if (!a.ok) return { status: 'error', message: a.error };
+  var sh = whSheet_();
+  if (sh.getLastRow() < 2) return { status: 'ok', items: [] };
+  var items = sh.getRange(2, 1, sh.getLastRow() - 1, WH_HEADERS.length).getValues()
+    .filter(function (r) { return String(r[WH.ID - 1]).trim() && String(r[WH.NAME - 1]).trim(); }).map(whRowToItem_);
+  return { status: 'ok', items: items };
+}
+function whNum_(v) { var n = Number(String(v === undefined || v === null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isFinite(n) ? Math.round(n * 1000) / 1000 : NaN; }
+// Новая позиция при инвентаризации. Та же позиция (имя + ед.) уже есть —
+// количество прибавляется (merge), место/категория/фото дополняются.
+function whAddItem(phone, item) {
+  var a = whAuth_(phone); if (!a.ok) return { status: 'error', message: a.error };
+  item = item || {};
+  var name = String(item.name || '').trim().slice(0, 200), unit = String(item.unit || 'шт').trim().slice(0, 20);
+  var qty = whNum_(item.qty);
+  if (!name) return { status: 'error', message: 'Укажите наименование' };
+  if (!isFinite(qty) || qty < 0) return { status: 'error', message: 'Укажите количество' };
+  var photos = (Array.isArray(item.photos) ? item.photos : []).filter(isUploadedPhotoUrl_).slice(0, 10);
+  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    var sh = whSheet_(), now = new Date(), key = whKey_(name, unit);
+    var n = sh.getLastRow() - 1, data = n > 0 ? sh.getRange(2, 1, n, WH_HEADERS.length).getValues() : [];
+    for (var i = 0; i < data.length; i++) {
+      if (whKey_(data[i][WH.NAME - 1], data[i][WH.UNIT - 1]) !== key) continue;
+      var row = i + 2, cur = whRowToItem_(data[i]), newQty = Math.round((cur.qty + qty) * 1000) / 1000;
+      var loc = cur.location, l2 = String(item.location || '').trim();
+      if (l2 && loc.toLowerCase().indexOf(l2.toLowerCase()) < 0) loc = loc ? loc + ', ' + l2 : l2;
+      sh.getRange(row, WH.QTY).setValue(newQty);
+      sh.getRange(row, WH.LOC).setValue(loc);
+      if (!cur.category && item.category) sh.getRange(row, WH.CAT).setValue(String(item.category).slice(0, 60));
+      if (photos.length) sh.getRange(row, WH.PHOTOS).setValue(cur.photos.concat(photos).join(', '));
+      sh.getRange(row, WH.UPDATED).setValue(now); sh.getRange(row, WH.BY).setValue(a.name);
+      cur.qty = newQty; cur.location = loc;
+      whLog_(a.name, cur, 'Инвентаризация (добавлено)', qty, newQty, item.comment);
+      return { status: 'ok', merged: true, item: whRowToItem_(sh.getRange(row, 1, 1, WH_HEADERS.length).getValues()[0]) };
+    }
+    var id = 'W' + Utilities.getUuid().slice(0, 8);
+    var rowV = [id, name, String(item.category || '').slice(0, 60), unit, qty, String(item.location || '').trim().slice(0, 120),
+      photos.join(', '), String(item.comment || '').trim().slice(0, 500), now, now, a.name];
+    sh.appendRow(rowV);
+    var it = whRowToItem_(rowV);
+    whLog_(a.name, it, 'Инвентаризация (новая позиция)', qty, qty, item.comment);
+    return { status: 'ok', merged: false, item: it };
+  } finally { lock.releaseLock(); }
+}
+// Правка позиции: поля и/или количество (корректировка — в журнал).
+function whUpdateItem(phone, id, item, reason) {
+  var a = whAuth_(phone); if (!a.ok) return { status: 'error', message: a.error };
+  item = item || {};
+  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    var sh = whSheet_(), n = sh.getLastRow() - 1;
+    if (n < 1) return { status: 'error', message: 'Позиция не найдена' };
+    var ids = sh.getRange(2, WH.ID, n, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) !== String(id)) continue;
+      var row = i + 2, cur = whRowToItem_(sh.getRange(row, 1, 1, WH_HEADERS.length).getValues()[0]);
+      if (item.name !== undefined && String(item.name).trim()) sh.getRange(row, WH.NAME).setValue(String(item.name).trim().slice(0, 200));
+      if (item.category !== undefined) sh.getRange(row, WH.CAT).setValue(String(item.category).slice(0, 60));
+      if (item.unit !== undefined && String(item.unit).trim()) sh.getRange(row, WH.UNIT).setValue(String(item.unit).trim().slice(0, 20));
+      if (item.location !== undefined) sh.getRange(row, WH.LOC).setValue(String(item.location).trim().slice(0, 120));
+      if (item.comment !== undefined) sh.getRange(row, WH.COMMENT).setValue(String(item.comment).trim().slice(0, 500));
+      if (Array.isArray(item.photos)) sh.getRange(row, WH.PHOTOS).setValue(item.photos.filter(isUploadedPhotoUrl_).slice(0, 20).join(', '));
+      if (item.qty !== undefined) {
+        var q = whNum_(item.qty);
+        if (!isFinite(q) || q < 0) return { status: 'error', message: 'Неверное количество' };
+        if (q !== cur.qty) {
+          sh.getRange(row, WH.QTY).setValue(q);
+          whLog_(a.name, cur, 'Корректировка', Math.round((q - cur.qty) * 1000) / 1000, q, reason || '');
+        }
+      }
+      sh.getRange(row, WH.UPDATED).setValue(new Date()); sh.getRange(row, WH.BY).setValue(a.name);
+      return { status: 'ok', item: whRowToItem_(sh.getRange(row, 1, 1, WH_HEADERS.length).getValues()[0]) };
+    }
+    return { status: 'error', message: 'Позиция не найдена' };
+  } finally { lock.releaseLock(); }
 }

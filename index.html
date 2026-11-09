@@ -790,6 +790,27 @@
   .tiStats span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.2; }
   .wifiPerm { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(242,153,0,.12); font-size: 13.5px; line-height: 1.4; }
   .wifiPerm button { margin-top: 8px; }
+  /* ===== Роли и склад ===== */
+  .roleSeg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .roleSeg button { margin: 0; padding: 12px 8px; font-size: 14px; font-weight: 700; border-radius: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+  .roleSeg button.on { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); color: var(--blue); }
+  .roleSeg button:disabled { opacity: .45; }
+  .roleSeg button small { display: block; font-size: 11px; font-weight: 600; color: var(--muted); }
+  #screenWh, #screenWhItem { width: 100%; max-width: 440px; }
+  #screenWh { padding-bottom: 64px; }
+  .whItem { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 14px; margin-bottom: 7px; cursor: pointer; }
+  .whItem:active { background: var(--bg); }
+  .whMain { flex: 1; min-width: 0; }
+  .whName { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
+  .whMeta { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .whQty { flex: none; text-align: right; font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .whQty small { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+  .whQty.zero { color: var(--red); }
+  .whRow { display: flex; gap: 10px; }
+  .whHits { display: flex; flex-direction: column; gap: 4px; margin: -6px 0 8px; }
+  .whHits button { margin: 0; padding: 8px 10px; text-align: left; font-size: 13.5px; font-weight: 600; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px; }
+  .whHits button small { color: var(--muted); font-weight: 500; margin-left: 6px; }
+  .whDup { margin: -4px 0 10px; padding: 9px 11px; border-radius: 10px; background: rgba(66,133,244,.12); font-size: 13px; line-height: 1.4; }
   .verLine { margin-top: 12px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
   .segCtl { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
   .segCtl button {
@@ -2172,6 +2193,12 @@
       <div class="whoami">Вы вошли как: <b id="profileWhoamiName"></b></div>
       <div class="switchUser"><a id="profileSwitchUserLink">Это не я / сменить пользователя</a></div>
     </div>
+    <!-- Режим работы: администратор / кладовщик / прораб / снабжение -->
+    <div class="card" id="roleCard" style="display:none;">
+      <h2 style="margin-top:0;">Режим работы</h2>
+      <div id="roleSeg" class="roleSeg"></div>
+      <div id="roleHint" class="ctHint" style="margin-top:8px;"></div>
+    </div>
     <div class="card" id="profileAdminCard" style="display:none;">
       <h2 style="margin-top:0;">Администрирование</h2>
       <button id="profileAdminPanelBtn" type="button" class="hasDot" style="background:var(--blue);">Админ-панель</button>
@@ -2549,6 +2576,61 @@
   </div>
 
   <!-- ===== Нижняя навигация ===== -->
+  <!-- ===== Склад (кладовщик) ===== -->
+  <div id="screenWh" style="display:none;">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Склад</h1>
+      <div class="whoami" id="whSummary">&nbsp;</div>
+    </div>
+    <div class="card tasksCard">
+      <input id="whSearch" type="search" placeholder="Поиск: наименование, место, категория" autocomplete="off">
+      <div id="whChips" class="expChips" style="margin-top:8px;"></div>
+      <div id="whList"></div>
+    </div>
+    <button id="whAddFab" type="button" class="fabAdd" aria-label="Добавить позицию" title="Добавить позицию"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+  </div>
+
+  <div id="screenWhItem" style="display:none;">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;" id="whFormTitle">Новая позиция</h1>
+      <div class="switchUser"><a id="whFormBack">← Склад</a></div>
+    </div>
+    <div class="card">
+      <label for="whName">Наименование *</label>
+      <input id="whName" type="text" autocomplete="off" placeholder="Например: Саморез 3,5×25 по дереву">
+      <div id="whNameHits" class="whHits"></div>
+      <div id="whDup" class="whDup" style="display:none;"></div>
+
+      <label for="whCat">Категория</label>
+      <select id="whCat"></select>
+
+      <div class="whRow">
+        <div style="flex:1;"><label for="whQty">Количество *</label><input id="whQty" type="text" inputmode="decimal" placeholder="0"></div>
+        <div style="width:120px;"><label for="whUnit">Ед.</label><select id="whUnit"></select></div>
+      </div>
+      <div id="whReasonWrap" style="display:none;">
+        <label for="whReason">Причина корректировки</label>
+        <input id="whReason" type="text" maxlength="200" placeholder="Пересчёт, пересорт, брак…">
+      </div>
+
+      <label for="whLoc">Место хранения</label>
+      <input id="whLoc" type="text" autocomplete="off" placeholder="Стеллаж 2, полка 3" list="whLocList">
+      <datalist id="whLocList"></datalist>
+
+      <label>Фото (необязательно)</label>
+      <div id="whPhotosOld" class="photoGrid" style="display:none;"></div>
+      <input id="whPhotoInput" type="file" accept="image/*" capture="environment" multiple>
+      <div id="whPhotoPreview" class="photoPreviewRow"></div>
+
+      <label for="whComment">Комментарий</label>
+      <textarea id="whComment" rows="2" placeholder="Необязательно"></textarea>
+
+      <button id="whSaveMore" type="button">Сохранить и добавить ещё</button>
+      <button id="whSave" type="button" style="background:var(--blue);">Сохранить</button>
+      <div id="whFormStatus" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
   <div id="photoViewer" aria-modal="true" role="dialog">
     <div id="pvTrack"></div>
     <div class="pvBar">
@@ -2962,7 +3044,7 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, whGetItems: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
@@ -2981,7 +3063,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects']
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems'], whUpdateItem: ['whGetItems']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -3385,6 +3467,9 @@
   var hasPushedInitialScreenState = false;
 
   function pushScreenState(name, params) {
+    // экраны склада не входят в старые списки «скрыть всё» — прячем здесь
+    if (name !== 'wh') { var w1 = document.getElementById('screenWh'); if (w1) w1.style.display = 'none'; }
+    if (name !== 'whItem') { var w2 = document.getElementById('screenWhItem'); if (w2) w2.style.display = 'none'; }
     // Если show*Screen() сейчас вызван ИЗ обработчика popstate (то есть
     // браузер уже сам переместил указатель истории назад/вперёд) — заново
     // ничего не пушим, иначе история будет расти в обе стороны одновременно.
@@ -3448,6 +3533,8 @@
         case 'expPay': showExpPayScreen(); break;
         case 'absLog': showAbsLogScreen(); break;
         case 'salary': showSalaryScreen(); break;
+      case 'wh': showWarehouseScreen(); break;
+      case 'whItem': showWarehouseScreen(); break;
         default: showScanScreen();
       }
   }
@@ -3592,7 +3679,8 @@
     // Значок «Расходы» — по сохранённому статусу администратора, на любом
     // экране (а не только после захода на «Приход», где статус обновляется).
     var navExp = document.getElementById('navExpBtn');
-    if (navExp && currentUser && currentUser.phone) navExp.classList.toggle('isAdmin', !!loadAdminStatusCache(currentUser.phone));
+    if (navExp && currentUser && currentUser.phone) navExp.classList.toggle('isAdmin', !!loadAdminStatusCache(currentUser.phone) || activeRole_() === 'storekeeper');
+    applyRoleNav_();
   }
   function hideBottomNav() { bottomNav.classList.remove('visible'); }
 
@@ -3602,7 +3690,8 @@
     stats: 'navStatsBtn',
     profile: 'navProfileBtn',
     absence: 'navProfileBtn',
-    expenses: 'navExpBtn'
+    expenses: 'navExpBtn',
+    wh: 'navExpBtn', whItem: 'navExpBtn'
   };
   function setActiveNav(screenName) {
     var activeId = NAV_ACTIVE_MAP[screenName] || null;
@@ -3857,6 +3946,213 @@
       toast_(want ? 'Автоотметка включена: приход отметится при подключении к Wi-Fi объекта' : 'Автоотметка выключена', 'ok');
     }).catch(function () { box.disabled = false; box.checked = !want; toast_('Нет связи с сервером', 'error'); });
   });
+
+  // ===== Роли: администратор / кладовщик / прораб / снабжение =====
+  var ROLE_LABEL = { admin: 'Администратор', storekeeper: 'Кладовщик', foreman: 'Прораб', supply: 'Снабжение' };
+  var ROLE_READY = { admin: true, storekeeper: true };   // прораб и снабжение — скоро
+  function myRoles_() {
+    try { return JSON.parse(localStorage.getItem('sevmod_roles_' + (currentUser && currentUser.phone)) || '[]'); } catch (e) { return []; }
+  }
+  function activeRole_() {
+    var roles = myRoles_(), r = '';
+    try { r = localStorage.getItem('sevmod_role_' + (currentUser && currentUser.phone)) || ''; } catch (e) {}
+    if (r && roles.indexOf(r) >= 0 && ROLE_READY[r]) return r;
+    if (roles.indexOf('admin') >= 0) return 'admin';
+    if (roles.indexOf('storekeeper') >= 0) return 'storekeeper';
+    return '';
+  }
+  function setActiveRole_(r) {
+    try { localStorage.setItem('sevmod_role_' + currentUser.phone, r); } catch (e) {}
+    applyRoleNav_(); renderRoleCard_();
+  }
+  function loadRoles_() {
+    if (!currentUser || !currentUser.phone) return;
+    swrLoad_({ action: 'getMyRoles', phone: currentUser.phone }, function (res) {
+      if (!res || res.status !== 'ok') return;
+      try { localStorage.setItem('sevmod_roles_' + currentUser.phone, JSON.stringify(res.roles || [])); } catch (e) {}
+      applyRoleNav_();
+      if (screenProfile.style.display === 'block') renderRoleCard_();
+    }, function () {});
+  }
+  // Вкладка в нижней панели: «Расходы» (администратор) или «Склад» (кладовщик).
+  var NAV_EXP_HTML = null;
+  function applyRoleNav_() {
+    var b = document.getElementById('navExpBtn'); if (!b) return;
+    if (NAV_EXP_HTML === null) NAV_EXP_HTML = b.innerHTML;
+    var wh = activeRole_() === 'storekeeper';
+    b.innerHTML = wh ? '<svg viewBox="0 0 24 24"><path d="M3 9l9-5 9 5v11H3z"/><path d="M7 20v-7h10v7"/><path d="M7 16.5h10"/></svg>Склад' : NAV_EXP_HTML;
+    if (wh) b.classList.add('isAdmin');
+  }
+  function renderRoleCard_() {
+    var roles = myRoles_(), card = document.getElementById('roleCard');
+    var list = ['admin', 'storekeeper', 'foreman', 'supply'].filter(function (r) { return roles.indexOf(r) >= 0; });
+    card.style.display = list.length > 1 ? 'block' : 'none';
+    if (list.length <= 1) return;
+    var cur = activeRole_();
+    document.getElementById('roleSeg').innerHTML = list.map(function (r) {
+      return '<button type="button" data-r="' + r + '"' + (r === cur ? ' class="on"' : '') + (ROLE_READY[r] ? '' : ' disabled') + '>' + ROLE_LABEL[r] +
+        (ROLE_READY[r] ? '' : '<small>скоро</small>') + '</button>';
+    }).join('');
+    document.getElementById('roleHint').textContent = cur === 'storekeeper' ? 'В нижней панели — «Склад»: остатки и ввод позиций.' : cur === 'admin' ? 'В нижней панели — «Расходы».' : '';
+  }
+  document.getElementById('roleSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-r]'); if (!b || b.disabled) return;
+    setActiveRole_(b.getAttribute('data-r'));
+    toast_('Режим: ' + ROLE_LABEL[b.getAttribute('data-r')], 'ok');
+  });
+  setTimeout(function () { if (currentUser) { applyRoleNav_(); loadRoles_(); } }, 1200);
+
+  // ===== Склад: остатки и ввод позиций (инвентаризация) =====
+  var WH_CATS = ['Сухие смеси', 'Листовые материалы', 'Профиль и металл', 'Крепёж', 'Электрика', 'Сантехника', 'Отделка', 'Лакокраска', 'Инструмент', 'Расходники', 'Прочее'];
+  var WH_UNITS = ['шт', 'м', 'м²', 'м³', 'кг', 'л', 'упак', 'мешок', 'рулон', 'лист', 'компл', 'пог. м'];
+  var whItems = [], whCat = '', whEdit = null;
+  var screenWh = document.getElementById('screenWh'), screenWhItem = document.getElementById('screenWhItem');
+  function hideAllScreens_() {
+    Array.prototype.forEach.call(document.querySelectorAll('body > div[id^="screen"]'), function (el) { el.style.display = 'none'; });
+  }
+  function showWarehouseScreen() {
+    hideAllScreens_();
+    screenWh.style.display = 'block';
+    showBottomNav(); setActiveNav('wh'); pushScreenState('wh');
+    loadWh_();
+  }
+  function loadWh_() {
+    var list = document.getElementById('whList');
+    var body = { action: 'whGetItems', phone: currentUser && currentUser.phone };
+    if (!swrHas_(body)) list.innerHTML = skeletonHtml_(4);
+    swrLoad_(body, function (res) {
+      if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
+      whItems = res.items || []; renderWh_();
+    }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+  }
+  function whFmtQty_(q) { return String(Math.round(q * 1000) / 1000).replace('.', ','); }
+  function renderWh_() {
+    var q = document.getElementById('whSearch').value.trim().toLowerCase();
+    var cats = {}; whItems.forEach(function (it) { var c = it.category || 'Без категории'; cats[c] = (cats[c] || 0) + 1; });
+    document.getElementById('whChips').innerHTML = '<button type="button" class="expChip' + (!whCat ? ' on' : '') + '" data-c="">Все ' + whItems.length + '</button>' +
+      Object.keys(cats).sort(function (a, b) { return a.localeCompare(b, 'ru'); }).map(function (c) {
+        return '<button type="button" class="expChip' + (whCat === c ? ' on' : '') + '" data-c="' + escapeHtml(c) + '">' + escapeHtml(c) + ' ' + cats[c] + '</button>';
+      }).join('');
+    var shown = whItems.filter(function (it) {
+      if (whCat && (it.category || 'Без категории') !== whCat) return false;
+      if (!q) return true;
+      return (it.name + ' ' + it.location + ' ' + it.category + ' ' + it.comment).toLowerCase().indexOf(q) >= 0;
+    }).sort(function (a, b) { return a.name.localeCompare(b.name, 'ru'); });
+    document.getElementById('whSummary').textContent = whItems.length ? 'Позиций: ' + whItems.length + (shown.length !== whItems.length ? ' · показано ' + shown.length : '') : 'Пока пусто — нажмите «+», чтобы внести первую позицию';
+    document.getElementById('whList').innerHTML = shown.length ? shown.map(function (it) {
+      var meta = [it.category, it.location].filter(Boolean).join(' · ');
+      return '<div class="whItem" data-id="' + escapeHtml(it.id) + '"><div class="whMain"><div class="whName">' + escapeHtml(it.name) + (it.photos.length ? ' ' + T_ICO_PHOTO_INLINE : '') + '</div>' +
+        (meta ? '<div class="whMeta">' + escapeHtml(meta) + '</div>' : '') + '</div>' +
+        '<div class="whQty' + (it.qty <= 0 ? ' zero' : '') + '">' + whFmtQty_(it.qty) + '<small>' + escapeHtml(it.unit) + '</small></div></div>';
+    }).join('') : '<div class="statsEmpty">' + (whItems.length ? 'Ничего не найдено' : 'Склад пуст') + '</div>';
+  }
+  var T_ICO_PHOTO_INLINE = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:var(--muted);stroke-width:1.8;vertical-align:-2px"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>';
+  document.getElementById('whSearch').addEventListener('input', renderWh_);
+  document.getElementById('whChips').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-c]'); if (!b) return;
+    whCat = b.getAttribute('data-c'); renderWh_();
+  });
+  document.getElementById('whList').addEventListener('click', function (e) {
+    var c = e.target.closest('.whItem'); if (!c) return;
+    var it = whItems.filter(function (x) { return x.id === c.getAttribute('data-id'); })[0];
+    if (it) openWhForm_(it);
+  });
+  document.getElementById('whAddFab').addEventListener('click', function () { openWhForm_(null); });
+  document.getElementById('whFormBack').addEventListener('click', function () { showWarehouseScreen(); });
+
+  var whUp = photoUploader_('whPhotoInput', 'whPhotoPreview', 'wh');
+  function whFillSelects_(cat, unit) {
+    var cats = WH_CATS.slice(); whItems.forEach(function (it) { if (it.category && cats.indexOf(it.category) < 0) cats.push(it.category); });
+    document.getElementById('whCat').innerHTML = '<option value="">— выберите —</option>' + cats.map(function (c) { return '<option' + (c === cat ? ' selected' : '') + '>' + escapeHtml(c) + '</option>'; }).join('');
+    var units = WH_UNITS.slice(); if (unit && units.indexOf(unit) < 0) units.push(unit);
+    document.getElementById('whUnit').innerHTML = units.map(function (u) { return '<option' + (u === (unit || 'шт') ? ' selected' : '') + '>' + escapeHtml(u) + '</option>'; }).join('');
+    var locs = {}; whItems.forEach(function (it) { String(it.location || '').split(',').forEach(function (l) { l = l.trim(); if (l) locs[l] = 1; }); });
+    document.getElementById('whLocList').innerHTML = Object.keys(locs).sort().map(function (l) { return '<option value="' + escapeHtml(l) + '">'; }).join('');
+  }
+  function openWhForm_(it, keep) {
+    whEdit = it;
+    hideAllScreens_();
+    screenWhItem.style.display = 'block';
+    showBottomNav(); setActiveNav('whItem'); pushScreenState('whItem');
+    document.getElementById('whFormTitle').textContent = it ? 'Позиция' : 'Новая позиция';
+    document.getElementById('whName').value = it ? it.name : '';
+    whFillSelects_(it ? it.category : (keep && keep.category) || '', it ? it.unit : (keep && keep.unit) || 'шт');
+    document.getElementById('whQty').value = it ? whFmtQty_(it.qty) : '';
+    document.getElementById('whLoc').value = it ? it.location : (keep && keep.location) || '';
+    document.getElementById('whComment').value = it ? it.comment : '';
+    document.getElementById('whReason').value = '';
+    document.getElementById('whReasonWrap').style.display = 'none';
+    document.getElementById('whNameHits').innerHTML = '';
+    document.getElementById('whDup').style.display = 'none';
+    document.getElementById('whFormStatus').textContent = '';
+    document.getElementById('whSaveMore').style.display = it ? 'none' : '';
+    document.getElementById('whSave').textContent = it ? 'Сохранить изменения' : 'Сохранить';
+    renderPhotoGrid(document.getElementById('whPhotosOld'), it ? it.photos : []);
+    whUp.reset();
+    if (!it) setTimeout(function () { document.getElementById('whName').focus(); }, 50);
+  }
+  function whFindSame_() {
+    var n = document.getElementById('whName').value.trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
+    var u = document.getElementById('whUnit').value;
+    return n ? whItems.filter(function (it) { return it.name.trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ') === n && it.unit === u && (!whEdit || it.id !== whEdit.id); })[0] : null;
+  }
+  function whUpdateHints_() {
+    var q = document.getElementById('whName').value.trim().toLowerCase(), hits = document.getElementById('whNameHits'), dup = document.getElementById('whDup');
+    var same = whEdit ? null : whFindSame_();
+    if (same) {
+      dup.style.display = 'block';
+      dup.innerHTML = 'Такая позиция уже есть: <b>' + whFmtQty_(same.qty) + ' ' + escapeHtml(same.unit) + '</b>' + (same.location ? ' · ' + escapeHtml(same.location) : '') + '. Введённое количество <b>прибавится</b> к остатку.';
+    } else dup.style.display = 'none';
+    if (whEdit || q.length < 2 || same) { hits.innerHTML = ''; return; }
+    var list = whItems.filter(function (it) { return it.name.toLowerCase().indexOf(q) >= 0; }).slice(0, 5);
+    hits.innerHTML = list.map(function (it) {
+      return '<button type="button" data-id="' + escapeHtml(it.id) + '">' + escapeHtml(it.name) + '<small>' + whFmtQty_(it.qty) + ' ' + escapeHtml(it.unit) + (it.location ? ' · ' + escapeHtml(it.location) : '') + '</small></button>';
+    }).join('');
+  }
+  document.getElementById('whName').addEventListener('input', whUpdateHints_);
+  document.getElementById('whUnit').addEventListener('change', whUpdateHints_);
+  document.getElementById('whNameHits').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-id]'); if (!b) return;
+    var it = whItems.filter(function (x) { return x.id === b.getAttribute('data-id'); })[0]; if (!it) return;
+    document.getElementById('whName').value = it.name;
+    whFillSelects_(it.category, it.unit);
+    if (!document.getElementById('whLoc').value) document.getElementById('whLoc').value = '';
+    whUpdateHints_();
+    document.getElementById('whQty').focus();
+  });
+  document.getElementById('whQty').addEventListener('input', function () {
+    if (!whEdit) return;
+    var v = Number(this.value.replace(/\s/g, '').replace(',', '.'));
+    document.getElementById('whReasonWrap').style.display = isFinite(v) && this.value.trim() !== '' && v !== whEdit.qty ? 'block' : 'none';
+  });
+  function whSave_(more) {
+    var st = document.getElementById('whFormStatus');
+    var name = document.getElementById('whName').value.trim(), qtyS = document.getElementById('whQty').value.trim();
+    var qty = Number(qtyS.replace(/\s/g, '').replace(',', '.'));
+    if (!name) { st.textContent = 'Укажите наименование'; st.className = 'error'; return; }
+    if (!qtyS || !isFinite(qty) || qty < 0) { st.textContent = 'Укажите количество'; st.className = 'error'; return; }
+    var btn = more ? document.getElementById('whSaveMore') : document.getElementById('whSave');
+    var item = { name: name, category: document.getElementById('whCat').value, unit: document.getElementById('whUnit').value, qty: qty,
+      location: document.getElementById('whLoc').value.trim(), comment: document.getElementById('whComment').value.trim() };
+    withUploadedPhotos_(whUp, st, btn, function (urls) {
+      btn.disabled = true; st.className = ''; st.textContent = 'Сохраняю…';
+      var body = whEdit
+        ? { action: 'whUpdateItem', phone: currentUser.phone, id: whEdit.id, item: Object.assign(item, { photos: (whEdit.photos || []).concat(urls) }), reason: document.getElementById('whReason').value.trim() }
+        : { action: 'whAddItem', phone: currentUser.phone, item: Object.assign(item, { photos: urls }) };
+      apiPost(body).then(function (res) {
+        btn.disabled = false;
+        if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не сохранилось'; st.className = 'error'; return; }
+        var saved = res.item;
+        var idx = whItems.findIndex(function (x) { return x.id === saved.id; });
+        if (idx >= 0) whItems[idx] = saved; else whItems.push(saved);
+        toast_(whEdit ? 'Сохранено' : (res.merged ? 'Добавлено к остатку: ' + saved.name + ' — теперь ' + whFmtQty_(saved.qty) + ' ' + saved.unit : 'Добавлено: ' + saved.name), 'ok');
+        if (more) openWhForm_(null, { category: item.category, unit: item.unit, location: item.location });
+        else showWarehouseScreen();
+      }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+    });
+  }
+  document.getElementById('whSave').addEventListener('click', function () { whSave_(false); });
+  document.getElementById('whSaveMore').addEventListener('click', function () { whSave_(true); });
 
   // ===== Строка версий внизу «Профиля» =====
   // Приложение (сборка Android-оболочки) · сервер (CODE_VERSION) · экраны
@@ -4188,7 +4484,7 @@
     var tasksFab = document.getElementById('tasksAddFab');
     if (tasksFab) tasksFab.style.display = isAdmin ? 'flex' : 'none';
     var navExp = document.getElementById('navExpBtn');
-    if (navExp) navExp.classList.toggle('isAdmin', !!isAdmin);
+    if (navExp) navExp.classList.toggle('isAdmin', !!isAdmin || activeRole_() === 'storekeeper');
   }
 
   function refreshAdminStatus() {
@@ -5023,6 +5319,7 @@
     setActiveNav('profile');
     pushScreenState('profile');
     renderVersionLine_();
+    renderRoleCard_(); loadRoles_();
     renderWifiAuto_();
   }
 
@@ -6823,7 +7120,7 @@
 
   // ===== Нижняя навигация — обработчики =====
   document.getElementById('navExpBtn').addEventListener('click', function () {
-    showExpHubScreen();
+    if (activeRole_() === 'storekeeper') showWarehouseScreen(); else showExpHubScreen();
   });
   document.getElementById('navTasksBtn').addEventListener('click', function () {
     showTasksScreen();
