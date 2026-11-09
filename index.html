@@ -750,6 +750,7 @@
   .tmShHead { margin: 14px 2px 8px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   .tmSh .tmName { font-size: 14.5px; }
   .tmMore { margin: 6px 0 0; background: var(--blue); }
+  .tmViewSeg { margin: 0 0 4px; }
   /* ===== Инфографика сотрудника ===== */
   .tiBox { border: 1px solid var(--border); border-radius: 16px; padding: 16px 14px 14px; margin-bottom: 8px; }
   .tiHero { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
@@ -4130,7 +4131,7 @@
   }
 
   // ===== «Мой кабинет» / «Общий» (для администратора) =====
-  var statsMode = 'mine', tmPeriod = 'day', tmDate = null, tmFilter = 'all', tmLast = null, tmObj = '', tmPerson = '';
+  var statsMode = 'mine', tmPeriod = 'day', tmDate = null, tmFilter = 'came', tmLast = null, tmObj = '', tmPerson = '', tmView = 'feed';
   try { tmObj = localStorage.getItem('sevmod_tm_obj') || ''; } catch (e) {}
   // список объектов в фильтре — из данных выбранного дня/месяца
   function tmFillObjects_(res) {
@@ -4190,7 +4191,8 @@
     return tmFmt_(f) + ' – ' + tmFmt_(t) + (f.getFullYear() !== td.getFullYear() ? '.' + f.getFullYear() : '');
   }
   function tmRenderNav_() {
-    if (!tmFrom) { tmFrom = tmToday_(); tmTo = tmToday_(); }
+    // по умолчанию — последние 2 недели по сегодня
+    if (!tmFrom) { tmTo = tmToday_(); tmFrom = new Date(tmTo.getFullYear(), tmTo.getMonth(), tmTo.getDate() - 13); }
     tmDate = tmFrom;
     document.getElementById('tmLabel').textContent = tmRangeLabel_(tmFrom, tmTo);
   }
@@ -4236,7 +4238,7 @@
   }
   function closeCal_(apply) {
     document.getElementById('calSheet').hidden = true;
-    if (apply && calF) { tmFrom = calF; tmTo = calT || calF; tmFilter = 'all'; loadTeam_(); }
+    if (apply && calF) { tmFrom = calF; tmTo = calT || calF; tmFilter = 'came'; loadTeam_(); }
   }
   document.getElementById('tmCalBtn').addEventListener('click', openCal_);
   document.getElementById('calSheet').addEventListener('click', function (e) { if (e.target === this) closeCal_(false); });
@@ -4330,7 +4332,12 @@
       '<div class="tmTile g"><b>' + totalD + '</b><span>смен</span></div>' +
       '<div class="tmTile o"><b>' + lateN + '</b><span>опозданий</span></div>' +
       '<div class="tmTile"><b>' + rows.filter(function (r) { return r.days; }).length + '</b><span>работали</span></div>';
-    list.innerHTML = rows.map(function (r) {
+    var viewSeg = '<div class="segCtl tmViewSeg" id="tmViewSeg"><button type="button" data-v="feed"' + (tmView === 'feed' ? ' class="on"' : '') + '>Лента отметок</button>' +
+      '<button type="button" data-v="people"' + (tmView === 'people' ? ' class="on"' : '') + '>По сотрудникам</button></div>';
+    if (!tmPerson && tmView === 'feed') { list.innerHTML = viewSeg + tmFeedHtml_(res.items); return; }
+    // в сводке — только те, кто отмечался в этом периоде
+    var shown = tmPerson ? rows : rows.filter(function (r) { return r.days || r.hoursNum; });
+    list.innerHTML = (tmPerson ? '' : viewSeg) + (shown.length || tmPerson ? '' : '<div class="statsEmpty">За этот период отметок нет</div>') + shown.map(function (r) {
       var sub = [];
       sub.push('<span>смен: <b>' + r.days + '</b></span>');
       if (r.lateDays) sub.push('<span class="late">опозданий ' + r.lateDays + (r.objOnly ? '' : ' (' + r.lateMinutes + ' мин)') + '</span>');
@@ -4346,6 +4353,46 @@
       list.innerHTML = tmInfoHtml_(rows[0], res.from || tmIso_(tmFrom), res.to || tmIso_(tmTo), res.workdays) + tmShiftsHtml_(rows[0].shifts || []);
     }
   }
+  // Лента отметок за период: все смены всех сотрудников, сверху самые свежие,
+  // с разделителями по дням.
+  function tmFeedHtml_(items) {
+    var all = [];
+    (items || []).forEach(function (r) {
+      (r.shifts || []).forEach(function (x) {
+        if (tmObj && x.object !== tmObj && (x.objects || []).indexOf(tmObj) < 0) return;
+        all.push({ name: r.name, x: x });
+      });
+    });
+    all.sort(function (a, b) {
+      return (b.x.date + (b.x.arrival || b.x.departure || '')).localeCompare(a.x.date + (a.x.arrival || a.x.departure || ''));
+    });
+    if (!all.length) return '<div class="statsEmpty">За этот период отметок нет</div>';
+    var t = tmToday_(), html = '', lastDate = '';
+    all.forEach(function (it) {
+      var x = it.x;
+      if (x.date !== lastDate) {
+        lastDate = x.date;
+        var p = x.date.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]), diff = Math.round((t - d) / 86400000);
+        var cnt = all.filter(function (y) { return y.x.date === x.date; }).length;
+        html += '<div class="tmShHead">' + (diff === 0 ? 'Сегодня, ' : diff === 1 ? 'Вчера, ' : '') + tmFmt_(d) + ', ' + TM_DOW[d.getDay()] + ' · ' + cnt + '</div>';
+      }
+      var right = x.onShift ? '<span class="tmPill g">на смене</span>' : (x.hours ? '<span class="tmPill b">' + escapeHtml(x.hours) + ' ч</span>' : '<span class="tmPill">—</span>');
+      var sub = [];
+      if (x.object) sub.push('<b>' + escapeHtml(x.object) + '</b>');
+      sub.push('<span class="tmTime">' + escapeHtml(x.arrival || '—') + ' – ' + escapeHtml(x.departure || (x.onShift ? 'сейчас' : '—')) + '</span>');
+      if (x.late > 0) sub.push('<span class="late">опоздание ' + x.late + ' мин</span>');
+      if (x.closeNote === 'auto') sub.push('<span class="warn">уход не отмечен</span>');
+      html += '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(it.name) + '</span>' + right + '</div><div class="tmSub">' + sub.join('') + '</div></div>';
+    });
+    return html;
+  }
+  document.getElementById('tmList').addEventListener('click', function (e) {
+    var b = e.target.closest('#tmViewSeg button[data-v]'); if (!b) return;
+    tmView = b.getAttribute('data-v');
+    try { localStorage.setItem('sevmod_tm_view', tmView); } catch (err) {}
+    renderTeam_();
+  });
+  try { tmView = localStorage.getItem('sevmod_tm_view') || 'feed'; } catch (e) {}
   // Выбран сотрудник в режиме дня: сразу подгружаем его месяц (с 1-го числа
   // по выбранный день; если выбрано 1-е — с 1-го прошлого месяца) — итоги и
   // все смены под карточкой дня.
@@ -4454,11 +4501,11 @@
     renderTeam_();
   });
   document.getElementById('tmPersonSel').addEventListener('change', function () {
-    tmPerson = this.value; tmFilter = 'all';
+    tmPerson = this.value; tmFilter = 'came';
     renderTeam_();
   });
   document.getElementById('tmObjSel').addEventListener('change', function () {
-    tmObj = this.value; tmFilter = 'all';
+    tmObj = this.value; tmFilter = 'came';
     try { localStorage.setItem('sevmod_tm_obj', tmObj); } catch (e) {}
     renderTeam_();
   });
