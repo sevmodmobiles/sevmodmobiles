@@ -45,12 +45,35 @@ public class PresenceWorker extends Worker {
             req.put("phone", phone);
             req.put("ip", ip);
             req.put("onWifi", wifi);
+            // имя сети и роутер — по ним сервер узнаёт офис (нужна геолокация «Всегда»)
+            if (wifi) {
+                String[] id = wifiId(c);
+                req.put("ssid", id[0]);
+                req.put("bssid", id[1]);
+            }
             req.put("reason", getInputData().getString("reason") == null ? "tick" : getInputData().getString("reason"));
             AbsenceActionReceiver.post(api, req.toString());
             s.edit().putBoolean("wifi_last_sent", wifi).putLong("wifi_last_at", System.currentTimeMillis()).apply();
             return Result.success();
         } catch (Exception e) {
             return Result.retry();
+        }
+    }
+
+    /** {имя сети, адрес роутера}; пусто, если Android не дал (нет разрешения). */
+    @SuppressWarnings("deprecation")
+    static String[] wifiId(Context c) {
+        try {
+            android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            android.net.wifi.WifiInfo wi = wm != null ? wm.getConnectionInfo() : null;
+            if (wi == null) return new String[] { "", "" };
+            String ssid = wi.getSSID() == null ? "" : wi.getSSID().replace("\"", "");
+            if ("<unknown ssid>".equals(ssid)) ssid = "";
+            String bssid = wi.getBSSID() == null ? "" : wi.getBSSID();
+            if ("02:00:00:00:00:00".equals(bssid)) bssid = "";
+            return new String[] { ssid, bssid };
+        } catch (Exception e) {
+            return new String[] { "", "" };
         }
     }
 
