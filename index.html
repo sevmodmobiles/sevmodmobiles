@@ -4009,7 +4009,7 @@
   // ===== Склад: остатки и ввод позиций (инвентаризация) =====
   var WH_CATS = ['Сухие смеси', 'Листовые материалы', 'Профиль и металл', 'Крепёж', 'Электрика', 'Сантехника', 'Отделка', 'Лакокраска', 'Изоляция', 'Пиломатериалы', 'Кровля и фасад', 'Вентиляция', 'Инструмент', 'Расходники', 'СИЗ и спецодежда', 'Прочее'];
   var WH_UNITS = ['шт', 'м', 'м²', 'м³', 'кг', 'л', 'упак', 'мешок', 'рулон', 'лист', 'компл', 'пог. м'];
-  var whItems = [], whCat = '', whEdit = null, whCatHits = [];
+  var whItems = [], whCat = '', whEdit = null, whCatHits = [], whPending = 0;
   var screenWh = document.getElementById('screenWh'), screenWhItem = document.getElementById('screenWhItem');
   function hideAllScreens_() {
     Array.prototype.forEach.call(document.querySelectorAll('body > div[id^="screen"]'), function (el) { el.style.display = 'none'; });
@@ -4023,6 +4023,7 @@
   }
   function loadWh_() {
     var list = document.getElementById('whList');
+    if (whPending) { renderWh_(); return; }   // идёт фоновое сохранение — показываем локальный список
     var body = { action: 'whGetItems', phone: currentUser && currentUser.phone };
     if (!swrHas_(body)) list.innerHTML = skeletonHtml_(4);
     swrLoad_(body, function (res) {
@@ -4059,6 +4060,7 @@
   });
   document.getElementById('whList').addEventListener('click', function (e) {
     var c = e.target.closest('.whItem'); if (!c) return;
+    if (/^tmp/.test(c.getAttribute('data-id'))) { toast_('Позиция ещё сохраняется — подождите пару секунд', 'ok'); return; }
     var it = whItems.filter(function (x) { return x.id === c.getAttribute('data-id'); })[0];
     if (it) openWhForm_(it);
   });
@@ -4196,20 +4198,40 @@
     var item = { name: name, category: document.getElementById('whCat').value, unit: document.getElementById('whUnit').value, qty: qty,
       location: document.getElementById('whLoc').value.trim(), comment: document.getElementById('whComment').value.trim() };
     withUploadedPhotos_(whUp, st, btn, function (urls) {
-      btn.disabled = true; st.className = ''; st.textContent = 'Сохраняю…';
-      var body = whEdit
-        ? { action: 'whUpdateItem', phone: currentUser.phone, id: whEdit.id, item: Object.assign(item, { photos: (whEdit.photos || []).concat(urls) }), reason: document.getElementById('whReason').value.trim() }
+      var edit = whEdit;
+      var body = edit
+        ? { action: 'whUpdateItem', phone: currentUser.phone, id: edit.id, item: Object.assign(item, { photos: (edit.photos || []).concat(urls) }), reason: document.getElementById('whReason').value.trim() }
         : { action: 'whAddItem', phone: currentUser.phone, item: Object.assign(item, { photos: urls }) };
-      apiPost(body).then(function (res) {
-        btn.disabled = false;
-        if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не сохранилось'; st.className = 'error'; return; }
-        var saved = res.item;
-        var idx = whItems.findIndex(function (x) { return x.id === saved.id; });
-        if (idx >= 0) whItems[idx] = saved; else whItems.push(saved);
-        toast_(whEdit ? 'Сохранено' : (res.merged ? 'Добавлено к остатку: ' + saved.name + ' — теперь ' + whFmtQty_(saved.qty) + ' ' + saved.unit : 'Добавлено: ' + saved.name), 'ok');
-        if (more) openWhForm_(null, { category: item.category, unit: item.unit, location: item.location });
-        else showWarehouseScreen();
-      }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+      // Сохраняем в фоне: список обновляем сразу, форма открывается моментально.
+      var tmp = null, sameRef = null;
+      if (edit) {
+        var ei = whItems.findIndex(function (x) { return x.id === edit.id; });
+        if (ei >= 0) whItems[ei] = Object.assign({}, whItems[ei], body.item);
+      } else {
+        var same = whFindSame_();
+        if (same) { sameRef = same; same.qty = Math.round((same.qty + qty) * 1000) / 1000; }
+        else { tmp = Object.assign({ id: 'tmp' + Date.now(), created: '', updated: '', by: '' }, body.item); whItems.push(tmp); }
+      }
+      whPending++;
+      bgWrite_(body, {
+        failPrefix: 'Не сохранилось «' + name + '»',
+        ok: function (res) { return edit ? 'Сохранено: ' + name : (res.merged ? 'Добавлено к остатку: ' + res.item.name + ' — теперь ' + whFmtQty_(res.item.qty) + ' ' + res.item.unit : 'Добавлено: ' + res.item.name); },
+        done: function (res) {
+          whPending--;
+          var saved = res.item; if (!saved) return;
+          if (tmp) { var ti = whItems.indexOf(tmp); if (ti >= 0) whItems.splice(ti, 1); }
+          var idx = whItems.findIndex(function (x) { return x.id === saved.id; });
+          if (idx >= 0) whItems[idx] = saved; else whItems.push(saved);
+          if (screenWh.style.display === 'block') renderWh_();
+        },
+        rollback: function () {
+          whPending--;
+          if (tmp) { var ri = whItems.indexOf(tmp); if (ri >= 0) whItems.splice(ri, 1); }
+          else if (sameRef) sameRef.qty = Math.round((sameRef.qty - qty) * 1000) / 1000;
+          else if (edit) { var bi = whItems.findIndex(function (x) { return x.id === edit.id; }); if (bi >= 0) whItems[bi] = edit; } if (screenWh.style.display === 'block') renderWh_(); }
+      });
+      if (more) openWhForm_(null, { location: item.location });
+      else showWarehouseScreen();
     });
   }
   document.getElementById('whSave').addEventListener('click', function () { whSave_(false); });
