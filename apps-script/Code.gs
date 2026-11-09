@@ -1,3 +1,4 @@
+// v91: автоотметка по Wi-Fi — последняя проверка (время, Wi-Fi, IP, офис) для диагностики.
 // v90: автоотметка по Wi-Fi офиса (тест): wifiPresence, журнал «Wi-Fi присутствие», закрытие дня по последнему присутствию.
 // v89: «Общий кабинет» — число рабочих дней периода (для инфографики сотрудника).
 // v88: опоздания — от смены объекта, иначе от 10:00; согласованное «Приду позже» учитывается.
@@ -4474,7 +4475,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v90';
+var CODE_VERSION = 'v91';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5613,7 +5614,9 @@ function setWifiAuto(phone, enabled) {
   return { status: 'ok', enabled: !!enabled };
 }
 function getWifiAuto(phone) {
-  return { status: 'ok', enabled: !!wifiProps_(WIFI_AUTO_KEY)[normalizePhone_(phone)] };
+  var p = normalizePhone_(phone), cur = wifiProps_(WIFI_STATE_KEY)[p] || {};
+  var last = cur.last ? { at: Utilities.formatDate(new Date(cur.last.at), 'Europe/Moscow', 'dd.MM HH:mm'), ip: cur.last.ip, onWifi: cur.last.onWifi, office: cur.last.office } : null;
+  return { status: 'ok', enabled: !!wifiProps_(WIFI_AUTO_KEY)[p], last: last };
 }
 
 function wifiPresence(phone, ip, onWifi, reason) {
@@ -5625,9 +5628,11 @@ function wifiPresence(phone, ip, onWifi, reason) {
   var office = onWifi ? officeByIp_(ip) : '';
   var now = new Date(), st = wifiProps_(WIFI_STATE_KEY), cur = st[p] || {};
   var res = { status: 'ok', enabled: true, inOffice: !!office, office: office };
+  // последняя проверка — для диагностики в «Профиле»
+  var lastReport = { at: now.getTime(), ip: ip, onWifi: !!onWifi, office: office, reason: String(reason || '').slice(0, 20) };
   if (office) {
     if (!cur.in || cur.object !== office) wifiLog_(emp.name, p, 'в сети офиса', office, ip, reason || '');
-    cur = { in: true, object: office, since: cur.in ? cur.since : now.getTime(), lastSeen: now.getTime(), ip: ip };
+    cur = { in: true, object: office, since: cur.in ? cur.since : now.getTime(), lastSeen: now.getTime(), ip: ip, last: lastReport };
     st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
     // авто-приход: первый за день, в разумное время
     var h = Number(Utilities.formatDate(now, 'Europe/Moscow', 'H'));
@@ -5641,7 +5646,9 @@ function wifiPresence(phone, ip, onWifi, reason) {
   } else if (cur.in) {
     // время — последнее присутствие в сети; когда заметили выход — в примечании
     wifiLog_(emp.name, p, 'вышел из сети офиса', cur.object, ip, (onWifi ? 'другая сеть Wi-Fi' : 'Wi-Fi отключён') + ', замечено в ' + clockStr_(now), new Date(cur.lastSeen || now));
-    cur.in = false; st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
+    cur.in = false; cur.last = lastReport; st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
+  } else {
+    cur.last = lastReport; st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
   }
   return res;
 }

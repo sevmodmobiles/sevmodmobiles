@@ -23,6 +23,22 @@ public class WifiPresencePlugin extends Plugin {
         call.resolve();
     }
 
+    /** Внешний IP через Wi-Fi (в обход VPN) — для отметки по Wi-Fi офиса. */
+    @PluginMethod
+    public void wifiIp(PluginCall call) {
+        new Thread(() -> {
+            JSObject r = new JSObject();
+            try {
+                android.net.Network n = PresenceWorker.wifiNetwork(getContext());
+                r.put("onWifi", n != null);
+                r.put("ip", n != null ? PresenceWorker.publicIp(n) : "");
+            } catch (Exception e) {
+                r.put("ip", "");
+            }
+            call.resolve(r);
+        }).start();
+    }
+
     @PluginMethod
     public void status(PluginCall call) {
         JSObject r = new JSObject();

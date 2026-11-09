@@ -32,12 +32,14 @@ public class PresenceWorker extends Worker {
         String phone = s.getString("phone", ""), api = s.getString("api", "");
         if (phone.isEmpty() || api.isEmpty()) return Result.success();
         PresenceScheduler.registerNetworkCallback(c); // переживает перезапуск телефона
-        boolean wifi = onWifi(c);
+        Network wifiNet = wifiNetwork(c);
+        boolean wifi = wifiNet != null;
         boolean lastWifi = s.getBoolean("wifi_last_sent", false);
         // не на Wi-Fi и об этом уже сообщали — ничего не делаем
         if (!wifi && !lastWifi) return Result.success();
         try {
-            String ip = wifi ? publicIp() : "";
+            // адрес узнаём именно через Wi-Fi — в обход VPN, если он включён
+            String ip = wifi ? publicIp(wifiNet) : "";
             JSONObject req = new JSONObject();
             req.put("action", "wifiPresence");
             req.put("phone", phone);
@@ -53,16 +55,25 @@ public class PresenceWorker extends Worker {
     }
 
     static boolean onWifi(Context c) {
-        ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm == null) return false;
-        Network n = cm.getActiveNetwork();
-        if (n == null) return false;
-        NetworkCapabilities nc = cm.getNetworkCapabilities(n);
-        return nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        return wifiNetwork(c) != null;
     }
 
-    static String publicIp() throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL("https://api.ipify.org").openConnection();
+    /** Подключённая сеть Wi-Fi (не VPN) или null. */
+    static Network wifiNetwork(Context c) {
+        ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return null;
+        for (Network n : cm.getAllNetworks()) {
+            NetworkCapabilities nc = cm.getNetworkCapabilities(n);
+            if (nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                && !nc.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return n;
+        }
+        return null;
+    }
+
+    static String publicIp(Network net) throws Exception {
+        URL u = new URL("https://api.ipify.org");
+        HttpURLConnection c = (HttpURLConnection) (net != null ? net.openConnection(u) : u.openConnection());
         c.setConnectTimeout(6000);
         c.setReadTimeout(6000);
         try (InputStream in = c.getInputStream()) {

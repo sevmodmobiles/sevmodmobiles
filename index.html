@@ -3137,7 +3137,12 @@
   function getPublicIp_(fresh) {
     if (!fresh && ipCache && Date.now() - ipCache.at < 90000) return Promise.resolve(ipCache.ip);
     if (ipPromise) return ipPromise;
-    ipPromise = fetchIpFrom_('https://api.ipify.org?format=json').then(function (ip) {
+    // в Android-приложении — адрес именно через Wi-Fi (в обход VPN)
+    var WP = nativePlugin_('WifiPresence');
+    var viaWifi = WP && WP.wifiIp ? WP.wifiIp().then(function (r) { return r && r.ip || ''; }).catch(function () { return ''; }) : Promise.resolve('');
+    ipPromise = viaWifi.then(function (ip) {
+      return ip || fetchIpFrom_('https://api.ipify.org?format=json');
+    }).then(function (ip) {
       return ip || fetchIpFrom_('https://ipinfo.io/json');
     }).then(function (ip) {
       ipPromise = null;
@@ -3657,6 +3662,10 @@
     apiPost({ action: 'getWifiAuto', phone: currentUser.phone }).then(function (r) {
       var on = !!(r && r.enabled);
       document.getElementById('wifiAutoInput').checked = on;
+      var hint = document.getElementById('wifiAutoHint'), l = r && r.last;
+      hint.textContent = !on ? 'тест: приход — при подключении к Wi-Fi офиса, уход — по последнему присутствию в сети (закрытие дня в 22:00)'
+        : !l ? 'Последняя проверка: ещё не было — телефон проверяет сеть раз в ~15 минут и при смене сети'
+        : 'Последняя проверка: ' + l.at + ' · ' + (l.onWifi ? 'Wi-Fi, IP ' + (l.ip || '—') + ' · ' + (l.office ? 'офис «' + l.office + '»' : 'не офис') : 'не на Wi-Fi');
       // сервер помнит «включено» — убедимся, что фоновая проверка на телефоне идёт
       (on ? WP.start() : WP.stop()).catch(function () {});
     }).catch(function () {});
