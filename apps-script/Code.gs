@@ -1,3 +1,4 @@
+// v92: getWifiAuto отдаёт объекты с Wi-Fi (кнопка «Запомнить эту сеть» в «Профиле»).
 // v91: автоотметка по Wi-Fi — последняя проверка (время, Wi-Fi, IP, офис) для диагностики.
 // v90: автоотметка по Wi-Fi офиса (тест): wifiPresence, журнал «Wi-Fi присутствие», закрытие дня по последнему присутствию.
 // v89: «Общий кабинет» — число рабочих дней периода (для инфографики сотрудника).
@@ -4475,7 +4476,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v91';
+var CODE_VERSION = 'v92';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5616,7 +5617,17 @@ function setWifiAuto(phone, enabled) {
 function getWifiAuto(phone) {
   var p = normalizePhone_(phone), cur = wifiProps_(WIFI_STATE_KEY)[p] || {};
   var last = cur.last ? { at: Utilities.formatDate(new Date(cur.last.at), 'Europe/Moscow', 'dd.MM HH:mm'), ip: cur.last.ip, onWifi: cur.last.onWifi, office: cur.last.office } : null;
-  return { status: 'ok', enabled: !!wifiProps_(WIFI_AUTO_KEY)[p], last: last };
+  // объекты, у которых задан Wi-Fi, — для кнопки «Запомнить эту сеть»
+  var offices = [];
+  try {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
+    if (sh && sh.getLastRow() >= 2 && sh.getLastColumn() >= OBJ_COL.WIFI) {
+      sh.getRange(2, 1, sh.getLastRow() - 1, OBJ_COL.WIFI).getValues().forEach(function (r) {
+        if (String(r[0]).trim() && splitIps_(r[OBJ_COL.WIFI - 1]).length) offices.push(String(r[0]).trim());
+      });
+    }
+  } catch (e) {}
+  return { status: 'ok', enabled: !!wifiProps_(WIFI_AUTO_KEY)[p], last: last, offices: offices };
 }
 
 function wifiPresence(phone, ip, onWifi, reason) {

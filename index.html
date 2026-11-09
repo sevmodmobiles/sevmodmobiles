@@ -2168,6 +2168,10 @@
         <input id="wifiAutoInput" type="checkbox">
         <span>Автоотметка по Wi-Fi офиса <small id="wifiAutoHint">тест: приход — при подключении к Wi-Fi офиса, уход — по последнему присутствию в сети (закрытие дня в 22:00)</small></span>
       </label>
+      <div id="wifiLearn" style="display:none; margin-top:8px;">
+        <div class="tmFilters" style="margin-bottom:6px;"><select id="wifiLearnObj"></select></div>
+        <button type="button" id="wifiLearnBtn" style="background:var(--blue);">Это Wi-Fi офиса — запомнить</button>
+      </div>
     </div>
     <div class="card">
       <h2 style="margin-top:0;">Отсутствия</h2>
@@ -3666,10 +3670,31 @@
       hint.textContent = !on ? 'тест: приход — при подключении к Wi-Fi офиса, уход — по последнему присутствию в сети (закрытие дня в 22:00)'
         : !l ? 'Последняя проверка: ещё не было — телефон проверяет сеть раз в ~15 минут и при смене сети'
         : 'Последняя проверка: ' + l.at + ' · ' + (l.onWifi ? 'Wi-Fi, IP ' + (l.ip || '—') + ' · ' + (l.office ? 'офис «' + l.office + '»' : 'не офис') : 'не на Wi-Fi');
+      // на Wi-Fi, но сеть не узнана — можно запомнить её как Wi-Fi офиса
+      var learn = document.getElementById('wifiLearn');
+      var canLearn = on && l && l.onWifi && !l.office && l.ip && (r.offices || []).length;
+      learn.style.display = canLearn ? 'block' : 'none';
+      if (canLearn) {
+        learn.setAttribute('data-ip', l.ip);
+        document.getElementById('wifiLearnObj').innerHTML = r.offices.map(function (o) { return '<option>' + escapeHtml(o) + '</option>'; }).join('');
+      }
       // сервер помнит «включено» — убедимся, что фоновая проверка на телефоне идёт
       (on ? WP.start() : WP.stop()).catch(function () {});
     }).catch(function () {});
   }
+  document.getElementById('wifiLearnBtn').addEventListener('click', function () {
+    var btn = this, ip = document.getElementById('wifiLearn').getAttribute('data-ip'), obj = document.getElementById('wifiLearnObj').value;
+    if (!ip || !obj) return;
+    btn.disabled = true;
+    apiPost({ action: 'adminSetObjectWifi', phone: currentUser.phone, objectName: obj, ip: ip, mode: 'add' }).then(function (r) {
+      btn.disabled = false;
+      if (!r || r.status !== 'ok') { toast_((r && r.message) || 'Не удалось сохранить', 'error'); return; }
+      toast_('Сеть ' + ip + ' запомнена как Wi-Fi «' + obj + '»', 'ok');
+      document.getElementById('wifiLearn').style.display = 'none';
+      var WP = nativePlugin_('WifiPresence'); if (WP) WP.start().catch(function () {}); // сразу перепроверить
+      setTimeout(renderWifiAuto_, 15000);
+    }).catch(function () { btn.disabled = false; toast_('Нет связи с сервером', 'error'); });
+  });
   document.getElementById('wifiAutoInput').addEventListener('change', function () {
     var box = this, want = box.checked, WP = nativePlugin_('WifiPresence');
     if (!WP) return;
