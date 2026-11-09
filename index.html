@@ -810,6 +810,10 @@
   .whHits { display: flex; flex-direction: column; gap: 4px; margin: -6px 0 8px; }
   .whHits button { margin: 0; padding: 8px 10px; text-align: left; font-size: 13.5px; font-weight: 600; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px; }
   .whHits button small { color: var(--muted); font-weight: 500; margin-left: 6px; }
+  .whHits { max-height: 320px; overflow-y: auto; }
+  .whHits button.cat { font-weight: 500; }
+  .whHits button.cat small { display: block; margin: 2px 0 0; font-size: 12px; }
+  .whHits .whHitsHead { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 4px 2px 0; }
   .whDup { margin: -4px 0 10px; padding: 9px 11px; border-radius: 10px; background: rgba(66,133,244,.12); font-size: 13px; line-height: 1.4; }
   .verLine { margin-top: 12px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
   .segCtl { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
@@ -3063,7 +3067,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems'], whUpdateItem: ['whGetItems']
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems'], whUpdateItem: ['whGetItems'], whCatalog: []
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -4003,9 +4007,9 @@
   setTimeout(function () { if (currentUser) { applyRoleNav_(); loadRoles_(); } }, 1200);
 
   // ===== Склад: остатки и ввод позиций (инвентаризация) =====
-  var WH_CATS = ['Сухие смеси', 'Листовые материалы', 'Профиль и металл', 'Крепёж', 'Электрика', 'Сантехника', 'Отделка', 'Лакокраска', 'Инструмент', 'Расходники', 'Прочее'];
+  var WH_CATS = ['Сухие смеси', 'Листовые материалы', 'Профиль и металл', 'Крепёж', 'Электрика', 'Сантехника', 'Отделка', 'Лакокраска', 'Изоляция', 'Пиломатериалы', 'Кровля и фасад', 'Вентиляция', 'Инструмент', 'Расходники', 'СИЗ и спецодежда', 'Прочее'];
   var WH_UNITS = ['шт', 'м', 'м²', 'м³', 'кг', 'л', 'упак', 'мешок', 'рулон', 'лист', 'компл', 'пог. м'];
-  var whItems = [], whCat = '', whEdit = null;
+  var whItems = [], whCat = '', whEdit = null, whCatHits = [];
   var screenWh = document.getElementById('screenWh'), screenWhItem = document.getElementById('screenWhItem');
   function hideAllScreens_() {
     Array.prototype.forEach.call(document.querySelectorAll('body > div[id^="screen"]'), function (el) { el.style.display = 'none'; });
@@ -4015,6 +4019,7 @@
     screenWh.style.display = 'block';
     showBottomNav(); setActiveNav('wh'); pushScreenState('wh');
     loadWh_();
+    loadWhCatalog_();
   }
   function loadWh_() {
     var list = document.getElementById('whList');
@@ -4090,11 +4095,51 @@
     renderPhotoGrid(document.getElementById('whPhotosOld'), it ? it.photos : []);
     whUp.reset();
     if (!it) setTimeout(function () { document.getElementById('whName').focus(); }, 50);
+    loadWhCatalog_();
   }
   function whFindSame_() {
     var n = document.getElementById('whName').value.trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
     var u = document.getElementById('whUnit').value;
     return n ? whItems.filter(function (it) { return it.name.trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ') === n && it.unit === u && (!whEdit || it.id !== whEdit.id); })[0] : null;
+  }
+  // Справочник материалов (обезличенный прайс): кэш в localStorage, сверка раз в 12 ч.
+  var WH_CAT_KEY = 'sevmod_wh_catalog_v1', whCatalog = null, whCatalogLoading = false;
+  function whCatNorm_(t) { return String(t || '').toLowerCase().replace(/ё/g, 'е').replace(/(\d)\s*[xхх*]\s*(?=\d)/g, '$1×').replace(/\s+/g, ' ').replace(/(\d) (?=[а-я²³])/g, '$1'); }
+  function whCatalogSet_(items) { whCatalog = items.map(function (r) { return { n: r[0], u: r[1], c: r[2], k: whCatNorm_(r[0]) }; }); }
+  function loadWhCatalog_() {
+    var saved = null;
+    if (!whCatalog) {
+      try { saved = JSON.parse(localStorage.getItem(WH_CAT_KEY) || 'null'); } catch (e) { saved = null; }
+      if (saved && saved.items) whCatalogSet_(saved.items);
+    } else { try { saved = JSON.parse(localStorage.getItem(WH_CAT_KEY) || 'null'); } catch (e) { saved = null; } }
+    if (whCatalogLoading || (saved && saved.t && Date.now() - saved.t < 12 * 3600 * 1000 && whCatalog)) return;
+    whCatalogLoading = true;
+    apiPost({ action: 'whCatalog', phone: currentUser && currentUser.phone, rev: saved && saved.rev }).then(function (res) {
+      whCatalogLoading = false;
+      if (!res || res.status !== 'ok') return;
+      var items = res.same && saved ? saved.items : res.items;
+      if (!items) return;
+      if (!res.same) whCatalogSet_(items);
+      try { localStorage.setItem(WH_CAT_KEY, JSON.stringify({ rev: res.rev, t: Date.now(), items: items })); } catch (e) {}
+      if (screenWhItem.style.display === 'block') whUpdateHints_();
+    }).catch(function () { whCatalogLoading = false; });
+  }
+  function whCatalogSearch_(q, limit) {
+    if (!whCatalog) return [];
+    var words = whCatNorm_(q).trim().split(' ').filter(Boolean);
+    if (!words.length) return [];
+    var out = [];
+    for (var i = 0; i < whCatalog.length; i++) {
+      var it = whCatalog[i], k = it.k, ok = true, score = 0;
+      for (var j = 0; j < words.length; j++) {
+        var p = k.indexOf(words[j]);
+        if (p < 0) { ok = false; break; }
+        if (j === 0) score += p === 0 ? 0 : (k.charAt(p - 1) === ' ' ? 1 : 3);
+      }
+      if (ok) out.push({ it: it, s: score * 1000 + k.length });
+    }
+    out.sort(function (a, b) { return a.s - b.s || a.it.n.localeCompare(b.it.n, 'ru'); });
+    return out.slice(0, limit).map(function (x) { return x.it; });
   }
   function whUpdateHints_() {
     var q = document.getElementById('whName').value.trim().toLowerCase(), hits = document.getElementById('whNameHits'), dup = document.getElementById('whDup');
@@ -4104,14 +4149,30 @@
       dup.innerHTML = 'Такая позиция уже есть: <b>' + whFmtQty_(same.qty) + ' ' + escapeHtml(same.unit) + '</b>' + (same.location ? ' · ' + escapeHtml(same.location) : '') + '. Введённое количество <b>прибавится</b> к остатку.';
     } else dup.style.display = 'none';
     if (whEdit || q.length < 2 || same) { hits.innerHTML = ''; return; }
-    var list = whItems.filter(function (it) { return it.name.toLowerCase().indexOf(q) >= 0; }).slice(0, 5);
-    hits.innerHTML = list.map(function (it) {
+    var qw = whCatNorm_(q).split(' ').filter(Boolean);
+    var list = whItems.filter(function (it) { var k = whCatNorm_(it.name); return qw.every(function (w) { return k.indexOf(w) >= 0; }); }).slice(0, 5);
+    var have = {}; list.forEach(function (it) { have[whCatNorm_(it.name) + '|' + it.unit] = 1; });
+    var cat = whCatalogSearch_(q, 12).filter(function (c) { return !have[c.k + '|' + c.u]; }).slice(0, 8);
+    whCatHits = cat;
+    hits.innerHTML = (list.length ? '<div class="whHitsHead">Уже на складе</div>' : '') + list.map(function (it) {
       return '<button type="button" data-id="' + escapeHtml(it.id) + '">' + escapeHtml(it.name) + '<small>' + whFmtQty_(it.qty) + ' ' + escapeHtml(it.unit) + (it.location ? ' · ' + escapeHtml(it.location) : '') + '</small></button>';
+    }).join('') + (cat.length ? '<div class="whHitsHead">Справочник</div>' : '') + cat.map(function (c, i) {
+      return '<button type="button" class="cat" data-cat="' + i + '">' + escapeHtml(c.n) + '<small>' + escapeHtml(c.u) + (c.c ? ' · ' + escapeHtml(c.c) : '') + '</small></button>';
     }).join('');
   }
   document.getElementById('whName').addEventListener('input', whUpdateHints_);
   document.getElementById('whUnit').addEventListener('change', whUpdateHints_);
   document.getElementById('whNameHits').addEventListener('click', function (e) {
+    var cb = e.target.closest('button[data-cat]');
+    if (cb) {
+      var c = whCatHits[Number(cb.getAttribute('data-cat'))]; if (!c) return;
+      document.getElementById('whName').value = c.n;
+      whFillSelects_(c.c || document.getElementById('whCat').value, c.u);
+      whUpdateHints_();
+      document.getElementById('whNameHits').innerHTML = '';
+      document.getElementById('whQty').focus();
+      return;
+    }
     var b = e.target.closest('button[data-id]'); if (!b) return;
     var it = whItems.filter(function (x) { return x.id === b.getAttribute('data-id'); })[0]; if (!it) return;
     document.getElementById('whName').value = it.name;
