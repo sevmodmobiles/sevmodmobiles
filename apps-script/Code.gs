@@ -1,3 +1,4 @@
+// v101: автоотметка — если телефон в Wi-Fi, но не видит имя сети (нет геолокации «Всегда»), запись в журнал и пуш раз в день.
 // v100: приглашение на установку — не привязано к сотруднику (для новых людей), необязательная пометка «кому».
 // v99: APK на Google Диске (apkUpload от сборки, apkInfo для обновления), одноразовые приглашения на установку.
 // v98: справочник — столбец «Быстрый поиск» (ПП 60×27, ПН 50×40, ГД-35, ГКЛВ…); лист обновляется из catalog-seed.json.
@@ -4505,7 +4506,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v100';
+var CODE_VERSION = 'v101';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5777,7 +5778,16 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
     wifiLog_(emp.name, p, 'вышел из сети объекта', cur.object, ip, (onWifi ? 'другая сеть Wi-Fi' : 'Wi-Fi отключён') + ', замечено в ' + clockStr_(now), new Date(cur.lastSeen || now));
     cur.in = false; cur.last = lastReport; st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
   } else {
-    cur.last = lastReport; st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
+    cur.last = lastReport;
+    // В Wi-Fi, но имя сети и роутер не видны: в фоне Android отдаёт их только
+    // при геолокации «Разрешить всегда». По IP офис не узнан — подсказываем раз в день.
+    var day = toIsoDate_(now);
+    if (onWifi && !ssid && !bssid && cur.hiddenDay !== day) {
+      cur.hiddenDay = day;
+      wifiLog_(emp.name, p, 'сеть не видна', '', ip, 'телефон в Wi-Fi, но имя сети скрыто: нужна геолокация «Разрешить всегда»' + (reason ? ', ' + reason : ''));
+      sendPush_([p], 'Автоотметка не видит Wi-Fi', 'Разрешите SEVMOD доступ к геолокации «Всегда» — без этого телефон не сообщает имя сети. Профиль → Автоотметка.', { screen: 'profile', tag: 'wifi' });
+    }
+    st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
   }
   return res;
 }
