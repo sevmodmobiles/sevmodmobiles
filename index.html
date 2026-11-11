@@ -2284,6 +2284,7 @@
     <div class="card">
       <button id="profilePolicyBtn" type="button" style="background:var(--muted);">Политика обработки персональных данных</button>
       <div id="profileVersion" class="verLine"></div>
+      <button type="button" id="apkCheckBtn" class="apkMini" style="display:none; margin:8px auto 0;">Проверить обновление приложения</button>
     </div>
   </div>
 
@@ -4351,9 +4352,28 @@
     }
     draw();
     var APP = nativePlugin_('App');
-    if (APP) APP.getInfo().then(function (i) { parts.app = 'сборка ' + (i && i.build || '?'); draw(); }).catch(function () {});
+    if (APP) {
+      document.getElementById('apkCheckBtn').style.display = 'block';
+      Promise.all([APP.getInfo(), latestApkBuild_()]).then(function (v) {
+        var mine = Number(v[0] && v[0].build) || 0, latest = Number(v[1]) || 0;
+        parts.app = 'сборка ' + (mine || '?') + (latest > mine ? ' (доступна ' + latest + ')' : ''); draw();
+      }).catch(function () { APP.getInfo().then(function (i) { parts.app = 'сборка ' + (i && i.build || '?'); draw(); }).catch(function () {}); });
+    }
     swrLoad_({ action: 'version' }, function (res) { if (res && res.version) { parts.server = res.version; draw(); } }, function () {});
   }
+
+  // Ручная проверка обновления: без ограничения «раз в 5 минут»
+  document.getElementById('apkCheckBtn').addEventListener('click', function () {
+    var APP = nativePlugin_('App'), btn = this; if (!APP) return;
+    btn.disabled = true; btn.textContent = 'Проверяю…';
+    Promise.all([APP.getInfo(), latestApkBuild_()]).then(function (v) {
+      btn.disabled = false; btn.textContent = 'Проверить обновление приложения';
+      var mine = Number(v[0] && v[0].build) || 0, latest = Number(v[1]) || 0;
+      apkMyBuild = mine;
+      if (latest > mine) { apkUpdateShownFor = latest; showAppUpdate_(latest); }
+      else toast_(latest ? 'Установлена последняя версия (сборка ' + mine + ')' : 'Не удалось узнать последнюю сборку', latest ? 'ok' : 'error');
+    }).catch(function (e) { btn.disabled = false; btn.textContent = 'Проверить обновление приложения'; toast_('Не удалось проверить: ' + ((e && e.message) || 'нет связи'), 'error'); });
+  });
 
   // ===== Push-уведомления (Android-приложение) =====
   // Только в сборке с Firebase (метка SEVMOD-Push в User-Agent). Разрешение
