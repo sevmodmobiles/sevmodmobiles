@@ -145,6 +145,12 @@ public class ApkUpdaterPlugin extends Plugin {
                     }
                 }
                 if (total > 0 && done != total) throw new Exception("download incomplete");
+                // Файл приложения — zip-архив (начинается с «PK»). Если пришла
+                // страница (ошибка/проверка Google Диска) — говорим об этом прямо.
+                try (InputStream chk = new java.io.FileInputStream(apk)) {
+                    byte[] h = new byte[2];
+                    if (chk.read(h) != 2 || h[0] != 'P' || h[1] != 'K') throw new Exception("сервер отдал не файл приложения, а страницу");
+                }
                 if (session) {
                     installWithSession(apk);
                 } else {

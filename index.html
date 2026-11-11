@@ -3857,7 +3857,7 @@
     document.getElementById('cfOk').style.background = '';
   }
   // Скачивание внутри приложения с прогрессом, затем системное окно «Обновить?».
-  var apkStatusSub = null;
+  var apkStatusSub = null, apkAborts = 0;
   function installApkUpdate_(UPD) {
     var ok = document.getElementById('cfOk'), txt = document.getElementById('cfText');
     UPD.canInstall().then(function (r) {
@@ -3875,11 +3875,15 @@
       if (!apkStatusSub) apkStatusSub = UPD.addListener('installStatus', function (st) {
         // 0 — установлено (приложение перезапустится само), 3 — отменено
         if (st.status === 0) return;
-        askConfirm('Обновление не установлено', st.status === 3
+        // Отмена (3) — повтор; если окно установки так и не появилось или отмена
+        // повторилась — скачивание через браузер (видно, что отдаёт сервер файла).
+        apkAborts = st.status === 3 ? apkAborts + 1 : 0;
+        var retry = st.status === 3 && apkAborts < 2;
+        askConfirm('Обновление не установлено', retry
           ? 'Установка отменена. Нажмите «Обновить», чтобы попробовать ещё раз.'
-          : 'Телефон не установил обновление' + (st.message ? ' (' + escapeHtml(st.message) + ')' : '') + '. Нажмите «Скачать» — файл откроется через браузер.',
-          st.status === 3 ? 'Обновить' : 'Скачать', function () {
-            if (st.status === 3) { installApkUpdate_(UPD); return; }
+          : 'Телефон не установил обновление' + (st.message ? ' (' + escapeHtml(st.message) + ')' : '') + '. Нажмите «Скачать» — файл скачается через браузер; откройте его из уведомления о загрузке и нажмите «Установить».',
+          retry ? 'Обновить' : 'Скачать', function () {
+            if (retry) { installApkUpdate_(UPD); return; }
             closeConfirm();
             var BR = nativePlugin_('Browser');
             if (BR) BR.open({ url: APK_URL }); else window.open(APK_URL, '_blank');
