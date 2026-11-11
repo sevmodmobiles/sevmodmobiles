@@ -3898,6 +3898,22 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') setTimeout(checkAppUpdate_, 1500);
   });
+  // Автоотметка по Wi-Fi: при каждом открытии приложения (не чаще раза в 10 минут)
+  // заново ставим фоновую проверку и сразу проверяем сеть — на случай, если
+  // телефон (экономия батареи, обновление) её снял.
+  var wifiKickAt = 0;
+  function wifiKick_() {
+    var WP = nativePlugin_('WifiPresence');
+    if (!WP || !WP.status || !currentUser || Date.now() - wifiKickAt < 10 * 60 * 1000) return;
+    wifiKickAt = Date.now();
+    var SS = nativePlugin_('SevmodSession');
+    if (SS) SS.setSession({ phone: currentUser.phone, apiUrl: API_URL }).catch(function () {});
+    WP.status().then(function (st) { if (st && st.enabled) return WP.start(); }).catch(function () {});
+  }
+  setTimeout(wifiKick_, 5000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') setTimeout(wifiKick_, 2000);
+  });
 
   // ===== Свежая версия экранов =====
   // Телефон держит страницу в кэше до 10 минут (так отдаёт GitHub Pages).

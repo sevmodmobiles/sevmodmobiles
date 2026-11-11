@@ -55,6 +55,16 @@
         <receiver
             android:name=".NetworkChangeReceiver"
             android:exported="false" />
+        <!-- Автоотметка: после перезагрузки телефона и обновления приложения
+             фоновая проверка запускается заново -->
+        <receiver
+            android:name=".PresenceRestartReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <!-- Ответ системного установщика при обновлении приложения -->
         <receiver
             android:name=".InstallResultReceiver"
@@ -87,6 +97,7 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- Push-уведомления (Android 13+ спрашивает разрешение) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>

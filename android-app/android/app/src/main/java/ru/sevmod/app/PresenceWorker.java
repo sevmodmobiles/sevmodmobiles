@@ -39,7 +39,9 @@ public class PresenceWorker extends Worker {
         if (!wifi && !lastWifi) return Result.success();
         try {
             // адрес узнаём именно через Wi-Fi — в обход VPN, если он включён
-            String ip = wifi ? publicIp(wifiNet) : "";
+            // IP — не обязателен: офис узнаётся по имени сети/роутеру; сбой сервиса IP не должен срывать отметку
+            String ip = "";
+            if (wifi) { try { ip = publicIp(wifiNet); } catch (Exception e) { ip = ""; } }
             JSONObject req = new JSONObject();
             req.put("action", "wifiPresence");
             req.put("phone", phone);

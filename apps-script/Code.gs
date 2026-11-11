@@ -1,3 +1,4 @@
+// v102: автоотметка — в журнал пишется и Wi-Fi, который не узнан как объект (раз в день на сеть), для диагностики.
 // v101: автоотметка — если телефон в Wi-Fi, но не видит имя сети (нет геолокации «Всегда»), запись в журнал и пуш раз в день.
 // v100: приглашение на установку — не привязано к сотруднику (для новых людей), необязательная пометка «кому».
 // v99: APK на Google Диске (apkUpload от сборки, apkInfo для обновления), одноразовые приглашения на установку.
@@ -4506,7 +4507,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v101';
+var CODE_VERSION = 'v102';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5782,6 +5783,12 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
     // В Wi-Fi, но имя сети и роутер не видны: в фоне Android отдаёт их только
     // при геолокации «Разрешить всегда». По IP офис не узнан — подсказываем раз в день.
     var day = toIsoDate_(now);
+    // Wi-Fi с именем, но ни к одному объекту не подходит — раз в день на сеть пишем в журнал
+    var nk = day + '|' + (ssid || '') + '|' + (bssid || ip || '');
+    if (onWifi && (ssid || bssid) && cur.unkKey !== nk) {
+      cur.unkKey = nk;
+      wifiLog_(emp.name, p, 'Wi-Fi не узнан', '', ip, (ssid ? '«' + ssid + '»' : 'без имени') + (bssid ? ' (' + bssid + ')' : '') + (reason ? ', ' + reason : ''));
+    }
     if (onWifi && !ssid && !bssid && cur.hiddenDay !== day) {
       cur.hiddenDay = day;
       wifiLog_(emp.name, p, 'сеть не видна', '', ip, 'телефон в Wi-Fi, но имя сети скрыто: нужна геолокация «Разрешить всегда»' + (reason ? ', ' + reason : ''));
