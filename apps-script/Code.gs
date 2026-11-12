@@ -1,3 +1,4 @@
+// v114: «Сотрудники» — колонки ищутся по заголовкам; роли — чекбоксы «Прораб», «Кладовщик», «Снабжение» (плюс старая текстовая «Роли»).
 // v113: расход «Прочее» (без работника и бригадира — объект, сумма, комментарий, статус); у прораба «Оплачено» пишет его в «Оплатил».
 // v112: подотчёт прораба учитывает и оплаты работникам, где он в «Оплатил»; в «Расходах» прораба — его остаток.
 // v111: раздел «Расходы» для прораба (asForeman) — те же действия, но только по его объектам; сводка и подотчёт — по нему.
@@ -1394,7 +1395,7 @@ function getEmployeeRates() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
   var rates = {};
   if (!sheet || sheet.getLastRow() < 2) return rates;
-  var width = Math.min(Math.max(sheet.getLastColumn(), 5), EMP_COL.SALARY);
+  var width = empWidth_(sheet);
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
   data.forEach(function (row) {
     var name = row[0];
@@ -1626,7 +1627,7 @@ function adminGetEmployees(phone) {
   if (!sheet || sheet.getLastRow() < 2) return { status: 'ok', employees: [] };
 
   ensurePayColumns_(sheet);
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, EMP_COL.SALARY).getValues();
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, empWidth_(sheet)).getValues();
   var employees = data
     .filter(function (row) { return row[0]; })
     .map(function (row) {
@@ -2714,7 +2715,7 @@ function findEmployeeByPhone(phone) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
   if (!sheet || sheet.getLastRow() < 2) return null;
   var normalizedPhone = normalizePhone_(phone);
-  var width = Math.min(Math.max(sheet.getLastColumn(), 5), EMP_COL.SALARY);
+  var width = empWidth_(sheet);
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
   for (var i = 0; i < data.length; i++) {
     if (normalizePhone_(data[i][1]) === normalizedPhone) {
@@ -4600,7 +4601,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v113';
+var CODE_VERSION = 'v114';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4815,11 +4816,38 @@ function setupAutoUpdate() {
 // ===================== ОКЛАД (v67) =====================
 // Лист «Сотрудники»: E — ставка за 8-часовую смену (подневщики),
 // H — тип оплаты, I — оклад за полный рабочий месяц.
-var EMP_COL = { PAY_TYPE: 8, SALARY: 9 };
+// Колонки листа «Сотрудники» ищутся по заголовкам (их можно переставлять);
+// если заголовка нет — старые места: H «Тип оплаты», I «Оклад».
+var EMP_ROLE_HEADERS = { 'прораб': 'foreman', 'кладовщик': 'storekeeper', 'снабжение': 'supply' };
+var EMP_COL_CACHE_ = null;
+function empCol_() {
+  if (EMP_COL_CACHE_) return EMP_COL_CACHE_;
+  var c = { PAY_TYPE: 0, SALARY: 0, ROLES: 0, roleCols: {} };
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
+  if (sh && sh.getLastColumn() > 0) {
+    sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].forEach(function (h, i) {
+      var k = String(h || '').trim().toLowerCase();
+      if (!k) return;
+      if (k.indexOf('тип оплаты') === 0 && !c.PAY_TYPE) c.PAY_TYPE = i + 1;
+      else if (k.indexOf('оклад') === 0 && !c.SALARY) c.SALARY = i + 1;
+      else if (k === 'роли' && !c.ROLES) c.ROLES = i + 1;
+      else if (EMP_ROLE_HEADERS[k] && !c.roleCols[EMP_ROLE_HEADERS[k]]) c.roleCols[EMP_ROLE_HEADERS[k]] = i + 1;
+    });
+  }
+  if (!c.PAY_TYPE) c.PAY_TYPE = 8;
+  if (!c.SALARY) c.SALARY = 9;
+  EMP_COL_CACHE_ = c;
+  return c;
+}
+var EMP_COL = { get PAY_TYPE() { return empCol_().PAY_TYPE; }, get SALARY() { return empCol_().SALARY; } };
+function empWidth_(sheet) { return Math.max(sheet.getLastColumn(), 5, EMP_COL.PAY_TYPE, EMP_COL.SALARY); }
 var PAY_DAILY = 'Подневно', PAY_SALARY = 'Оклад';
 function payTypeOf_(v) { return String(v || '').trim().toLowerCase() === 'оклад' ? PAY_SALARY : PAY_DAILY; }
 function ensurePayColumns_(sheet) {
   if (sheet.getMaxColumns() < EMP_COL.SALARY) sheet.insertColumnsAfter(sheet.getMaxColumns(), EMP_COL.SALARY - sheet.getMaxColumns());
+  // заголовок на месте (возможно, переставлен) — ничего не трогаем
+  if (String(sheet.getRange(1, EMP_COL.PAY_TYPE).getValue()).trim().toLowerCase().indexOf('тип оплаты') === 0 &&
+      String(sheet.getRange(1, EMP_COL.SALARY).getValue()).trim().toLowerCase().indexOf('оклад') === 0) return;
   if (String(sheet.getRange(1, EMP_COL.PAY_TYPE).getValue()).trim() !== 'Тип оплаты') {
     sheet.getRange(1, EMP_COL.PAY_TYPE).setValue('Тип оплаты');
   }
@@ -4907,7 +4935,7 @@ function adminSalaryReport(phone, month) {
   var empSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
   if (!empSheet || empSheet.getLastRow() < 2) return { status: 'ok', month: year + '-' + ('0' + (mon + 1)).slice(-2), people: [] };
   ensurePayColumns_(empSheet);
-  var emps = empSheet.getRange(2, 1, empSheet.getLastRow() - 1, EMP_COL.SALARY).getValues()
+  var emps = empSheet.getRange(2, 1, empSheet.getLastRow() - 1, empWidth_(empSheet)).getValues()
     .filter(function (r) { return r[0] && payTypeOf_(r[EMP_COL.PAY_TYPE - 1]) === PAY_SALARY; })
     .map(function (r) {
       return { name: String(r[0]), phone: normalizePhone_(r[1]), reg: r[2] instanceof Date ? parseIsoDate_(toIsoDate_(r[2])) : null,
@@ -5972,29 +6000,30 @@ function wifiCloseDay_() {
 // Администратор (галочка G) может работать в любой роли.
 var EMP_ROLES_COL = 10;
 var ROLE_KEYS = { 'прораб': 'foreman', 'кладовщик': 'storekeeper', 'снабжение': 'supply', 'снабженец': 'supply' };
-function rolesOf_(phone) {
-  var p = normalizePhone_(phone), out = [];
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
-  if (!sh || sh.getLastRow() < 2) return out;
-  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, Math.min(EMP_ROLES_COL, sh.getMaxColumns())).getValues();
-  for (var i = 0; i < rows.length; i++) {
-    if (normalizePhone_(rows[i][1]) !== p) continue;
-    var adm = rows[i][6] === true || String(rows[i][6]).trim().toUpperCase() === 'TRUE';
-    if (adm) return ['admin', 'storekeeper', 'foreman', 'supply'];
-    String(rows[i][EMP_ROLES_COL - 1] || '').toLowerCase().split(/[,;\s]+/).forEach(function (x) {
-      var k = ROLE_KEYS[x.trim()]; if (k && out.indexOf(k) < 0) out.push(k);
-    });
-    return out;
-  }
+function empRowRoles_(row) {
+  var adm = row[6] === true || String(row[6]).trim().toUpperCase() === 'TRUE';
+  if (adm) return ['admin', 'storekeeper', 'foreman', 'supply'];
+  var c = empCol_(), out = [];
+  Object.keys(c.roleCols).forEach(function (role) {
+    var v = row[c.roleCols[role] - 1];
+    if (v === true || String(v).trim().toUpperCase() === 'TRUE') out.push(role);
+  });
+  if (c.ROLES) String(row[c.ROLES - 1] || '').toLowerCase().split(/[,;\s]+/).forEach(function (x) {
+    var k = ROLE_KEYS[x.trim()]; if (k && out.indexOf(k) < 0) out.push(k);
+  });
   return out;
+}
+function rolesOf_(phone) {
+  var p = normalizePhone_(phone);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
+  if (!sh || sh.getLastRow() < 2) return [];
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(sh.getLastColumn(), 7)).getValues();
+  for (var i = 0; i < rows.length; i++) if (normalizePhone_(rows[i][1]) === p) return empRowRoles_(rows[i]);
+  return [];
 }
 function getMyRoles(phone) {
   var p = normalizePhone_(phone);
   if (!p || !findEmployeeByPhone(p)) return { status: 'error', message: 'Сотрудник не найден' };
-  try {
-    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Сотрудники');
-    if (sh && String(sh.getRange(1, EMP_ROLES_COL).getValue()).trim() !== 'Роли') sh.getRange(1, EMP_ROLES_COL).setValue('Роли');
-  } catch (e) {}
   return { status: 'ok', roles: rolesOf_(p) };
 }
 function hasRole_(phone, role) { var r = rolesOf_(phone); return r.indexOf('admin') >= 0 || r.indexOf(role) >= 0; }
@@ -6276,10 +6305,10 @@ function fmForemen_() {
   if (objSh && objSh.getLastRow() > 1) objSh.getRange(2, 1, objSh.getLastRow() - 1, OBJ_COL.FOREMAN).getValues().forEach(function (r) {
     var fp = normalizePhone_(r[OBJ_COL.FOREMAN - 1]); if (fp && String(r[0]).trim()) (resp[fp] = resp[fp] || []).push(String(r[0]).trim());
   });
-  es.getRange(2, 1, es.getLastRow() - 1, Math.min(EMP_ROLES_COL, es.getMaxColumns())).getValues().forEach(function (r) {
+  es.getRange(2, 1, es.getLastRow() - 1, Math.max(es.getLastColumn(), 7)).getValues().forEach(function (r) {
     var p = normalizePhone_(r[1]), nm = String(r[0]).trim(); if (!p || !nm || seen[p]) return;
-    var roles = String(r[EMP_ROLES_COL - 1] || '').toLowerCase();
-    if (/прораб/.test(roles) || resp[p]) { seen[p] = 1; list.push({ phone: p, name: nm, objects: resp[p] || [] }); }
+    var adm = r[6] === true || String(r[6]).trim().toUpperCase() === 'TRUE';
+    if ((!adm && empRowRoles_(r).indexOf('foreman') >= 0) || resp[p]) { seen[p] = 1; list.push({ phone: p, name: nm, objects: resp[p] || [] }); }
   });
   return list.sort(function (a, b) { return a.name.localeCompare(b.name, 'ru'); });
 }
