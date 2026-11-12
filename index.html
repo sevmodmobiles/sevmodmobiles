@@ -2611,20 +2611,28 @@
       <div class="switchUser"><a id="adminExpenseBackLink">← Расходы</a></div>
     </div>
     <div class="card">
-      <label for="expDateBtn">Дата или период</label>
+      <div class="segCtl" id="expKindSeg" style="display:none; margin:0 0 12px;">
+        <button type="button" data-t="work" class="on">Работы</button>
+        <button type="button" data-t="other">Прочее</button>
+      </div>
+      <label for="expDateBtn" id="expDateLbl">Дата или период</label>
       <button id="expDateBtn" class="dateField" type="button" aria-haspopup="dialog">
         <span id="expDateText">—</span><span class="dateFieldIcon" aria-hidden="true"><svg class="lineIcon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></span>
       </button>
+      <div id="expBrigBlock">
       <label for="expBrigadier" style="margin-top:10px;">Бригадир</label>
       <input id="expBrigadier" type="text" autocomplete="off" placeholder="Необязательно — выберите из списка">
       <div id="expBrigadierErr" class="pickError" hidden></div>
+      </div>
 
       <!-- Без бригадира: один работник и его ставка -->
       <div id="expSingleWrap">
+        <div id="expWorkerBlock">
         <label for="expWorker" style="margin-top:10px;">Работник</label>
         <input id="expWorker" type="text" autocomplete="off" placeholder="Выберите из списка">
         <div id="expWorkerErr" class="pickError" hidden></div>
-        <label for="expRate" style="margin-top:10px;">Ставка, ₽</label>
+        </div>
+        <label for="expRate" style="margin-top:10px;" id="expRateLbl">Ставка, ₽</label>
         <input id="expRate" type="number" inputmode="decimal" min="0" step="any" placeholder="Например: 4000">
       </div>
 
@@ -2640,13 +2648,17 @@
       <label for="expObject" style="margin-top:10px;">Объект</label>
       <input id="expObject" type="text" autocomplete="off" placeholder="Выберите из списка">
       <div id="expObjectErr" class="pickError" hidden></div>
+      <div id="expStatusBlock">
       <label for="expPayStatus" style="margin-top:10px;">Статус</label>
       <div class="statusSelectWrap">
         <span id="expPayStatusDot" class="dot" aria-hidden="true"></span>
         <select id="expPayStatus"><option value="НЕ ОПЛАЧЕНО">НЕ ОПЛАЧЕНО</option></select>
       </div>
+      </div>
+      <div id="expCommentBlock">
       <label for="expComment" style="margin-top:10px;">Комментарий</label>
       <input id="expComment" type="text" maxlength="500" placeholder="Необязательно">
+      </div>
       <div id="expPeriodNote" hidden></div>
       <button id="expSubmitBtn" type="button" style="margin-top:10px;">Добавить в таблицу</button>
       <div id="expStatus"></div>
@@ -8509,6 +8521,9 @@
     screenExpPay.style.display = 'none';
     screenAbsLog.style.display = 'none'; screenSalary.style.display = 'none';
     screenAdminExpense.style.display = 'block';
+    document.getElementById('expKindSeg').style.display = expFmMode_() ? '' : 'none';
+    if (!expFmMode_()) expKind = 'work';
+    applyExpKind_();
     if (!expRange.from) { expRange.from = isoToday_(); expRange.to = expRange.from; }
     renderExpDateField();
     setExpStatus('');
@@ -8518,6 +8533,30 @@
     pushScreenState('adminExpense');
   }
 
+  // Что оплачиваем (у прораба): «Работы» — обычная форма; «Прочее» — без
+  // бригадира и работника, «Сумма» вместо ставки, комментарий перед статусом.
+  var expKind = 'work';
+  function applyExpKind_() {
+    var other = expKind === 'other';
+    Array.prototype.forEach.call(document.getElementById('expKindSeg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-t') === expKind); });
+    document.getElementById('expBrigBlock').style.display = other ? 'none' : '';
+    document.getElementById('expWorkerBlock').style.display = other ? 'none' : '';
+    document.getElementById('expRateLbl').textContent = other ? 'Сумма, ₽' : 'Ставка, ₽';
+    document.getElementById('expRate').placeholder = other ? 'Например: 2500' : 'Например: 4000';
+    document.getElementById('expComment').placeholder = other ? 'Что оплатили: доставка, аренда, расходники…' : 'Необязательно';
+    document.getElementById('expDateLbl').textContent = other ? 'Дата' : 'Дата или период';
+    var st = document.getElementById('expStatusBlock'), cm = document.getElementById('expCommentBlock');
+    if (other) st.parentNode.insertBefore(cm, st); else cm.parentNode.insertBefore(st, cm);
+    if (other) {
+      document.getElementById('expBrigadier').value = ''; document.getElementById('expWorker').value = '';
+      if (expRange.to && expRange.to !== expRange.from) { expRange.to = expRange.from; renderExpDateField(); }
+      try { updateBrigadeMode(); } catch (e) {}
+    }
+  }
+  document.getElementById('expKindSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-t]'); if (!b) return;
+    expKind = b.getAttribute('data-t'); applyExpKind_(); setExpStatus('');
+  });
   function loadExpLookups() {
     swrLoad_({ action: 'adminExpenseLookups', phone: currentUser && currentUser.phone }, function (res) {
         if (res && res.status === 'ok') {
@@ -8929,7 +8968,11 @@
     if (!picksOk) { setExpStatus('Выберите значения из списков', 'error'); return; }
     if (!payload.date) { setExpStatus('Укажите дату', 'error'); return; }
     var whoText;
-    if (expBrigadeMode()) {
+    if (expKind === 'other' && expFmMode_()) {
+      if (!(Number(payload.rate) > 0)) { setExpStatus('Укажите сумму', 'error'); return; }
+      payload.kind = 'other'; payload.worker = ''; payload.brigadier = ''; payload.dateTo = payload.date;
+      whoText = 'Прочее' + (payload.comment ? ' (' + payload.comment + ')' : '');
+    } else if (expBrigadeMode()) {
       var picked = expBrigade.filter(function (m) { return m.checked; });
       if (!picked.length) { setExpStatus('Отметьте хотя бы одного работника бригады', 'error'); return; }
       var noRate = picked.filter(function (m) { return !(Number(String(m.rate).replace(',', '.')) > 0); });
@@ -9431,8 +9474,8 @@
       // В режиме «По бригадам» человек без бригадира — самостоятельная карточка
       // наравне с бригадами (не общая группа «Без бригадира»).
       var isBrigRow = groupByBrig && !!r.brigadier;
-      var key = isBrigRow ? 'b\u0001' + r.brigadier : 'p\u0001' + (r.worker || '(без имени)');
-      var g = groups[key] || (groups[key] = { key: key, name: isBrigRow ? r.brigadier : (r.worker || '(без имени)'), isBrig: isBrigRow,
+      var key = isBrigRow ? 'b\u0001' + r.brigadier : 'p\u0001' + (r.worker || 'Прочее');
+      var g = groups[key] || (groups[key] = { key: key, name: isBrigRow ? r.brigadier : (r.worker || 'Прочее'), isBrig: isBrigRow,
         sum: 0, rows: [], objects: {}, statuses: {}, people: {}, min: '', max: '' });
       var t = Number(r.total) || 0;
       g.sum += t;
@@ -9440,7 +9483,7 @@
       if (r.object) g.objects[r.object] = true;
       var sk = r.status || 'Без статуса';
       g.statuses[sk] = (g.statuses[sk] || 0) + t;
-      var pw = r.worker || '(без имени)';
+      var pw = r.worker || 'Прочее';
       var pp = g.people[pw] || (g.people[pw] = { name: pw, sum: 0, days: {} });
       pp.sum += t;
       if (r.date) pp.days[r.date] = true;
@@ -9455,7 +9498,7 @@
       name: function (a, b) { return String(a.name).localeCompare(String(b.name), 'ru'); }
     }[sortBy] || function (a, b) { return b.sum - a.sum; });
     var total = arr.reduce(function (a, g) { return a + g.sum; }, 0);
-    var peopleCount = {}; list.forEach(function (r) { peopleCount[r.worker || '(без имени)'] = true; });
+    var peopleCount = {}; list.forEach(function (r) { peopleCount[r.worker || 'Прочее'] = true; });
     var nPeople = Object.keys(peopleCount).length;
 
     document.getElementById('expTotals').innerHTML = arr.length
@@ -9547,7 +9590,7 @@
     document.getElementById('expSelCount').textContent = rows.length + ' зап.' + (np > 1 ? ' · ' + np + ' чел.' : '');
   }
   function expSelText_(rows) {
-    var people = {}; rows.forEach(function (r) { people[r.worker || '(без имени)'] = true; });
+    var people = {}; rows.forEach(function (r) { people[r.worker || 'Прочее'] = true; });
     var names = Object.keys(people);
     return '<b>' + escapeHtml(names.slice(0, 3).join(', ')) + (names.length > 3 ? ' и ещё ' + (names.length - 3) : '') + '</b>: ' +
       rows.length + ' зап. на <b>' + money_(rows.reduce(function (a, r) { return a + (Number(r.total) || 0); }, 0)) + '</b>.';
@@ -9795,7 +9838,7 @@
     pcCommon = { payer: last.payer || '', method: last.method || '', bank: last.bank || '', note: '' };
     var by = {}; pcGroups = [];
     rows.forEach(function (r) {
-      var n = r.worker || '(без имени)';
+      var n = r.worker || 'Прочее';
       if (!by[n]) { by[n] = { name: n, rows: [], sum: 0 }; pcGroups.push(by[n]); }
       by[n].rows.push(r); by[n].sum += Number(r.total) || 0;
     });
@@ -10328,7 +10371,7 @@
     // Сжатый список: одна строка на человека (сумма его смен), смены — по раскрытию.
     var groups = {}, gl = [];
     list.forEach(function (r) {
-      var name = r.worker || '(без имени)';
+      var name = r.worker || 'Прочее';
       var g = groups[name];
       if (!g) { g = groups[name] = { name: name, rows: [], sum: 0, min: '', max: '', objects: {}, brigs: {}, statuses: {} }; gl.push(g); }
       g.rows.push(r);
@@ -10417,7 +10460,7 @@
     var name = grp.dataset.name;
     // галочка у имени — выбрать / снять все смены человека
     if (e.target.classList.contains('payGChk')) {
-      var rows = payFiltered_().filter(function (r) { return (r.worker || '(без имени)') === name; });
+      var rows = payFiltered_().filter(function (r) { return (r.worker || 'Прочее') === name; });
       var all = rows.every(function (r) { return paySel[r.row]; });
       rows.forEach(function (r) { if (all) delete paySel[r.row]; else paySel[r.row] = true; });
       renderPay(); return;
@@ -10534,7 +10577,7 @@
   // Бригада — если у записи есть бригадир; человек без бригадира — сам по себе
   // (отдельная единица наравне с бригадами), а не общая группа.
   function allocKey_(r) {
-    return allocBy === 'brig' && r.brigadier ? 'b\u0001' + r.brigadier : 'p\u0001' + (r.worker || '(без имени)');
+    return allocBy === 'brig' && r.brigadier ? 'b\u0001' + r.brigadier : 'p\u0001' + (r.worker || 'Прочее');
   }
   function allocLabel_(k) {
     var p = k.split('\u0001');
@@ -10563,7 +10606,7 @@
   function allocSeq_(g) {
     var per = {}, people = [];
     g.rows.slice().sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); }).forEach(function (r) {
-      var w = r.worker || '(без имени)';
+      var w = r.worker || 'Прочее';
       if (!per[w]) { per[w] = { rows: [], sum: 0 }; people.push(w); }
       per[w].rows.push(r); per[w].sum += Number(r.total) || 0;
     });
@@ -10603,7 +10646,7 @@
       if (allocOff[mk] || allocManual[mk] !== undefined) return;
       var per = {};
       g.rows.forEach(function (r) {
-        var w = r.worker || '(без имени)';
+        var w = r.worker || 'Прочее';
         (per[w] = per[w] || { id: g.key + '\u0001' + w, rows: [], sum: 0 });
         per[w].rows.push(r); per[w].sum += Number(r.total) || 0;
       });
@@ -10708,7 +10751,7 @@
       parts.forEach(function (p2) { paidSum += p2.pay; });
       html += '<div class="allocRG"><div class="h">' + escapeHtml(g.label) + '<span>' + money_(paidSum) + '</span></div>';
       var per = {};
-      paid.forEach(function (r) { var w = r.worker || '(без имени)'; (per[w] = per[w] || { n: 0, sum: 0, dates: [] }); per[w].n++; per[w].sum += Number(r.total) || 0; per[w].dates.push(r.date); });
+      paid.forEach(function (r) { var w = r.worker || 'Прочее'; (per[w] = per[w] || { n: 0, sum: 0, dates: [] }); per[w].n++; per[w].sum += Number(r.total) || 0; per[w].dates.push(r.date); });
       var names = Object.keys(per);
       if (!names.length && !parts.length) html += '<div class="p">ничего не влезло</div>';
       parts.forEach(function (p2) {
