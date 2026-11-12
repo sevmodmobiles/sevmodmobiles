@@ -2733,6 +2733,7 @@
     <div class="card logo-card">
       <h1 style="margin-top:0;">Мои объекты</h1>
       <div class="whoami" id="fmSummary">&nbsp;</div>
+      <div class="switchUser"><a id="fmCabinetLink">Мой кабинет (смены)</a></div>
     </div>
     <div class="card" style="padding:6px;">
       <div class="segCtl" id="fmTab" style="margin:0;">
@@ -4046,6 +4047,8 @@
   };
   function setActiveNav(screenName) {
     var activeId = NAV_ACTIVE_MAP[screenName] || null;
+    if (activeRole_() === 'foreman' && activeId === 'navExpBtn' && /^exp|^expenses$/.test(screenName)) activeId = 'navStatsBtn';
+    else if (activeRole_() === 'foreman' && screenName === 'stats') activeId = 'navExpBtn';
     ['navTasksBtn', 'navStatsBtn', 'navExpBtn', 'navProfileBtn'].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.classList.toggle('active', id === activeId);
@@ -4358,8 +4361,13 @@
     }, function () {});
   }
   // Вкладка в нижней панели: «Расходы» (администратор) или «Склад» (кладовщик).
-  var NAV_EXP_HTML = null;
+  var NAV_EXP_HTML = null, NAV_STATS_HTML = null;
   function applyRoleNav_() {
+    var sb = document.getElementById('navStatsBtn');
+    if (sb) {
+      if (NAV_STATS_HTML === null) NAV_STATS_HTML = sb.innerHTML;
+      sb.innerHTML = activeRole_() === 'foreman' ? '<svg viewBox="0 0 24 24"><path d="M9 21V3h5.5a4.5 4.5 0 0 1 0 9H6"/><path d="M6 16.5h9"/></svg>Расходы' : NAV_STATS_HTML;
+    }
     var b = document.getElementById('navExpBtn'); if (!b) return;
     if (NAV_EXP_HTML === null) NAV_EXP_HTML = b.innerHTML;
     var r = activeRole_(), wh = r === 'storekeeper', fm = r === 'foreman';
@@ -5062,6 +5070,7 @@
   }
   document.getElementById('fmExpNew').addEventListener('click', openFmExp_);
   document.getElementById('fmExpBtn').addEventListener('click', function () { showExpHubScreen(); });
+  document.getElementById('fmCabinetLink').addEventListener('click', function () { showStatsScreen(); });
   document.getElementById('fmeBack').addEventListener('click', function () { fmTab = 'cash'; showFmScreen_(); });
   document.getElementById('fmeSave').addEventListener('click', function () {
     var st = document.getElementById('fmeStatus'), btn = this;
@@ -8434,6 +8443,7 @@
     showTasksScreen();
   });
   document.getElementById('navStatsBtn').addEventListener('click', function () {
+    if (activeRole_() === 'foreman') { showExpHubScreen(); return; }
     showStatsScreen();
   });
   document.getElementById('navProfileBtn').addEventListener('click', function () {
