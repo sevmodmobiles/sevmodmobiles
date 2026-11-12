@@ -2759,12 +2759,7 @@
       <div class="segCtl" id="fmTab" style="margin:0;">
         <button type="button" data-t="att" class="on">Посещаемость</button>
         <button type="button" data-t="rep">Фотоотчёты</button>
-        <button type="button" data-t="cash">Подотчёт</button>
       </div>
-    </div>
-    <div class="card" style="padding:10px;">
-      <button id="fmExpBtn" type="button" style="margin:0 0 8px; background:var(--blue);">Расходы по моим объектам</button>
-      <button id="fmMatReq" type="button" disabled class="fmSoon">Заявка на материалы <small>в разработке</small></button>
     </div>
     <div class="card tasksCard" id="fmCashBox" style="display:none;">
       <div id="fmCashHead"></div>
@@ -4964,6 +4959,7 @@
   // ----- Фотоотчёты -----
   var fmTab = 'att', fmRepDays = 7, fmRepObj = '', fmRepRes = null, fmDayRep = {}, fmMyObjects = [];
   try { fmTab = localStorage.getItem('sevmod_fm_tab') || 'att'; } catch (e) {}
+  if (fmTab !== 'att' && fmTab !== 'rep') fmTab = 'att'; // «Подотчёт» убран — он в «Расходах»
   function fmApplyTab_() {
     segSet_('fmTab', fmTab);
     document.getElementById('fmRepBox').style.display = fmTab === 'rep' ? '' : 'none';
@@ -5090,9 +5086,8 @@
     setTimeout(function () { document.getElementById('fmeAmount').focus(); }, 50);
   }
   document.getElementById('fmExpNew').addEventListener('click', openFmExp_);
-  document.getElementById('fmExpBtn').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('fmCabinetLink').addEventListener('click', function () { showStatsScreen(); });
-  document.getElementById('fmeBack').addEventListener('click', function () { fmTab = 'cash'; showFmScreen_(); });
+  document.getElementById('fmeBack').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('fmeSave').addEventListener('click', function () {
     var st = document.getElementById('fmeStatus'), btn = this;
     var sum = Number(document.getElementById('fmeAmount').value.replace(/\s/g, '').replace(',', '.'));
@@ -5104,7 +5099,7 @@
         btn.disabled = false;
         if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не сохранилось'; st.className = 'error'; return; }
         toast_('Расход ' + fmRub_(sum) + ' записан. Остаток: ' + fmRub_(res.balance), 'ok');
-        fmeUp.reset(); fmTab = 'cash'; showFmScreen_();
+        fmeUp.reset(); showExpHubScreen();
       }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
     });
   });
