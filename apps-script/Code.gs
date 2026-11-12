@@ -1,3 +1,4 @@
+// v121: последнее время в сети объекта, если его нет в состоянии, — из журнала «Wi-Fi присутствие» («вышел из сети объекта»).
 // v120: Wi-Fi — появился в сети другого объекта: смена на прежнем закрывается последним временем в его сети (даже если сеть уже потеряна), затем приход.
 // v119: ежедневная задача прорабу «Фотоотчёт» по каждому его объекту (в 9:00 по будням), закрывается сама при загрузке фотоотчёта.
 // v118: авто-приход по Wi-Fi передаёт в отметку имя сети и роутер (раньше требовалась геолокация, если офис узнан не по IP); отказ пишется в журнал раз в день.
@@ -4609,7 +4610,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v120';
+var CODE_VERSION = 'v121';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5901,7 +5902,7 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
     // Переезд: смена открыта на другом объекте — закрываем её последним временем
     // в его сети (если оно известно и позже начала смены), иначе — сейчас.
     if (os.open && objKey_(os.objectName) !== objKey_(office)) {
-      var lastThere = seen[objKey_(os.objectName)], since = os.since ? Number(os.since) || new Date(os.since).getTime() : 0;
+      var lastThere = seen[objKey_(os.objectName)] || wifiLastSeenFromLog_(p, os.objectName), since = os.since ? Number(os.since) || new Date(os.since).getTime() : 0;
       var at = lastThere && (!since || lastThere > since) && lastThere < now.getTime() ? new Date(lastThere) : now;
       if (wifiCloseShiftAt_(p, emp.name, os.objectName, at, 'авто: появился на «' + office + '» (по Wi-Fi)' + (at === now ? ', время в прежней сети неизвестно' : ''))) {
         wifiLog_(emp.name, p, 'авто-уход', os.objectName, ip, 'переход на «' + office + '», уход в ' + clockStr_(at));
@@ -5944,6 +5945,19 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
   return res;
 }
 
+// Последнее время в сети объекта по журналу: строка «вышел из сети объекта»
+// пишется временем последнего присутствия. Смотрим только последние 300 строк.
+function wifiLastSeenFromLog_(phone, object) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Wi-Fi присутствие');
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var n = Math.min(sh.getLastRow() - 1, 300), v = sh.getRange(sh.getLastRow() - n + 1, 1, n, 5).getValues(), k = objKey_(object);
+  for (var i = v.length - 1; i >= 0; i--) {
+    if (normalizePhone_(v[i][2]) !== phone || objKey_(v[i][4]) !== k) continue;
+    if (String(v[i][3]) === 'вышел из сети объекта' && v[i][0] instanceof Date) return v[i][0].getTime();
+    if (String(v[i][3]) === 'в сети объекта') return 0; // после входа выхода не было
+  }
+  return 0;
+}
 // Был ли сегодня приход (на объекте object, если указан).
 function hadArrivalToday_(phone, object) {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
@@ -5998,7 +6012,7 @@ function wifiCloseDay_() {
       // сегодняшняя смена — только после 22:00; вчерашняя и раньше — сразу
       if (sinceDay >= today && h < WIFI_DAY_CLOSE_HOUR) return;
       // последнее время именно в сети объекта этой смены (если известно)
-      var lastObj = s.seen && s.seen[objKey_(e.objectName)];
+      var lastObj = (s.seen && s.seen[objKey_(e.objectName)]) || wifiLastSeenFromLog_(p, e.objectName);
       var last = new Date(lastObj || s.lastSeen);
       if (last <= new Date(since) || startOfDay_(last).getTime() !== sinceDay.getTime()) return; // в этот день в сети не был
       var emp = findEmployeeByPhone(p);
