@@ -1,3 +1,4 @@
+// v110: подотчёт прорабов — выдача администратором (нал / безнал на ИП, комиссия % — первым расходом), расходы прораба, баланс, расходы по его объектам.
 // v109: прораб — ежедневные фотоотчёты по объектам: Диск «Фотоотчёты/Объект/дата», лист «Фотоотчёты», напоминание в 17:00.
 // v108: прораб — «Мои объекты» (fmAttendance): кто на объектах, где он ответственный (только они), за день.
 // v107: история машин (whTrucks) — приёмки, отправки и переезды из листов «Приёмки» и «Отправки».
@@ -536,6 +537,10 @@ function doPost(e) {
     if (data.action === 'adminApkSetup') return jsonOutput(adminApkSetup(data.phone));
     if (data.action === 'adminCreateInvite') return jsonOutput(adminCreateInvite(data.phone, data.employee));
     if (data.action === 'whObjects') return jsonOutput(whObjects(data.phone));
+    if (data.action === 'adminFmTransfer') return jsonOutput(adminFmTransfer(data.phone, data.foreman, data.amount, data.method, data.taxPct, data.date, data.comment));
+    if (data.action === 'adminFmCash') return jsonOutput(adminFmCash(data.phone));
+    if (data.action === 'fmCash') return jsonOutput(fmCash(data.phone));
+    if (data.action === 'fmAddExpense') return jsonOutput(fmAddExpense(data.phone, data.expense));
     if (data.action === 'fmReport') return jsonOutput(fmReport(data.phone, data.report));
     if (data.action === 'fmReports') return jsonOutput(fmReports(data.phone, data.from, data.to));
     if (data.action === 'fmAttendance') return jsonOutput(fmAttendance(data.phone, data.date));
@@ -2262,9 +2267,9 @@ function uploadPhoto(phone, photo, label) {
   if (typeof photo !== 'string' || photo.indexOf('data:image/') !== 0 || photo.length > 12000000) {
     return { status: 'error', message: 'Неверный файл фото' };
   }
-  var kind = { task: 'задача', before: 'до', after: 'после', wh: 'склад', report: 'отчёт' }[label] || 'фото';
+  var kind = { task: 'задача', before: 'до', after: 'после', wh: 'склад', report: 'отчёт', receipt: 'чек' }[label] || 'фото';
   try {
-    return { status: 'ok', url: savePhoto(photo, emp.name + '_' + kind, label === 'wh' ? 'Фото склада' : label === 'report' ? FM_REP_ROOT : 'Фото задач') };
+    return { status: 'ok', url: savePhoto(photo, emp.name + '_' + kind, label === 'wh' ? 'Фото склада' : label === 'report' ? FM_REP_ROOT : label === 'receipt' ? 'Чеки прорабов' : 'Фото задач') };
   } catch (e) {
     return { status: 'error', message: 'Не удалось сохранить фото: ' + (e && e.message || e) };
   }
@@ -4374,6 +4379,8 @@ function cashOverview_(rows) {
     var h = h_(r[10]);
     if (h) h.paid += Number(r[5]) || 0;
   });
+  // расходы прорабов из подотчёта (включая комиссию за ведение ИП)
+  fmExpRows_().forEach(function (e) { var h = holders[e.by]; if (h) h.paid += e.amount; });
   return {
     holders: order.map(function (k) {
       var h = holders[k];
@@ -4523,7 +4530,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v109';
+var CODE_VERSION = 'v110';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6155,6 +6162,149 @@ function fmAttendance(phone, dateIso) {
   var names = all ? Object.keys(groups) : mine;
   return { status: 'ok', date: res.date, today: res.today, all: all,
     groups: names.sort(function (a, b) { return a.localeCompare(b, 'ru'); }).map(function (n) { return { object: n, people: groups[n] || [] }; }) };
+}
+// ----- Подотчёт прорабов -----
+// Выдача: строка в «Подотчёт» (Компания → прораб). Комиссия за ведение ИП
+// (по умолчанию 7% при безнале) сразу записывается первым расходом прораба.
+// Расходы прораба — лист «Расходы прорабов»; остаток = получил − передал − расходы
+// (− оплаты работникам, где он указан в «Оплатил»).
+var FM_EXP_SHEET = 'Расходы прорабов';
+var FM_EXP_HEADERS = ['Дата', 'Прораб', 'Телефон', 'Объект', 'Статья', 'Сумма', 'Способ', 'Комментарий', 'Чеки', 'Записано', 'Кто записал'];
+var FM_EXP_CATS = ['Материалы', 'Инструмент', 'Доставка / транспорт', 'Работы / услуги', 'Питание', 'Аренда', 'Прочее'];
+var FM_FEE_CAT = 'Комиссия за ведение ИП';
+function fmExpSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(FM_EXP_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(FM_EXP_SHEET);
+    sh.getRange(1, 1, 1, FM_EXP_HEADERS.length).setValues([FM_EXP_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function fmExpRows_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FM_EXP_SHEET), out = [];
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, FM_EXP_HEADERS.length).getValues().forEach(function (r, i) {
+    var amt = Number(r[5]) || 0; if (!amt) return;
+    out.push({ row: i + 2, date: r[0] instanceof Date ? toIsoDate_(r[0]) : '', by: String(r[1] || '').trim(), phone: normalizePhone_(r[2]),
+      object: String(r[3] || ''), cat: String(r[4] || ''), amount: amt, method: String(r[6] || ''), comment: String(r[7] || ''), photos: urlsToArray_(r[8]) });
+  });
+  return out;
+}
+function fmAddExpRow_(date, emp, phone, obj, cat, amount, method, comment, photos, who) {
+  var sh = fmExpSheet_();
+  sh.appendRow([date, emp, "'" + phone, obj, cat, amount, method, comment, (photos || []).join(', '), new Date(), who]);
+  var r = sh.getLastRow();
+  sh.getRange(r, 1).setNumberFormat('dd.MM.yyyy'); sh.getRange(r, 6).setNumberFormat('#,##0.00 ₽'); sh.getRange(r, 10).setNumberFormat('dd.MM.yyyy HH:mm');
+}
+function fmMoney_(v) { var n = Math.round(Number(String(v === undefined || v === null ? '' : v).replace(/\s/g, '').replace(',', '.')) * 100) / 100; return isFinite(n) ? n : NaN; }
+// Прорабы для выдачи: у кого роль «прораб» в «Сотрудниках» или кто ответственный на объекте.
+function fmForemen_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), es = ss.getSheetByName('Сотрудники'), list = [], seen = {};
+  if (!es || es.getLastRow() < 2) return list;
+  var objSh = ss.getSheetByName('Объекты'), resp = {};
+  if (objSh && objSh.getLastRow() > 1) objSh.getRange(2, 1, objSh.getLastRow() - 1, OBJ_COL.FOREMAN).getValues().forEach(function (r) {
+    var fp = normalizePhone_(r[OBJ_COL.FOREMAN - 1]); if (fp && String(r[0]).trim()) (resp[fp] = resp[fp] || []).push(String(r[0]).trim());
+  });
+  es.getRange(2, 1, es.getLastRow() - 1, Math.min(EMP_ROLES_COL, es.getMaxColumns())).getValues().forEach(function (r) {
+    var p = normalizePhone_(r[1]), nm = String(r[0]).trim(); if (!p || !nm || seen[p]) return;
+    var roles = String(r[EMP_ROLES_COL - 1] || '').toLowerCase();
+    if (/прораб/.test(roles) || resp[p]) { seen[p] = 1; list.push({ phone: p, name: nm, objects: resp[p] || [] }); }
+  });
+  return list.sort(function (a, b) { return a.name.localeCompare(b.name, 'ru'); });
+}
+function fmBalanceOf_(name, phone, exps) {
+  var received = 0, given = 0, spent = 0, moves = [];
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CASH_SHEET_NAME);
+  if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, CASH_HEADERS.length).getValues().forEach(function (v) {
+    var amt = Number(v[3]) || 0; if (!amt) return;
+    var f = String(v[1] || '').trim(), t = String(v[2] || '').trim();
+    if (t === name) { received += amt; moves.push({ kind: 'in', date: v[0] instanceof Date ? toIsoDate_(v[0]) : '', amount: amt, from: f, method: String(v[4] || ''), comment: String(v[5] || '') }); }
+    else if (f === name) { given += amt; moves.push({ kind: 'out', date: v[0] instanceof Date ? toIsoDate_(v[0]) : '', amount: amt, to: t, method: String(v[4] || ''), comment: String(v[5] || '') }); }
+  });
+  var mine = (exps || fmExpRows_()).filter(function (e) { return e.phone === phone || (!e.phone && e.by === name); });
+  mine.forEach(function (e) { spent += e.amount; });
+  var r2 = function (x) { return Math.round(x * 100) / 100; };
+  return { received: r2(received), given: r2(given), spent: r2(spent), balance: r2(received - given - spent), moves: moves, expenses: mine };
+}
+function adminFmTransfer(phone, foremanPhone, amount, method, taxPct, dateIso, comment) {
+  var auth = adminAuth_(phone); if (!auth.ok) return { status: 'error', message: auth.error };
+  var fp = normalizePhone_(foremanPhone), emp = fp && findEmployeeByPhone_(fp);
+  if (!emp) return { status: 'error', message: 'Прораб не найден' };
+  var sum = fmMoney_(amount), pct = fmMoney_(taxPct === '' || taxPct === undefined ? 0 : taxPct);
+  if (!(sum > 0) || sum > 100000000) return { status: 'error', message: 'Укажите сумму' };
+  if (!(pct >= 0 && pct < 50)) return { status: 'error', message: 'Неверный процент' };
+  var cash = method === 'нал';
+  var date = parseIsoDate_(dateIso) || startOfDay_(new Date());
+  var fee = Math.round(sum * pct) / 100, who = findEmployeeByPhone_(auth.phone), whoName = who ? who.name : auth.phone;
+  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    var sh = getCashSheet_(), row = sh.getLastRow() + 1;
+    var note = String(comment || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    sh.getRange(row, 1, 1, CASH_HEADERS.length).setValues([[date, CASH_COMPANY, emp.name, sum, cash ? 'наличные' : 'безнал (ИП)',
+      (note ? note + ' · ' : '') + (fee ? 'комиссия ' + String(pct).replace('.', ',') + '% = ' + fee : 'без комиссии'), whoName, new Date()]]);
+    sh.getRange(row, 1).setNumberFormat('dd.MM.yyyy'); sh.getRange(row, 4).setNumberFormat('#,##0 ₽'); sh.getRange(row, 8).setNumberFormat('dd.MM.yyyy HH:mm');
+    if (fee > 0) fmAddExpRow_(date, emp.name, fp, '', FM_FEE_CAT, fee, cash ? 'наличные' : 'безнал', String(pct).replace('.', ',') + '% от ' + sum, [], 'авто');
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+  var b = fmBalanceOf_(emp.name, fp);
+  try { sendPush_([fp], 'Подотчётные средства', 'Получено ' + sum + ' ₽' + (fee ? ', комиссия ' + fee + ' ₽' : '') + '. Остаток: ' + b.balance + ' ₽', { screen: 'fm', tag: 'cash' }); } catch (e) {}
+  return { status: 'ok', fee: fee, net: Math.round((sum - fee) * 100) / 100, balance: b.balance };
+}
+// Для администратора: прорабы и их остатки.
+function adminFmCash(phone) {
+  var auth = adminAuth_(phone); if (!auth.ok) return { status: 'error', message: auth.error };
+  var exps = fmExpRows_();
+  return { status: 'ok', defaultPct: 7, foremen: fmForemen_().map(function (f) {
+    var b = fmBalanceOf_(f.name, f.phone, exps);
+    return { phone: f.phone, name: f.name, objects: f.objects, received: b.received, spent: b.spent, balance: b.balance };
+  }) };
+}
+// Расходы по объектам прораба из общей таблицы расходов (только его объекты).
+function fmLaborRows_(objs) {
+  var lay = expenseLayout_(); if (lay.error) return [];
+  var keys = {}; objs.forEach(function (o) { keys[objKey_(o)] = 1; });
+  var sheet = lay.sheet, cols = lay.cols, first = lay.headerRow + 1, last = expenseLastDataRow_(sheet, lay), out = [];
+  if (last < first) return out;
+  var data = sheet.getRange(first, 1, last - first + 1, sheet.getLastColumn()).getValues();
+  var v_ = function (row, c) { return c ? row[c - 1] : ''; };
+  data.forEach(function (row) {
+    var obj = String(v_(row, cols.object) || '').trim(); if (!keys[objKey_(obj)]) return;
+    var worker = String(v_(row, cols.worker) || '').trim(), rate = Number(v_(row, cols.rate)) || 0; if (!worker && !rate) return;
+    var cnt = Number(v_(row, cols.count)) || 1, total = Number(v_(row, cols.total));
+    if (!isFinite(total) || v_(row, cols.total) === '') total = rate * cnt;
+    var d = v_(row, cols.date);
+    out.push({ date: d instanceof Date ? toIsoDate_(d) : '', worker: worker, object: obj, total: total, status: String(v_(row, cols.status) || '').trim(), comment: String(v_(row, cols.comment) || '').trim() });
+  });
+  return out.sort(function (a, b) { return b.date.localeCompare(a.date); }).slice(0, 300);
+}
+// Для прораба: остаток, поступления, его расходы и расходы по его объектам.
+function fmCash(phone) {
+  var p = normalizePhone_(phone), emp = p && findEmployeeByPhone_(p);
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
+  if (!hasRole_(p, 'foreman')) return { status: 'error', message: 'Раздел для прорабов' };
+  var b = fmBalanceOf_(emp.name, p), objs = fmObjects_(p);
+  return { status: 'ok', name: emp.name, objects: objs, cats: FM_EXP_CATS, balance: b.balance, received: b.received, spent: b.spent, given: b.given,
+    moves: b.moves.reverse().slice(0, 100), expenses: b.expenses.reverse().slice(0, 300).map(function (e) { delete e.phone; return e; }),
+    labor: objs.length ? fmLaborRows_(objs) : [] };
+}
+function fmAddExpense(phone, ex) {
+  var p = normalizePhone_(phone), emp = p && findEmployeeByPhone_(p);
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
+  if (!hasRole_(p, 'foreman')) return { status: 'error', message: 'Раздел для прорабов' };
+  ex = ex || {};
+  var sum = fmMoney_(ex.amount), obj = String(ex.object || '').trim();
+  if (!(sum > 0) || sum > 10000000) return { status: 'error', message: 'Укажите сумму' };
+  var objs = fmObjects_(p);
+  if (obj && !objs.some(function (o) { return objKey_(o) === objKey_(obj); })) return { status: 'error', message: 'Объект «' + obj + '» — не ваш' };
+  var cat = FM_EXP_CATS.indexOf(String(ex.cat)) >= 0 ? String(ex.cat) : 'Прочее';
+  var photos = (Array.isArray(ex.photos) ? ex.photos : []).filter(isUploadedPhotoUrl_).slice(0, 10);
+  var date = parseIsoDate_(ex.date) || startOfDay_(new Date());
+  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    fmAddExpRow_(date, emp.name, p, obj, cat, sum, ex.method === 'безнал' ? 'безнал' : 'наличные', String(ex.comment || '').trim().slice(0, 500), photos, emp.name);
+  } finally { lock.releaseLock(); }
+  return { status: 'ok', balance: fmBalanceOf_(emp.name, p).balance };
 }
 // ----- Фотоотчёты прораба -----
 // Фото загружаются по одному (uploadPhoto, label 'report') в «Фотоотчёты»,

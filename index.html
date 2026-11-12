@@ -1705,6 +1705,24 @@
   .frHead span { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
   .frCard .photoGrid { display: flex; margin-top: 8px; }
   .frCmt { margin-top: 8px; font-size: 14px; line-height: 1.4; }
+  .fmSoon { margin: 0; opacity: .55; background: var(--muted); }
+  .fmSoon small { display: block; font-size: 12px; font-weight: 600; opacity: .9; }
+  .fcBal { text-align: center; padding: 6px 0 12px; }
+  .fcBal b { display: block; font-size: 36px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .fcBal b.neg { color: var(--red); }
+  .fcBal span { font-size: 13px; color: var(--muted); }
+  .fcOp { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .fcOp:last-child { border-bottom: 0; }
+  .fcOp .fcM { flex: 1; min-width: 0; }
+  .fcOp .fcT { font-weight: 600; font-size: 14.5px; }
+  .fcOp .fcS { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .fcOp .fcA { font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .fcOp .fcA.in { color: var(--green); }
+  .fcOp .photoGrid { display: flex; margin-top: 6px; }
+  .fcaRow { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 14.5px; }
+  .fcaRow:last-child { border-bottom: 0; }
+  .fcaRow b { white-space: nowrap; }
+  .fcaRow small { display: block; color: var(--muted); font-size: 12px; }
   .whTag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: rgba(66,133,244,.13); color: var(--blue); margin-left: 6px; vertical-align: 1px; }
   #bottomNavInner {
     width: 100%;
@@ -2172,6 +2190,10 @@
 
       <div class="card">
         <button id="goToSalaryBtn" type="button" style="background: var(--blue);">Окладники: отчёт</button>
+      </div>
+
+      <div class="card">
+        <button id="goToFmCashBtn" type="button">Подотчёт прорабам</button>
       </div>
 
       <div class="card" id="pushAdminCard">
@@ -2716,7 +2738,16 @@
       <div class="segCtl" id="fmTab" style="margin:0;">
         <button type="button" data-t="att" class="on">Посещаемость</button>
         <button type="button" data-t="rep">Фотоотчёты</button>
+        <button type="button" data-t="cash">Подотчёт</button>
       </div>
+    </div>
+    <div class="card" style="padding:10px;">
+      <button id="fmMatReq" type="button" disabled class="fmSoon">Заявка на материалы <small>скоро · уйдёт в снабжение</small></button>
+    </div>
+    <div class="card tasksCard" id="fmCashBox" style="display:none;">
+      <div id="fmCashHead"></div>
+      <button id="fmExpNew" type="button">Добавить расход</button>
+      <div id="fmCashList"></div>
     </div>
     <div class="card tasksCard" id="fmRepBox" style="display:none;">
       <button id="fmRepNew" type="button">Сделать фотоотчёт</button>
@@ -2732,6 +2763,67 @@
         <input id="fmDate" type="date" aria-label="Другая дата">
       </div>
       <div id="fmList"></div>
+    </div>
+  </div>
+
+  <!-- Прораб: новый расход из подотчёта -->
+  <div id="screenFmExp" style="display:none;">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Расход</h1>
+      <div class="whoami" id="fmeBal">&nbsp;</div>
+      <div class="switchUser"><a id="fmeBack">← Подотчёт</a></div>
+    </div>
+    <div class="card">
+      <label for="fmeAmount">Сумма, ₽ *</label>
+      <input id="fmeAmount" type="text" inputmode="decimal" placeholder="0">
+      <label for="fmeCat">Статья</label>
+      <select id="fmeCat"></select>
+      <label for="fmeObj">Объект</label>
+      <select id="fmeObj"></select>
+      <div class="segCtl" id="fmeMethod" style="margin:4px 0 12px;">
+        <button type="button" data-t="наличные" class="on">Наличные</button>
+        <button type="button" data-t="безнал">Безнал / карта</button>
+      </div>
+      <label for="fmeDate">Дата</label>
+      <input id="fmeDate" type="date">
+      <label for="fmeComment">Что купили / за что</label>
+      <textarea id="fmeComment" rows="2" placeholder="Например: саморезы ГД-35, доставка песка"></textarea>
+      <label>Фото чека</label>
+      <input id="fmePhotoInput" type="file" accept="image/*" capture="environment" multiple>
+      <div id="fmePhotoPreview" class="photoPreviewRow"></div>
+      <button id="fmeSave" type="button">Сохранить расход</button>
+      <div id="fmeStatus" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+  <!-- Администратор: подотчёт прорабам -->
+  <div id="screenFmCashAdm" style="display:none;">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Подотчёт прорабам</h1>
+      <div class="switchUser"><a id="fcaBack">← Панель администратора</a></div>
+    </div>
+    <div class="card">
+      <label for="fcaWho">Прораб *</label>
+      <select id="fcaWho"></select>
+      <label for="fcaAmount">Сумма перевода, ₽ *</label>
+      <input id="fcaAmount" type="text" inputmode="decimal" placeholder="0">
+      <div class="segCtl" id="fcaMethod" style="margin:4px 0 12px;">
+        <button type="button" data-t="безнал" class="on">Безнал на ИП</button>
+        <button type="button" data-t="нал">Наличные</button>
+      </div>
+      <label for="fcaPct">Налог / ведение ИП, %</label>
+      <input id="fcaPct" type="text" inputmode="decimal" value="7">
+      <div id="fcaCalc" class="whDup" style="margin-top:4px;"></div>
+      <label for="fcaDate">Дата</label>
+      <input id="fcaDate" type="date">
+      <label for="fcaComment">Комментарий</label>
+      <input id="fcaComment" type="text" maxlength="200" placeholder="Необязательно: на что">
+      <button id="fcaSend" type="button">Передать</button>
+      <div id="fcaStatus" style="margin-top:10px;"></div>
+    </div>
+    <div class="card">
+      <div class="apkHead">Остатки у прорабов</div>
+      <div id="fcaList"></div>
     </div>
   </div>
 
@@ -3282,7 +3374,7 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, fmAttendance: 1, fmReports: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, whTrucks: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, fmAttendance: 1, fmReports: 1, fmCash: 1, adminFmCash: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, whTrucks: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
@@ -3302,7 +3394,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], fmReport: ['fmReports'], whReceive: ['whGetItems', 'whEquipment', 'whTrucks'], whShip: ['whGetItems', 'whEquipment', 'whTrucks'], whMove: ['whEquipment', 'whTrucks']
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], fmReport: ['fmReports'], fmAddExpense: ['fmCash'], adminFmTransfer: ['adminFmCash', 'fmCash', 'adminExpenseOverview'], whReceive: ['whGetItems', 'whEquipment', 'whTrucks'], whShip: ['whGetItems', 'whEquipment', 'whTrucks'], whMove: ['whEquipment', 'whTrucks']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -3713,6 +3805,8 @@
     if (name !== 'whTrucks') { var w4 = document.getElementById('screenWhTrucks'); if (w4) w4.style.display = 'none'; }
     if (name !== 'fm') { var w5 = document.getElementById('screenFm'); if (w5) w5.style.display = 'none'; }
     if (name !== 'fmRep') { var w6 = document.getElementById('screenFmRep'); if (w6) w6.style.display = 'none'; }
+    if (name !== 'fmExp') { var w7 = document.getElementById('screenFmExp'); if (w7) w7.style.display = 'none'; }
+    if (name !== 'fmCashAdm') { var w8 = document.getElementById('screenFmCashAdm'); if (w8) w8.style.display = 'none'; }
     // Если show*Screen() сейчас вызван ИЗ обработчика popstate (то есть
     // браузер уже сам переместил указатель истории назад/вперёд) — заново
     // ничего не пушим, иначе история будет расти в обе стороны одновременно.
@@ -3782,6 +3876,8 @@
       case 'whTrucks': showWarehouseScreen(); break;
       case 'fm': showFmScreen_(); break;
       case 'fmRep': showFmScreen_(); break;
+      case 'fmExp': showFmScreen_(); break;
+      case 'fmCashAdm': showAdminScreen(); break;
         default: showScanScreen();
       }
   }
@@ -3938,7 +4034,7 @@
     profile: 'navProfileBtn',
     absence: 'navProfileBtn',
     expenses: 'navExpBtn',
-    wh: 'navExpBtn', whItem: 'navExpBtn', fm: 'navExpBtn', fmRep: 'navExpBtn'
+    wh: 'navExpBtn', whItem: 'navExpBtn', fm: 'navExpBtn', fmRep: 'navExpBtn', fmExp: 'navExpBtn', fmCashAdm: 'navProfileBtn'
   };
   function setActiveNav(screenName) {
     var activeId = NAV_ACTIVE_MAP[screenName] || null;
@@ -4825,7 +4921,7 @@
     showBottomNav(); setActiveNav('fm'); pushScreenState('fm');
     if (!fmDate) fmDate = tmToday_();
     fmApplyTab_();
-    if (fmTab === 'rep') loadFmReports_(); else loadFm_();
+    if (fmTab === 'rep') loadFmReports_(); else if (fmTab === 'cash') loadFmCash_(); else loadFm_();
   }
   // ----- Фотоотчёты -----
   var fmTab = 'att', fmRepDays = 7, fmRepObj = '', fmRepRes = null, fmDayRep = {}, fmMyObjects = [];
@@ -4834,12 +4930,13 @@
     segSet_('fmTab', fmTab);
     document.getElementById('fmRepBox').style.display = fmTab === 'rep' ? '' : 'none';
     document.getElementById('fmAttBox').style.display = fmTab === 'att' ? '' : 'none';
+    document.getElementById('fmCashBox').style.display = fmTab === 'cash' ? '' : 'none';
   }
   document.getElementById('fmTab').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-t]'); if (!b) return;
     fmTab = b.getAttribute('data-t');
     try { localStorage.setItem('sevmod_fm_tab', fmTab); } catch (err) {}
-    fmApplyTab_(); if (fmTab === 'rep') loadFmReports_(); else loadFm_();
+    fmApplyTab_(); if (fmTab === 'rep') loadFmReports_(); else if (fmTab === 'cash') loadFmCash_(); else loadFm_();
   });
   function loadFmReports_() {
     var t = tmToday_(), from = new Date(t.getFullYear(), t.getMonth(), t.getDate() - (fmRepDays - 1));
@@ -4907,6 +5004,114 @@
         fmrUp.reset(); fmTab = 'rep'; showFmScreen_();
       }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
     });
+  });
+  // ----- Подотчёт прораба -----
+  var fmCashRes = null;
+  function fmRub_(n) { return (Math.round(n * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ₽'; }
+  function fmDateStr_(iso) { var p = String(iso || '').split('-'); return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0].slice(2) : ''; }
+  function loadFmCash_() {
+    var body = { action: 'fmCash', phone: currentUser && currentUser.phone }, list = document.getElementById('fmCashList');
+    if (!swrHas_(body)) { list.innerHTML = skeletonHtml_(3); document.getElementById('fmCashHead').innerHTML = ''; }
+    swrLoad_(body, function (res) {
+      if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
+      fmCashRes = res; renderFmCash_();
+    }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+  }
+  function renderFmCash_() {
+    var r = fmCashRes; if (!r) return;
+    document.getElementById('fmCashHead').innerHTML = '<div class="fcBal"><span>Подотчётные средства</span><b' + (r.balance < 0 ? ' class="neg"' : '') + '>' + fmRub_(r.balance) + '</b>' +
+      '<span>получено ' + fmRub_(r.received) + ' · потрачено ' + fmRub_(r.spent) + (r.given ? ' · возвращено ' + fmRub_(r.given) : '') + '</span></div>';
+    var ops = [];
+    (r.moves || []).forEach(function (m) { ops.push({ date: m.date, html: '<div class="fcOp"><div class="fcM"><div class="fcT">' + (m.kind === 'in' ? 'Получено' : 'Передано: ' + escapeHtml(m.to)) + '</div><div class="fcS">' + fmDateStr_(m.date) + ' · ' + escapeHtml(m.method) + (m.comment ? ' · ' + escapeHtml(m.comment) : '') + '</div></div><div class="fcA' + (m.kind === 'in' ? ' in' : '') + '">' + (m.kind === 'in' ? '+' : '−') + fmRub_(m.amount) + '</div></div>' }); });
+    (r.expenses || []).forEach(function (e) { ops.push({ date: e.date, html: '<div class="fcOp"><div class="fcM"><div class="fcT">' + escapeHtml(e.cat) + (e.object ? ' · ' + escapeHtml(e.object) : '') + '</div><div class="fcS">' + fmDateStr_(e.date) + (e.method ? ' · ' + escapeHtml(e.method) : '') + (e.comment ? ' · ' + escapeHtml(e.comment) : '') + '</div>' +
+      (e.photos && e.photos.length ? '<div class="photoGrid">' + photoStripInner_(e.photos) + '</div>' : '') + '</div><div class="fcA">−' + fmRub_(e.amount) + '</div></div>' }); });
+    ops.sort(function (a, b) { return b.date.localeCompare(a.date); });
+    var labor = r.labor || [];
+    document.getElementById('fmCashList').innerHTML = '<div class="tmShHead">Операции</div>' + (ops.length ? ops.map(function (o) { return o.html; }).join('') : '<div class="ctHint">Пока ничего — подотчётные средства выдаёт администратор.</div>') +
+      (labor.length ? '<div class="tmShHead">Расходы по моим объектам (оплата работ)</div>' + labor.slice(0, 100).map(function (l) {
+        return '<div class="fcOp"><div class="fcM"><div class="fcT">' + escapeHtml(l.worker || '—') + '</div><div class="fcS">' + fmDateStr_(l.date) + ' · ' + escapeHtml(l.object) + (l.status ? ' · ' + escapeHtml(l.status.toLowerCase()) : '') + (l.comment ? ' · ' + escapeHtml(l.comment) : '') + '</div></div><div class="fcA">' + fmRub_(l.total) + '</div></div>';
+      }).join('') : '');
+  }
+  var fmeUp = photoUploader_('fmePhotoInput', 'fmePhotoPreview', 'receipt');
+  ['fmeMethod', 'fcaMethod'].forEach(function (id) {
+    document.getElementById(id).addEventListener('click', function (e) { var b = e.target.closest('button[data-t]'); if (b) { segSet_(id, b.getAttribute('data-t')); if (id === 'fcaMethod') { document.getElementById('fcaPct').value = b.getAttribute('data-t') === 'нал' ? '0' : '7'; fcaCalc_(); } } });
+  });
+  function openFmExp_() {
+    hideAllScreens_();
+    document.getElementById('screenFmExp').style.display = 'block';
+    showBottomNav(); setActiveNav('fmExp'); pushScreenState('fmExp');
+    var r = fmCashRes || { objects: [], cats: ['Материалы', 'Прочее'], balance: 0 };
+    document.getElementById('fmeBal').textContent = 'Остаток подотчёта: ' + fmRub_(r.balance);
+    document.getElementById('fmeCat').innerHTML = (r.cats || []).map(function (c) { return '<option>' + escapeHtml(c) + '</option>'; }).join('');
+    document.getElementById('fmeObj').innerHTML = (r.objects || []).map(function (o) { return '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>'; }).join('') + '<option value="">Без объекта (общие)</option>';
+    document.getElementById('fmeAmount').value = ''; document.getElementById('fmeComment').value = '';
+    document.getElementById('fmeDate').value = tmIso_(tmToday_()); document.getElementById('fmeDate').max = tmIso_(tmToday_());
+    document.getElementById('fmeStatus').textContent = '';
+    segSet_('fmeMethod', 'наличные'); fmeUp.reset();
+    setTimeout(function () { document.getElementById('fmeAmount').focus(); }, 50);
+  }
+  document.getElementById('fmExpNew').addEventListener('click', openFmExp_);
+  document.getElementById('fmeBack').addEventListener('click', function () { fmTab = 'cash'; showFmScreen_(); });
+  document.getElementById('fmeSave').addEventListener('click', function () {
+    var st = document.getElementById('fmeStatus'), btn = this;
+    var sum = Number(document.getElementById('fmeAmount').value.replace(/\s/g, '').replace(',', '.'));
+    if (!(sum > 0)) { st.textContent = 'Укажите сумму'; st.className = 'error'; return; }
+    withUploadedPhotos_(fmeUp, st, btn, function (urls) {
+      btn.disabled = true; st.className = ''; st.textContent = 'Сохраняю…';
+      apiPost({ action: 'fmAddExpense', phone: currentUser.phone, expense: { amount: sum, cat: document.getElementById('fmeCat').value, object: document.getElementById('fmeObj').value,
+        method: segGet_('fmeMethod'), date: document.getElementById('fmeDate').value, comment: document.getElementById('fmeComment').value.trim(), photos: urls } }).then(function (res) {
+        btn.disabled = false;
+        if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не сохранилось'; st.className = 'error'; return; }
+        toast_('Расход ' + fmRub_(sum) + ' записан. Остаток: ' + fmRub_(res.balance), 'ok');
+        fmeUp.reset(); fmTab = 'cash'; showFmScreen_();
+      }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+    });
+  });
+  // ----- Администратор: выдача подотчёта прорабам -----
+  var fcaRes = null;
+  function showFmCashAdm_() {
+    hideAllScreens_();
+    document.getElementById('screenFmCashAdm').style.display = 'block';
+    showBottomNav(); setActiveNav('fmCashAdm'); pushScreenState('fmCashAdm');
+    document.getElementById('fcaDate').value = tmIso_(tmToday_());
+    document.getElementById('fcaStatus').textContent = '';
+    fcaCalc_();
+    var body = { action: 'adminFmCash', phone: currentUser && currentUser.phone };
+    if (!swrHas_(body)) document.getElementById('fcaList').innerHTML = skeletonHtml_(2);
+    swrLoad_(body, function (res) {
+      if (!res || res.status !== 'ok') { document.getElementById('fcaList').innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка') + '</div>'; return; }
+      fcaRes = res;
+      var sel = document.getElementById('fcaWho'), cur = sel.value;
+      sel.innerHTML = '<option value="">— выберите прораба —</option>' + res.foremen.map(function (f) {
+        return '<option value="' + escapeHtml(f.phone) + '"' + (f.phone === cur ? ' selected' : '') + '>' + escapeHtml(f.name) + ' · ' + fmRub_(f.balance) + '</option>';
+      }).join('');
+      document.getElementById('fcaList').innerHTML = res.foremen.length ? res.foremen.map(function (f) {
+        return '<div class="fcaRow"><div>' + escapeHtml(f.name) + '<small>' + (f.objects.length ? escapeHtml(f.objects.join(', ')) : 'нет объектов') + ' · получено ' + fmRub_(f.received) + ', потрачено ' + fmRub_(f.spent) + '</small></div><b' + (f.balance < 0 ? ' style="color:var(--red)"' : '') + '>' + fmRub_(f.balance) + '</b></div>';
+      }).join('') : '<div class="ctHint">Прорабов нет: укажите роль «прораб» в «Сотрудниках» (столбец «Роли») или назначьте ответственного на объект.</div>';
+    }, function () {});
+  }
+  function fcaCalc_() {
+    var sum = Number(document.getElementById('fcaAmount').value.replace(/\s/g, '').replace(',', '.')) || 0;
+    var pct = Number(document.getElementById('fcaPct').value.replace(',', '.')) || 0, fee = Math.round(sum * pct) / 100;
+    document.getElementById('fcaCalc').innerHTML = sum ? 'Комиссия за ведение ИП: <b>' + fmRub_(fee) + '</b> — запишется прорабу первым расходом.<br>Останется на расходы: <b>' + fmRub_(sum - fee) + '</b>' : 'Комиссия (налог) считается от суммы перевода и сразу списывается у прораба первым расходом.';
+  }
+  ['fcaAmount', 'fcaPct'].forEach(function (id) { document.getElementById(id).addEventListener('input', fcaCalc_); });
+  document.getElementById('goToFmCashBtn').addEventListener('click', showFmCashAdm_);
+  document.getElementById('fcaBack').addEventListener('click', function () { showAdminScreen(); });
+  document.getElementById('fcaSend').addEventListener('click', function () {
+    var st = document.getElementById('fcaStatus'), btn = this, who = document.getElementById('fcaWho').value;
+    var sum = Number(document.getElementById('fcaAmount').value.replace(/\s/g, '').replace(',', '.'));
+    if (!who) { st.textContent = 'Выберите прораба'; st.className = 'error'; return; }
+    if (!(sum > 0)) { st.textContent = 'Укажите сумму'; st.className = 'error'; return; }
+    btn.disabled = true; st.className = ''; st.textContent = 'Передаю…';
+    apiPost({ action: 'adminFmTransfer', phone: currentUser.phone, foreman: who, amount: sum, method: segGet_('fcaMethod'), taxPct: document.getElementById('fcaPct').value,
+      date: document.getElementById('fcaDate').value, comment: document.getElementById('fcaComment').value.trim() }).then(function (res) {
+      btn.disabled = false;
+      if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не получилось'; st.className = 'error'; return; }
+      st.textContent = ''; toast_('Передано ' + fmRub_(sum) + (res.fee ? ', комиссия ' + fmRub_(res.fee) : '') + '. Остаток у прораба: ' + fmRub_(res.balance), 'ok');
+      document.getElementById('fcaAmount').value = ''; document.getElementById('fcaComment').value = ''; fcaCalc_();
+      showFmCashAdm_();
+    }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
   });
   var fmLastAtt = null;
   function loadFm_() {
