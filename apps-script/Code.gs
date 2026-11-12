@@ -1,3 +1,4 @@
+// v111: раздел «Расходы» для прораба (asForeman) — те же действия, но только по его объектам; сводка и подотчёт — по нему.
 // v110: подотчёт прорабов — выдача администратором (нал / безнал на ИП, комиссия % — первым расходом), расходы прораба, баланс, расходы по его объектам.
 // v109: прораб — ежедневные фотоотчёты по объектам: Диск «Фотоотчёты/Объект/дата», лист «Фотоотчёты», напоминание в 17:00.
 // v108: прораб — «Мои объекты» (fmAttendance): кто на объектах, где он ответственный (только они), за день.
@@ -493,9 +494,13 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
 }
 
+// Раздел «Расходы» в режиме прораба: запросы приходят с asForeman — доступ
+// по роли «прораб», данные и действия только по его объектам (expAuth_).
+var EXP_FM_ = false;
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
+    EXP_FM_ = !!(data && data.asForeman === true);
 
     if (data.action === 'register') {
       return jsonOutput(registerUser(data.name, data.phone, data.photo, data.googleIdToken));
@@ -3322,7 +3327,7 @@ function expenseRefColumn_(sheet, col) {
 var EXPENSE_DEFAULT_PAYERS = ['Дмитрий', 'Кирилл', 'Влад'];
 var EXPENSE_DEFAULT_BANKS = ['Сбер', 'Т-Банк', 'Альфа-Банк', 'ВТБ', 'Озон Банк', 'Райффайзен'];
 function adminAddExpenseBank(phone, name) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   var bank = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
   if (!bank) return { status: 'error', message: 'Укажите банк' };
@@ -3355,7 +3360,7 @@ function adminAddExpenseBank(phone, name) {
 
 // Новый работник в справочник расходов. Возвращает { status, name, existed }.
 function adminAddExpenseWorker(phone, firstName, lastName, workerPhone, asBrigadier) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   function clean_(v) { return String(v || '').replace(/\s+/g, ' ').trim().slice(0, 60); }
   var first = clean_(firstName), surname = clean_(lastName);
@@ -3508,7 +3513,7 @@ var EXPENSE_MAX_ROWS = 600;
 // [{ worker, rate }] (бригада: у каждого своя ставка). dateToIso — конец
 // периода (включительно): на каждый день и каждого работника — своя строка.
 function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso, entries, status) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
 
   var date = parseIsoDate_(dateIso);
@@ -3537,6 +3542,7 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
   if (!pickedObject) return { status: 'error', message: 'Укажите объект' };
   brigadier = pickedBrigadier;
   objectName = pickedObject;
+  if (!expObjAllowed_(auth, objectName)) return { status: 'error', message: 'Объект «' + objectName + '» — не ваш' };
   comment = String(comment || '').trim().slice(0, 500);
 
   var raw = (entries && entries.length) ? entries : [{ worker: worker, rate: rate }];
@@ -3657,8 +3663,9 @@ var CONTRACT_STATUS_ADVANCE = 'По Графику';
 var CONTRACT_STATUS_ACT = 'По Акту';
 
 function adminAddContract(phone, objectName, brigadier, totalSum, payments, comment) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
+  if (!expObjAllowed_(auth, objectName)) return { status: 'error', message: 'Объект «' + String(objectName || '').trim() + '» — не ваш' };
   var lists = getExpenseRefLists_();
   var obj = pickFromList_(lists.objects, objectName);
   if (!obj) return { status: 'error', message: obj === null ? 'Объекта «' + String(objectName).trim() + '» нет в списке.' : 'Укажите объект' };
@@ -4027,8 +4034,9 @@ function restoreExpenseFromAudit() {
 
 // Деление строк для частичной оплаты (снизу вверх, чтобы номера выше не сдвигались).
 function adminSplitExpenseRow(phone, items) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
+  var gErr = expItemsGuard_(auth, items); if (gErr) return { status: 'error', message: gErr };
   if (!items || !items.length) return { status: 'error', message: 'Нет записей для деления' };
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -4085,8 +4093,9 @@ function adminSplitExpenseRow(phone, items) {
 // Удаление выбранных строк расходов (с проверкой отпечатка). reason —
 // обязательная причина, пишется в журнал.
 function adminDeleteExpenseRows(phone, items, reason) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
+  var gErr = expItemsGuard_(auth, items); if (gErr) return { status: 'error', message: gErr };
   if (!items || !items.length) return { status: 'error', message: 'Не выбрано ни одной записи' };
   reason = String(reason || '').replace(/\s+/g, ' ').trim().slice(0, 500);
   if (reason.length < 3) return { status: 'error', message: 'Укажите причину удаления' };
@@ -4219,8 +4228,9 @@ function adminDeleteExpenseRows(phone, items, reason) {
 // Смена статуса у выбранных строк. payDate: 'yyyy-MM-dd' — поставить дату
 // погашения, '' — очистить, null/undefined — не трогать.
 function adminSetExpenseStatus(phone, items, status, payDate, reason) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
+  var gErr = expItemsGuard_(auth, items); if (gErr) return { status: 'error', message: gErr };
   if (!items || !items.length) return { status: 'error', message: 'Не выбрано ни одной записи' };
   if (items.length > 2000) return { status: 'error', message: 'Слишком много записей за раз' };
   var lock = LockService.getScriptLock();
@@ -4423,10 +4433,41 @@ function adminAddCashMove(phone, from, to, amount, dateIso, method, comment) {
   }
 }
 
+// Доступ к разделу «Расходы»: администратор — всё; прораб (asForeman) — только свои объекты.
+function expAuth_(phone) {
+  if (!EXP_FM_) { var a = adminAuth_(phone); if (a.ok) a.objects = null; return a; }
+  var p = normalizePhone_(phone), emp = p && findEmployeeByPhone_(p);
+  if (!emp) return { ok: false, error: 'Сотрудник не найден' };
+  if (!hasRole_(p, 'foreman')) return { ok: false, error: 'Раздел для прорабов' };
+  return { ok: true, phone: p, foreman: true, name: emp.name, objects: fmObjects_(p) };
+}
+function expObjAllowed_(auth, obj) {
+  if (!auth || !auth.objects) return true;
+  var k = objKey_(obj);
+  return auth.objects.some(function (o) { return objKey_(o) === k; });
+}
+// Записи по номерам строк — все ли на объектах прораба.
+function expItemsGuard_(auth, items) {
+  if (!auth.objects || !items || !items.length) return '';
+  var lay = expenseLayout_(); if (lay.error || !lay.cols.object) return lay.error || 'Нет колонки «Объект»';
+  for (var i = 0; i < items.length; i++) {
+    var r = Number(items[i] && items[i].row);
+    if (!(r > lay.headerRow)) return 'Неверная запись';
+    var o = lay.sheet.getRange(r, lay.cols.object).getValue();
+    if (!expObjAllowed_(auth, o)) return 'Запись по объекту «' + o + '» — не ваш объект';
+  }
+  return '';
+}
+// Сводка шапки для прораба: суммы статусов — только по его строкам.
+function expFmSummary_(summary, rows) {
+  // суммы шапки — по всей компании; прорабу отдаём только подписи, а суммы
+  // приложение посчитает по его строкам (нулевые строки оно не показывает)
+  return summary.map(function (x) { return { label: x.label, value: null, color: x.color }; });
+}
 // Сводка (шапка листа) + строки расходов для экранов "Расходы" и
 // "Посмотреть расходы".
 function adminExpenseOverview(phone) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   var lay = expenseLayout_();
   if (lay.error) return { status: 'error', message: lay.error };
@@ -4475,12 +4516,20 @@ function adminExpenseOverview(phone) {
       ]);
     }
   }
+  var cash;
+  if (auth.foreman) {
+    rows = rows.filter(function (r) { return expObjAllowed_(auth, r[3]); });
+    summary = expFmSummary_(summary, rows);
+    var full = cashOverview_([]), me = auth.name;
+    cash = { holders: full.holders.filter(function (h) { return h.name === me; }), moves: full.moves.filter(function (m) { return m.from === me || m.to === me; }), company: full.company };
+  } else cash = cashOverview_(rows);
   return {
     status: 'ok',
+    foreman: !!auth.foreman,
     summary: summary,
     fields: ['date', 'worker', 'brigadier', 'object', 'rate', 'total', 'status', 'payDate', 'comment', 'row', 'payer'],
     rows: rows,
-    cash: cashOverview_(rows),
+    cash: cash,
     promoted: promoted,
     updatedAt: Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy HH:mm')
   };
@@ -4489,7 +4538,7 @@ function adminExpenseOverview(phone) {
 // Списки для формы — те же, что проверяются при записи (жёсткий выбор):
 // работники и бригадиры из листа "Справочник расходов", объекты из "Объекты".
 function adminExpenseLookups(phone) {
-  var auth = adminAuth_(phone);
+  var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
   var lists = getExpenseRefLists_();
   function sorted_(a) { return a.slice().sort(function (x, y) { return x.localeCompare(y, 'ru'); }); }
@@ -4508,13 +4557,13 @@ function adminExpenseLookups(phone) {
     strict: true,
     workers: sorted_(lists.workers),
     brigadiers: sorted_(lists.brigadiers),
-    objects: sorted_(lists.objects),
+    objects: sorted_(lists.objects).filter(function (o) { return expObjAllowed_(auth, o); }),
     brigades: hist.brigades,
     lastRates: hist.lastRates,
     statuses: statuses,
     statusColors: statusColors,
     defaultStatus: pickFromList_(statuses, EXPENSE_DEFAULT_STATUS) || EXPENSE_DEFAULT_STATUS,
-    payers: expenseRefColumn_(lists.ref, 5).length ? expenseRefColumn_(lists.ref, 5) : EXPENSE_DEFAULT_PAYERS,
+    payers: auth.foreman ? [auth.name] : expenseRefColumn_(lists.ref, 5).length ? expenseRefColumn_(lists.ref, 5) : EXPENSE_DEFAULT_PAYERS,
     banks: expenseRefColumn_(lists.ref, 4).length ? expenseRefColumn_(lists.ref, 4) : EXPENSE_DEFAULT_BANKS,
     refSheet: EXPENSE_REF_SHEET_NAME
   };
@@ -4530,7 +4579,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v110';
+var CODE_VERSION = 'v111';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',

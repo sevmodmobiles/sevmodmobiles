@@ -2742,6 +2742,7 @@
       </div>
     </div>
     <div class="card" style="padding:10px;">
+      <button id="fmExpBtn" type="button" style="margin:0 0 8px; background:var(--blue);">Расходы по моим объектам</button>
       <button id="fmMatReq" type="button" disabled class="fmSoon">Заявка на материалы <small>в разработке</small></button>
     </div>
     <div class="card tasksCard" id="fmCashBox" style="display:none;">
@@ -3349,7 +3350,13 @@
       });
   }
 
+  // Раздел «Расходы» в режиме прораба: те же запросы с пометкой asForeman —
+  // сервер отдаёт и меняет только записи по его объектам.
+  var EXP_SCOPED = { adminExpenseOverview: 1, adminExpenseLookups: 1, adminAddExpense: 1, adminAddExpenseWorker: 1, adminAddContract: 1,
+    adminDeleteExpenseRows: 1, adminSetExpenseStatus: 1, adminSplitExpenseRow: 1, adminAddExpenseBank: 1 };
+  function expFmMode_() { try { return activeRole_() === 'foreman'; } catch (e) { return false; } }
   function apiPost(body, opts) {
+    if (body && EXP_SCOPED[body.action] && expFmMode_() && !body.asForeman) body = Object.assign({}, body, { asForeman: true });
     var o = { method: 'POST', body: JSON.stringify(body) };
     // keepalive — запрос доходит до сервера, даже если страницу свернули/«усыпили».
     if (opts && opts.keepalive) o.keepalive = true;
@@ -3400,6 +3407,7 @@
   function swrKey_(body) {
     var b = {}, k;
     for (k in body) if (k !== 'phone') b[k] = body[k];
+    if (body && EXP_SCOPED[body.action] && expFmMode_()) b.asForeman = true;
     return SWR_PREFIX + String((currentUser && currentUser.phone) || '') + '|' + JSON.stringify(b);
   }
   function swrRead_(body) {
@@ -4336,6 +4344,8 @@
   }
   function setActiveRole_(r) {
     try { localStorage.setItem('sevmod_role_' + currentUser.phone, r); } catch (e) {}
+    expOverview = null; // сводка расходов у прораба своя
+    try { expLookups = { workers: [], brigadiers: [], objects: [], brigades: {}, lastRates: {} }; } catch (e) {}
     applyRoleNav_(); renderRoleCard_();
   }
   function loadRoles_() {
@@ -5051,6 +5061,7 @@
     setTimeout(function () { document.getElementById('fmeAmount').focus(); }, 50);
   }
   document.getElementById('fmExpNew').addEventListener('click', openFmExp_);
+  document.getElementById('fmExpBtn').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('fmeBack').addEventListener('click', function () { fmTab = 'cash'; showFmScreen_(); });
   document.getElementById('fmeSave').addEventListener('click', function () {
     var st = document.getElementById('fmeStatus'), btn = this;
@@ -9081,6 +9092,10 @@
   function showExpHubScreen() {
     hideAllForExp_();
     screenExpHub.style.display = 'block';
+    var fmx = expFmMode_();
+    document.getElementById('expHubBackLink').textContent = fmx ? '← Мои объекты' : '← Панель администратора';
+    document.getElementById('cashMoveBtn').style.display = fmx ? 'none' : '';
+    var nt = document.getElementById('ctNewObjToggle'); if (nt) nt.style.display = fmx ? 'none' : '';
     showBottomNav();
     setActiveNav('expenses');
     pushScreenState('expHub');
@@ -9887,7 +9902,7 @@
       expSelText_(rows) + '<br>Строки будут удалены из таблицы.',
       'Удалить ' + rows.length + ' зап.', function () { deleteExpenseRows_(rows, rows.length === 1 ? rows[0].worker : 'Выбранные записи'); }, true);
   });
-  document.getElementById('expHubBackLink').addEventListener('click', function () { showAdminScreen(); });
+  document.getElementById('expHubBackLink').addEventListener('click', function () { if (expFmMode_()) showFmScreen_(); else showAdminScreen(); });
   document.getElementById('expViewBackLink').addEventListener('click', function () { showExpHubScreen(); });
   document.getElementById('expGoAddBtn').addEventListener('click', function () { showAdminExpenseScreen(); });
   document.getElementById('expGoViewBtn').addEventListener('click', function () { showExpViewScreen(); });
