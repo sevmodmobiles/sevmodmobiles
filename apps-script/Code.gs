@@ -1,3 +1,4 @@
+// v124: несколько смен в день (разные объекты) — пары «приход → уход»: кабинеты, общий кабинет, лента; «на смене с» — по журналу.
 // v123: автоприход ставится временем первого появления в сети объекта; начало открытых смен сверяется с журналом «Учет» (правки в таблице подхватываются).
 // v122: автоприход по Wi-Fi — в любое время суток; ночное закрытие не трогает смену, пока человек в сети объекта, и закрывает и ночные смены.
 // v121: последнее время в сети объекта, если его нет в состоянии, — из журнала «Wi-Fi присутствие» («вышел из сети объекта»).
@@ -2747,12 +2748,29 @@ function getShiftStatus(phone) {
 }
 
 // v33: к статистике кабинета добавляются отгулы/больничные со статусом
+// Смены из отметок: каждый «Приход» открывает смену, ближайший «Уход» её
+// закрывает. Так в один день может быть несколько смен (переезд с объекта на объект).
+function shiftNoteOf_(note) { note = String(note || ''); return note.indexOf('автозакрытие') === 0 ? 'auto' : (note.indexOf('уход со слов') === 0 ? 'manual' : ''); }
+function segmentsFromEvents_(evs) {
+  evs.sort(function (a, b) { return a.ts - b.ts; });
+  var segs = [], cur = null;
+  evs.forEach(function (e) {
+    if (e.type === 'Приход') {
+      if (cur) segs.push(cur);
+      cur = { arrival: e.ts, departure: null, object: e.obj, note: '', late: e.late };
+    } else if (e.type === 'Уход') {
+      if (cur) { cur.departure = e.ts; cur.note = shiftNoteOf_(e.note); if (!cur.object) cur.object = e.obj; segs.push(cur); cur = null; }
+      else segs.push({ arrival: null, departure: e.ts, object: e.obj, note: shiftNoteOf_(e.note), late: null });
+    }
+  });
+  if (cur) segs.push(cur);
+  return segs;
+}
 function getMyStats(phone) {
   var res = getMyStatsCore_(phone);
   if (res.status !== 'ok') return res;
   var os = getOpenShift(phone);
-  var since = os.since || null;
-  if (os.open && !since) since = openShiftSinceFromLog_(phone);
+  var since = os.open ? (openShiftSinceFromLog_(phone) || os.since || null) : null;
   res.openShift = os.open ? { objectName: os.objectName, since: since } : null;
   // Окладнику денежные суммы в кабинете не показываем.
   var emp = findEmployeeByPhone(phone);
@@ -2795,41 +2813,22 @@ function getMyStatsCore_(phone) {
 
   var lastCol = Math.max(logSheet.getLastColumn(), 6);
   var data = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, lastCol).getValues();
-  var shifts = {};
+  var evs = [];
   for (var i = 0; i < data.length; i++) {
-    var ts = data[i][0];
-    var rowName = data[i][1];
-    var eventType = data[i][4];
-    var lateVal = data[i][5];
-    if (!(ts instanceof Date) || rowName !== name || !eventType) continue;
-
-    var dateStr = Utilities.formatDate(ts, 'Europe/Moscow', 'dd.MM.yyyy');
-    if (!shifts[dateStr]) {
-      shifts[dateStr] = { date: dateStr, arrival: null, departure: null, lateMinutes: '', object: '' };
-    }
+    var ts = data[i][0], eventType = data[i][4];
+    if (!(ts instanceof Date) || data[i][1] !== name || !eventType) continue;
     var rowObject = String(data[i][3] || '').trim();
-    if (eventType === 'Приход') {
-      if (!shifts[dateStr].arrival || ts < shifts[dateStr].arrival) {
-        shifts[dateStr].arrival = ts;
-        if (rowObject) shifts[dateStr].object = rowObject;
-        shifts[dateStr].lateMinutes = computeLate_(ts, rowObject, phone);
-      }
-    } else if (eventType === 'Уход') {
-      if (!shifts[dateStr].departure || ts > shifts[dateStr].departure) {
-        shifts[dateStr].departure = ts;
-        var note = String(data[i][8] || '');
-        shifts[dateStr].closeNote = note.indexOf('автозакрытие') === 0 ? 'auto' : (note.indexOf('уход со слов') === 0 ? 'manual' : '');
-      }
-      if (!shifts[dateStr].arrival && !shifts[dateStr].object && rowObject) shifts[dateStr].object = rowObject;
-    }
+    evs.push({ ts: ts, type: eventType, obj: rowObject, note: data[i][8], late: eventType === 'Приход' ? computeLate_(ts, rowObject, phone) : null });
   }
-
-  var dateKeys = Object.keys(shifts);
-  dateKeys.sort(function (a, b) {
-    var da = a.split('.').reverse().join('-');
-    var db = b.split('.').reverse().join('-');
-    return da < db ? 1 : -1; // по убыванию — сначала свежие
+  // каждая смена — отдельной строкой (в один день их может быть несколько)
+  var shifts = {}, dateKeys = [];
+  segmentsFromEvents_(evs).forEach(function (sg, k) {
+    var at = sg.arrival || sg.departure;
+    var key = Utilities.formatDate(at, 'Europe/Moscow', 'dd.MM.yyyy') + '#' + k;
+    shifts[key] = { date: key.split('#')[0], arrival: sg.arrival, departure: sg.departure, lateMinutes: sg.late, object: sg.object, closeNote: sg.note, at: at };
+    dateKeys.push(key);
   });
+  dateKeys.sort(function (a, b) { return shifts[b].at - shifts[a].at; }); // сначала свежие
 
   var nowMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'MM.yyyy');
 
@@ -2837,8 +2836,8 @@ function getMyStatsCore_(phone) {
   var monthFraction = 0, monthPay = 0, monthLateMinutes = 0;
   var days = [];
 
-  dateKeys.forEach(function (dateStr) {
-    var s = shifts[dateStr];
+  dateKeys.forEach(function (key) {
+    var s = shifts[key], dateStr = s.date;
     var hoursStr = '', payForDay = 0, fraction = 0;
     var lateMinutes = (typeof s.lateMinutes === 'number') ? s.lateMinutes : null;
 
@@ -4612,7 +4611,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v123';
+var CODE_VERSION = 'v124';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5601,24 +5600,25 @@ function adminAttendance(adminPhone, dateIso, mode, dateTo, internal) {
       if (mode === 'day' ? iso !== dayIso : (iso < fromIso || iso > toIso)) return;
       var o = byPhone[normalizePhone_(r[2])] || byName[String(r[1] || '').trim()];
       if (!o) return;
-      var d = o.days[iso] || (o.days[iso] = { arrival: null, departure: null, object: '', late: null, note: '', objects: {} });
       var obj = String(r[3] || '').trim(), type = r[4];
-      if (obj) d.objects[obj] = true;
-      if (type === 'Приход') {
-        if (!d.arrival || ts < d.arrival) {
-          d.arrival = ts; if (obj) d.object = obj;
-          d.late = computeLate_(ts, obj, r[2]);
-        }
-      } else if (type === 'Уход') {
-        if (!d.departure || ts > d.departure) {
-          d.departure = ts;
-          var note = String(r[8] || '');
-          d.note = note.indexOf('автозакрытие') === 0 ? 'auto' : (note.indexOf('уход со слов') === 0 ? 'manual' : '');
-        }
-        if (!d.object && obj) d.object = obj;
-      }
+      if (type !== 'Приход' && type !== 'Уход') return;
+      (o.ev = o.ev || []).push({ ts: ts, type: type, obj: obj, note: r[8], late: type === 'Приход' ? computeLate_(ts, obj, r[2]) : null });
     });
   }
+  // смены (пары «приход → уход») раскладываем по дням прихода
+  people.forEach(function (o) {
+    if (!o.ev) return;
+    segmentsFromEvents_(o.ev).forEach(function (sg) {
+      var iso = Utilities.formatDate(sg.arrival || sg.departure, tz, 'yyyy-MM-dd');
+      var d = o.days[iso] || (o.days[iso] = { arrival: null, departure: null, object: '', late: null, note: '', objects: {}, segs: [], frac: 0 });
+      d.segs.push(sg);
+      if (sg.object) d.objects[sg.object] = true;
+      if (sg.arrival && (!d.arrival || sg.arrival < d.arrival)) { d.arrival = sg.arrival; d.object = sg.object || d.object; d.late = sg.late; }
+      if (sg.departure && (!d.departure || sg.departure > d.departure)) { d.departure = sg.departure; d.note = sg.note; }
+      if (!d.object && sg.object) d.object = sg.object;
+      if (sg.arrival && sg.departure && sg.departure > sg.arrival) d.frac += (sg.departure - sg.arrival) / 86400000;
+    });
+  });
 
   // согласованные отсутствия
   var absMap = {};
@@ -5644,11 +5644,16 @@ function adminAttendance(adminPhone, dateIso, mode, dateTo, internal) {
       if (d) {
         it.arrival = hm(d.arrival); it.departure = hm(d.departure); it.object = d.object;
         it.objects = Object.keys(d.objects); it.late = d.late; it.closeNote = d.note;
-        if (d.arrival && d.departure && d.departure > d.arrival) it.hours = hoursFractionToStr((d.departure - d.arrival) / 86400000);
+        if (d.frac) it.hours = hoursFractionToStr(d.frac);
+        it.segments = d.segs.map(function (sg) {
+          return { object: sg.object, arrival: hm(sg.arrival), departure: hm(sg.departure), late: sg.late,
+            hours: sg.arrival && sg.departure && sg.departure > sg.arrival ? hoursFractionToStr((sg.departure - sg.arrival) / 86400000) : '', closeNote: sg.note };
+        });
       }
       var os = open[o.phone];
       if (dayIso === todayIso && os) {
-        var since = os.since || openShiftSinceFromLog_(o.phone);
+        // начало — по журналу (время прихода могли поправить в таблице)
+        var since = openShiftSinceFromLog_(o.phone) || os.since;
         it.onShift = { object: os.objectName, since: since ? hm(new Date(since)) : '' };
       }
       (absMap[o.phone] || []).forEach(function (a) { if (a.from <= dayIso && dayIso <= a.to) it.absence = a; });
@@ -5665,16 +5670,18 @@ function adminAttendance(adminPhone, dateIso, mode, dateTo, internal) {
     keys.forEach(function (k) {
       var d = o.days[k];
       if (d.arrival) worked++;
-      var f = (d.arrival && d.departure && d.departure > d.arrival) ? (d.departure - d.arrival) / 86400000 : 0;
+      var f = d.frac || 0;
       frac += f;
       // по объектам: смена засчитывается объекту прихода (иначе — любому из дня)
-      var mainObj = d.object || Object.keys(d.objects)[0];
-      if (mainObj) {
-        var bo = byObj[mainObj] || (byObj[mainObj] = { days: 0, frac: 0, late: 0 });
-        if (d.arrival) bo.days++;
-        bo.frac += f;
-        if (d.late > 0) bo.late++;
-      }
+      // по объектам: каждая смена — своему объекту
+      var seenObj = {};
+      d.segs.forEach(function (sg) {
+        var ob = sg.object || d.object; if (!ob) return;
+        var bo = byObj[ob] || (byObj[ob] = { days: 0, frac: 0, late: 0 });
+        if (sg.arrival && !seenObj[ob]) { bo.days++; seenObj[ob] = 1; }
+        if (sg.arrival && sg.departure && sg.departure > sg.arrival) bo.frac += (sg.departure - sg.arrival) / 86400000;
+        if (sg.late > 0) bo.late++;
+      });
       if (d.late > 0) { late++; lateMin += d.late; }
       if (d.note === 'auto') auto++;
       Object.keys(d.objects).forEach(function (x) { objs[x] = (objs[x] || 0) + 1; });
@@ -5688,13 +5695,16 @@ function adminAttendance(adminPhone, dateIso, mode, dateTo, internal) {
       }
     });
     // все смены за период — для просмотра одного сотрудника
-    var shifts = keys.sort().reverse().map(function (k) {
-      var d = o.days[k];
-      var f = (d.arrival && d.departure && d.departure > d.arrival) ? (d.departure - d.arrival) / 86400000 : 0;
-      var os = open[o.phone], on = k === todayIso && os;
-      return { date: k, arrival: hm(d.arrival), departure: hm(d.departure), hours: f ? hoursFractionToStr(f) : '',
-        object: d.object || Object.keys(d.objects)[0] || '', objects: Object.keys(d.objects), late: d.late, closeNote: d.note,
-        onShift: on ? true : false };
+    // каждая смена — отдельно (в один день может быть несколько объектов)
+    var shifts = [];
+    keys.sort().reverse().forEach(function (k) {
+      var d = o.days[k], os = open[o.phone];
+      d.segs.slice().sort(function (a, b) { return (b.arrival || b.departure) - (a.arrival || a.departure); }).forEach(function (sg) {
+        var f = sg.arrival && sg.departure && sg.departure > sg.arrival ? (sg.departure - sg.arrival) / 86400000 : 0;
+        var on = k === todayIso && os && !sg.departure && sg.arrival && objKey_(sg.object) === objKey_(os.objectName);
+        shifts.push({ date: k, arrival: hm(sg.arrival), departure: hm(sg.departure), hours: f ? hoursFractionToStr(f) : '',
+          object: sg.object || '', objects: sg.object ? [sg.object] : [], late: sg.late, closeNote: sg.note, onShift: !!on });
+      });
     });
     return { name: o.name, phone: o.phone, shifts: shifts, days: worked, hours: hoursFractionToStr(frac), hoursNum: Math.round(frac * 24 * 10) / 10,
       lateDays: late, lateMinutes: lateMin, autoClosed: auto, absenceDays: absDays,

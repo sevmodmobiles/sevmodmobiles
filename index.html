@@ -757,6 +757,8 @@
   .tmSub .late { color: #F29900; font-weight: 700; }
   .tmSub .warn { color: var(--red); }
   .tmTime { font-variant-numeric: tabular-nums; }
+  .tmSegs { width: 100%; }
+  .tmSegLine { padding: 2px 0; }
   .tmShHead { margin: 14px 2px 8px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   .tmSh .tmName { font-size: 14.5px; }
   .tmMore { margin: 6px 0 0; background: var(--blue); }
@@ -5935,11 +5937,22 @@
         else if (x.absence) pill = '<span class="tmPill">' + escapeHtml(x.absence.type) + '</span>';
         else pill = '<span class="tmPill r">нет отметок</span>';
         var obj = (x.onShift && x.onShift.object) || x.object;
+        var segs = x.segments || [];
+        if (segs.length > 1) {
+          // несколько смен за день (переезд между объектами) — каждая строкой
+          var lines = segs.map(function (sg, i) {
+            var open = !sg.departure && i === segs.length - 1 && x.onShift;
+            return '<div class="tmSegLine"><b>' + escapeHtml(sg.object || '—') + '</b> <span class="tmTime">' + escapeHtml(sg.arrival || '—') + ' – ' + escapeHtml(sg.departure || (open ? 'сейчас' : '—')) + '</span>' +
+              (sg.hours ? ' · ' + escapeHtml(sg.hours) + ' ч' : '') + (sg.late > 0 ? ' <span class="late">+' + sg.late + ' мин</span>' : '') + '</div>';
+          }).join('');
+          sub.push('<div class="tmSegs">' + lines + '</div>');
+          obj = '';
+        }
         if (obj) sub.push('<b>' + escapeHtml(obj) + '</b>');
-        if (was(x)) sub.push('<span class="tmTime">' + escapeHtml(x.arrival || '—') + ' – ' + escapeHtml(x.departure || (x.onShift ? 'сейчас' : '—')) + '</span>');
-        if (x.late > 0) sub.push('<span class="late">опоздание ' + x.late + ' мин</span>');
+        if (was(x) && segs.length <= 1) sub.push('<span class="tmTime">' + escapeHtml(x.arrival || '—') + ' – ' + escapeHtml(x.departure || (x.onShift ? 'сейчас' : '—')) + '</span>');
+        if (x.late > 0 && segs.length <= 1) sub.push('<span class="late">опоздание ' + x.late + ' мин</span>');
         if (x.closeNote === 'auto') sub.push('<span class="warn">уход не отмечен</span>');
-        if (x.objects && x.objects.length > 1) sub.push('ещё: ' + escapeHtml(x.objects.filter(function (o) { return o !== obj; }).join(', ')));
+        if (x.objects && x.objects.length > 1 && segs.length <= 1) sub.push('ещё: ' + escapeHtml(x.objects.filter(function (o) { return o !== obj; }).join(', ')));
         if (x.absence && (x.absence.tFrom || x.absence.tTo) && !was(x)) sub.push(escapeHtml(x.absence.tFrom + '–' + x.absence.tTo));
         return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(x.name) + '</span>' + pill + '</div>' +
           (sub.length ? '<div class="tmSub">' + sub.join('') + '</div>' : '') + '</div>';
@@ -6189,8 +6202,20 @@
       '<b>' + big + '</b><span>' + label + '</span></div>';
   }
   function tmInfoHtml_(r, fromIso, toIso, workdays) {
-    var sh = (r.shifts || []).filter(function (x) { return !tmObj || x.object === tmObj || (x.objects || []).indexOf(tmObj) >= 0; });
-    var byDate = {}; sh.forEach(function (x) { byDate[x.date] = x; });
+    var raw = (r.shifts || []).filter(function (x) { return !tmObj || x.object === tmObj || (x.objects || []).indexOf(tmObj) >= 0; });
+    // несколько смен в один день — для инфографики складываем в один день
+    var byDate = {};
+    raw.slice().reverse().forEach(function (x) {
+      var d = byDate[x.date];
+      if (!d) { byDate[x.date] = Object.assign({}, x, { objects: (x.objects || []).slice() }); return; }
+      if (x.arrival && (!d.arrival || x.arrival < d.arrival)) { d.arrival = x.arrival; d.late = x.late; d.object = x.object; }
+      if (x.departure && (!d.departure || x.departure > d.departure)) d.departure = x.departure;
+      var m = (tmMin_(d.hours) || 0) + (tmMin_(x.hours) || 0); d.hours = m ? tmHM_(m) : '';
+      if (x.onShift) d.onShift = true;
+      (x.objects || []).forEach(function (o) { if (d.objects.indexOf(o) < 0) d.objects.push(o); });
+      if (d.objects.length > 1) d.object = d.objects.join(' → ');
+    });
+    var sh = Object.keys(byDate).sort().reverse().map(function (k) { return byDate[k]; });
     var worked = sh.filter(function (x) { return x.arrival; }), late = worked.filter(function (x) { return x.late > 0; });
     var mins = sh.map(function (x) { return tmMin_(x.hours); }).filter(function (v) { return v; });
     var totalMin = mins.reduce(function (a, b) { return a + b; }, 0);
