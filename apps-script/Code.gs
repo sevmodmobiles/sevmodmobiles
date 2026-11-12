@@ -1,3 +1,4 @@
+// v122: автоприход по Wi-Fi — в любое время суток; ночное закрытие не трогает смену, пока человек в сети объекта, и закрывает и ночные смены.
 // v121: последнее время в сети объекта, если его нет в состоянии, — из журнала «Wi-Fi присутствие» («вышел из сети объекта»).
 // v120: Wi-Fi — появился в сети другого объекта: смена на прежнем закрывается последним временем в его сети (даже если сеть уже потеряна), затем приход.
 // v119: ежедневная задача прорабу «Фотоотчёт» по каждому его объекту (в 9:00 по будням), закрывается сама при загрузке фотоотчёта.
@@ -4610,7 +4611,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v121';
+var CODE_VERSION = 'v122';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5909,7 +5910,7 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
         os = getOpenShift(p);
       }
     }
-    if (!os.open && h >= 6 && h < WIFI_DAY_CLOSE_HOUR && !hadArrivalToday_(p, office)) {
+    if (!os.open && !hadArrivalToday_(p, office)) {
       var r = logEvent(emp.name, p, office, 'Приход', null, now.getTime(), 'wifi' + p + toIsoDate_(now).replace(/-/g, '') + '_' + objKey_(office).replace(/[^a-zа-я0-9]/gi, '').slice(0, 20), ip, ssid, bssid);
       var okIn = r && r.status === 'ok';
       // отказ — в журнал не чаще раза в день (телефон проверяет каждые ~15 минут)
@@ -6009,12 +6010,16 @@ function wifiCloseDay_() {
       var since = e.since || openShiftSinceFromLog_(p);
       if (!since) return;
       var sinceDay = startOfDay_(new Date(since));
-      // сегодняшняя смена — только после 22:00; вчерашняя и раньше — сразу
+      // сегодняшняя смена — только после 22:00 (днём выход из сети — обед, перекур); вчерашняя и раньше — сразу
       if (sinceDay >= today && h < WIFI_DAY_CLOSE_HOUR) return;
+      // человек сейчас в сети этого объекта (последняя проверка < 45 мин назад) — не закрываем
+      if (s.in && objKey_(s.object) === objKey_(e.objectName) && now.getTime() - s.lastSeen < 45 * 60000) return;
       // последнее время именно в сети объекта этой смены (если известно)
       var lastObj = (s.seen && s.seen[objKey_(e.objectName)]) || wifiLastSeenFromLog_(p, e.objectName);
-      var last = new Date(lastObj || s.lastSeen);
-      if (last <= new Date(since) || startOfDay_(last).getTime() !== sinceDay.getTime()) return; // в этот день в сети не был
+      if (!lastObj && objKey_(s.object) === objKey_(e.objectName)) lastObj = s.lastSeen;
+      if (!lastObj) return;
+      var last = new Date(lastObj);
+      if (last <= new Date(since) || now.getTime() - last.getTime() > 36 * 3600000) return; // после прихода в сети не был
       var emp = findEmployeeByPhone(p);
       sheet.appendRow([last, emp ? emp.name : '', p, e.objectName, 'Уход', '', '', '', 'авто: последний раз в Wi-Fi объекта', now]);
       var row = sheet.getLastRow();
