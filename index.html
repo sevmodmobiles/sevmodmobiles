@@ -1662,12 +1662,16 @@
   .fabAdd:active { transform: scale(0.94); }
   .fabTruck { bottom: calc(162px + env(safe-area-inset-bottom, 0px)); background: var(--green); }
   .fabTruck svg { stroke-width: 1.9; stroke-linejoin: round; }
+  #screenWh { padding-bottom: 170px; }
   .fabTruck2 { bottom: calc(232px + env(safe-area-inset-bottom, 0px)); }
   .wrItem { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 6px; }
   .wrItem .wrN { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; }
   .wrItem .wrN small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; margin-top: 2px; }
   .wrItem .wrQ { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .wrItem .wrDel { flex: none; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 50%; background: var(--bg); color: var(--muted); font-size: 18px; line-height: 1; }
+  .eqObj { margin: 14px 2px 6px; display: flex; align-items: baseline; gap: 8px; }
+  .eqObj b { font-size: 15px; } .eqObj span { font-size: 12.5px; color: var(--muted); }
+  .whItem .eqSince { font-size: 12px; color: var(--muted); }
   .whTag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: rgba(66,133,244,.13); color: var(--blue); margin-left: 6px; vertical-align: 1px; }
   #bottomNavInner {
     width: 100%;
@@ -2655,6 +2659,10 @@
         <button type="button" data-t="Материал">Материалы</button>
         <button type="button" data-t="Оборудование">Оборудование</button>
       </div>
+      <div class="segCtl" id="whEqSeg" style="display:none; margin-bottom:10px;">
+        <button type="button" data-t="stock" class="on">Список</button>
+        <button type="button" data-t="objects">Где находится</button>
+      </div>
       <input id="whSearch" type="search" placeholder="Поиск: наименование, место, категория" autocomplete="off">
       <div id="whChips" class="expChips" style="margin-top:8px;"></div>
       <div id="whList"></div>
@@ -2718,6 +2726,7 @@
         <button type="button" data-t="Материал" class="on">Материал</button>
         <button type="button" data-t="Оборудование">Оборудование</button>
       </div>
+      <div id="whWhere" class="whDup" style="display:none;"></div>
       <label for="whName">Наименование *</label>
       <input id="whName" type="text" autocomplete="off" placeholder="Например: Саморез 3,5×25 по дереву">
       <div id="whNameHits" class="whHits"></div>
@@ -3166,7 +3175,7 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, whGetItems: 1, whObjects: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
@@ -3186,7 +3195,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems'], whUpdateItem: ['whGetItems'], whCatalog: [], whReceive: ['whGetItems'], whShip: ['whGetItems']
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], whReceive: ['whGetItems', 'whEquipment'], whShip: ['whGetItems', 'whEquipment']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -4159,7 +4168,8 @@
   // ===== Склад: остатки и ввод позиций (инвентаризация) =====
   var WH_CATS = ['Сухие смеси', 'Листовые материалы', 'Профиль и металл', 'Крепёж', 'Электрика', 'Сантехника', 'Отделка', 'Лакокраска', 'Изоляция', 'Пиломатериалы', 'Кровля и фасад', 'Вентиляция', 'Инструмент', 'Расходники', 'СИЗ и спецодежда', 'Прочее'];
   var WH_UNITS = ['шт', 'м', 'м²', 'м³', 'кг', 'л', 'упак', 'мешок', 'рулон', 'лист', 'компл', 'пог. м'];
-  var whItems = [], whCat = '', whEdit = null, whCatHits = [], whPending = 0, whTypeFlt = '';
+  var whItems = [], whCat = '', whEdit = null, whCatHits = [], whPending = 0, whTypeFlt = '', whEq = null, whEqView = 'stock', whObjMap = {};
+  try { whEqView = localStorage.getItem('sevmod_wh_eqview') || 'stock'; } catch (e) {}
   var screenWh = document.getElementById('screenWh'), screenWhItem = document.getElementById('screenWhItem');
   function hideAllScreens_() {
     Array.prototype.forEach.call(document.querySelectorAll('body > div[id^="screen"]'), function (el) { el.style.display = 'none'; });
@@ -4178,12 +4188,56 @@
     if (!swrHas_(body)) list.innerHTML = skeletonHtml_(4);
     swrLoad_(body, function (res) {
       if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
-      whItems = res.items || []; renderWh_();
+      whItems = res.items || []; renderWh_(); loadWhEq_();
     }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
   }
   function whFmtQty_(q) { return String(Math.round(q * 1000) / 1000).replace('.', ','); }
+  // Оборудование: где находится (склад / объекты) — по журналу отправок и приёмок
+  function loadWhEq_() {
+    swrLoad_({ action: 'whEquipment', phone: currentUser && currentUser.phone }, function (res) {
+      if (!res || res.status !== 'ok') return;
+      whEq = res; if (screenWh.style.display === 'block') renderWh_();
+    }, function () {});
+    swrLoad_({ action: 'whObjects', phone: currentUser && currentUser.phone }, function (res) {
+      if (!res || res.status !== 'ok') return;
+      whObjMap = {}; (res.objects || []).forEach(function (o) { whObjMap[o.name] = o; });
+    }, function () {});
+  }
+  function whEqOf_(id) { return whEq ? (whEq.items || []).filter(function (x) { return x.id === id; })[0] : null; }
+  function renderWhEqObjects_(q) {
+    var groups = [], by = (whEq && whEq.byObject) || {};
+    var match = function (name, obj) { return !q || (name + ' ' + (obj || '')).toLowerCase().indexOf(q) >= 0; };
+    var stock = whItems.filter(function (it) { return it.type === 'Оборудование' && it.qty > 0 && match(it.name, 'склад ' + it.location); });
+    if (stock.length) groups.push({ title: 'Склад', sub: '', rows: stock.map(function (it) { return { id: it.id, name: it.name, qty: it.qty, unit: it.unit, note: it.location }; }) });
+    Object.keys(by).sort(function (a, b) { return a.localeCompare(b, 'ru'); }).forEach(function (on) {
+      var rows = by[on].filter(function (x) { return match(x.name, on); });
+      if (!rows.length) return;
+      var f = whObjMap[on] && whObjMap[on].foreman;
+      groups.push({ title: on, sub: f ? 'прораб ' + (personShort_(f) || f) : '', rows: rows.map(function (x) { return { id: x.id, name: x.name, qty: x.qty, unit: x.unit, note: x.since ? 'с ' + x.since : '' }; }) });
+    });
+    if (!whEq) return '<div class="statsEmpty"><span class="spinner"></span> Загрузка…</div>';
+    if (!groups.length) return '<div class="statsEmpty">' + (q ? 'Ничего не найдено' : 'Оборудования пока нет — занесите его через «+» или приёмку машины с типом «Оборудование»') + '</div>';
+    return groups.map(function (g) {
+      return '<div class="eqObj"><b>' + escapeHtml(g.title) + '</b><span>' + g.rows.length + ' поз.' + (g.sub ? ' · ' + escapeHtml(g.sub) : '') + '</span></div>' + g.rows.map(function (r) {
+        return '<div class="whItem" data-id="' + escapeHtml(r.id) + '"><div class="whMain"><div class="whName">' + escapeHtml(r.name) + '</div>' + (r.note ? '<div class="eqSince">' + escapeHtml(r.note) + '</div>' : '') + '</div>' +
+          '<div class="whQty">' + whFmtQty_(r.qty) + '<small>' + escapeHtml(r.unit) + '</small></div></div>';
+      }).join('');
+    }).join('');
+  }
   function renderWh_() {
     var q = document.getElementById('whSearch').value.trim().toLowerCase();
+    var eqMode = whTypeFlt === 'Оборудование';
+    document.getElementById('whEqSeg').style.display = eqMode ? '' : 'none';
+    segSet_('whEqSeg', whEqView);
+    if (eqMode && whEqView === 'objects') {
+      document.getElementById('whChips').style.display = 'none';
+      Array.prototype.forEach.call(document.getElementById('whTypeSeg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-t') === whTypeFlt); });
+      var onObj = 0; Object.keys((whEq && whEq.byObject) || {}).forEach(function (k) { onObj += whEq.byObject[k].length; });
+      document.getElementById('whSummary').textContent = 'Оборудование: на объектах ' + onObj + ' поз.';
+      document.getElementById('whList').innerHTML = renderWhEqObjects_(q);
+      return;
+    }
+    document.getElementById('whChips').style.display = '';
     Array.prototype.forEach.call(document.getElementById('whTypeSeg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-t') === whTypeFlt); });
     var base = whItems.filter(function (it) { return !whTypeFlt || (it.type || 'Материал') === whTypeFlt; });
     var cats = {}; base.forEach(function (it) { var c = it.category || 'Без категории'; cats[c] = (cats[c] || 0) + 1; });
@@ -4200,6 +4254,11 @@
     document.getElementById('whSummary').textContent = whItems.length ? 'Позиций: ' + whItems.length + (shown.length !== whItems.length ? ' · показано ' + shown.length : '') : 'Пока пусто — нажмите «+», чтобы внести первую позицию';
     document.getElementById('whList').innerHTML = shown.length ? shown.map(function (it) {
       var meta = [it.category, it.location].filter(Boolean).join(' · ');
+      if (it.type === 'Оборудование') {
+        var eq = whEqOf_(it.id), onObjQ = 0;
+        if (eq) eq.objects.forEach(function (o) { onObjQ += o.qty; });
+        if (onObjQ) meta = (meta ? meta + ' · ' : '') + 'на объектах ' + whFmtQty_(onObjQ);
+      }
       return '<div class="whItem" data-id="' + escapeHtml(it.id) + '"><div class="whMain"><div class="whName">' + escapeHtml(it.name) + (it.photos.length ? ' ' + T_ICO_PHOTO_INLINE : '') + (it.type === 'Оборудование' && !whTypeFlt ? '<span class="whTag">обор.</span>' : '') + '</div>' +
         (meta ? '<div class="whMeta">' + escapeHtml(meta) + '</div>' : '') + '</div>' +
         '<div class="whQty' + (it.qty <= 0 ? ' zero' : '') + '">' + whFmtQty_(it.qty) + '<small>' + escapeHtml(it.unit) + '</small></div></div>';
@@ -4207,6 +4266,12 @@
   }
   var T_ICO_PHOTO_INLINE = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:var(--muted);stroke-width:1.8;vertical-align:-2px"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>';
   document.getElementById('whSearch').addEventListener('input', renderWh_);
+  document.getElementById('whEqSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-t]'); if (!b) return;
+    whEqView = b.getAttribute('data-t');
+    try { localStorage.setItem('sevmod_wh_eqview', whEqView); } catch (err) {}
+    renderWh_();
+  });
   document.getElementById('whTypeSeg').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-t]'); if (!b) return;
     whTypeFlt = b.getAttribute('data-t'); whCat = ''; renderWh_();
@@ -4246,6 +4311,10 @@
     document.getElementById('whFormTitle').textContent = it ? 'Позиция' : 'Новая позиция';
     document.getElementById('whName').value = it ? it.name : '';
     segSet_('whTypeF', it ? (it.type || 'Материал') : (whTypeFlt || 'Материал'));
+    var wh = document.getElementById('whWhere'), eqi = it && it.type === 'Оборудование' ? whEqOf_(it.id) : null;
+    wh.style.display = eqi ? 'block' : 'none';
+    if (eqi) wh.innerHTML = '<b>Где сейчас:</b> склад — ' + whFmtQty_(eqi.warehouse) + ' ' + escapeHtml(eqi.unit) +
+      eqi.objects.map(function (o) { return '<br>' + escapeHtml(o.object) + ' — ' + whFmtQty_(o.qty) + ' ' + escapeHtml(eqi.unit) + (o.since ? ' (с ' + o.since + ')' : ''); }).join('');
     whFillSelects_(it ? it.category : (keep && keep.category) || '', it ? it.unit : (keep && keep.unit) || 'шт');
     document.getElementById('whQty').value = it ? whFmtQty_(it.qty) : '';
     document.getElementById('whLoc').value = it ? it.location : (keep && keep.location) || '';

@@ -1,3 +1,4 @@
+// v105: учёт оборудования по объектам (whEquipment) — по журналу отправок и приёмок.
 // v104: склад — отправка машины на объект (whShip): списание со склада, лист «Отправки».
 // v103: склад — тип «Материал / Оборудование», приёмка машины с объекта (whObjects, whReceive, лист «Приёмки»).
 // v102: автоотметка — в журнал пишется и Wi-Fi, который не узнан как объект (раз в день на сеть), для диагностики.
@@ -531,6 +532,7 @@ function doPost(e) {
     if (data.action === 'adminApkSetup') return jsonOutput(adminApkSetup(data.phone));
     if (data.action === 'adminCreateInvite') return jsonOutput(adminCreateInvite(data.phone, data.employee));
     if (data.action === 'whObjects') return jsonOutput(whObjects(data.phone));
+    if (data.action === 'whEquipment') return jsonOutput(whEquipment(data.phone));
     if (data.action === 'whShip') return jsonOutput(whShip(data.phone, data.shipment));
     if (data.action === 'whReceive') return jsonOutput(whReceive(data.phone, data.receipt));
     if (data.action === 'whCatalog') return jsonOutput(whCatalog(data.phone, data.rev));
@@ -4512,7 +4514,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v104';
+var CODE_VERSION = 'v105';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6059,6 +6061,44 @@ function whObjects(phone) {
     out.push({ name: nm, foreman: fp ? (names[fp] || '') : '', foremanPhone: fp || '' });
   });
   return { status: 'ok', objects: out };
+}
+// Где оборудование: по журналу движений — отправлено на объект минус принято
+// с этого объекта (по каждой позиции с типом «Оборудование»).
+function whEquipment(phone) {
+  var a = whAuth_(phone); if (!a.ok) return { status: 'error', message: a.error };
+  var sh = whSheet_(), n = sh.getLastRow() - 1;
+  var eq = {};
+  (n > 0 ? sh.getRange(2, 1, n, WH_HEADERS.length).getValues() : []).forEach(function (r) {
+    var it = whRowToItem_(r);
+    if (it.type === 'Оборудование' && it.id) eq[it.id] = { id: it.id, name: it.name, unit: it.unit, warehouse: it.qty, location: it.location, objects: {} };
+  });
+  var lg = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(WH_LOG_SHEET);
+  if (lg && lg.getLastRow() > 1) {
+    lg.getRange(2, 1, lg.getLastRow() - 1, 9).getValues().forEach(function (r) {
+      var e = eq[String(r[2])]; if (!e) return;
+      var op = String(r[5] || ''), d = Number(r[6]) || 0, m;
+      if ((m = /^Отправка на объект «(.+)»$/.exec(op))) {
+        var o = e.objects[m[1]] || (e.objects[m[1]] = { qty: 0, since: null });
+        o.qty += -d; if (r[0] instanceof Date) o.since = r[0];
+      } else if ((m = /^Приёмка с объекта «(.+)»$/.exec(op))) {
+        var o2 = e.objects[m[1]] || (e.objects[m[1]] = { qty: 0, since: null });
+        o2.qty -= d;
+      }
+    });
+  }
+  var items = [], byObj = {};
+  Object.keys(eq).forEach(function (id) {
+    var e = eq[id], objs = [];
+    Object.keys(e.objects).forEach(function (on) {
+      var q = Math.round(e.objects[on].qty * 1000) / 1000;
+      if (q <= 0) return; // вернули всё (или привезли то, что раньше не отправляли)
+      var since = e.objects[on].since ? Utilities.formatDate(e.objects[on].since, 'Europe/Moscow', 'dd.MM.yyyy') : '';
+      objs.push({ object: on, qty: q, since: since });
+      (byObj[on] = byObj[on] || []).push({ id: id, name: e.name, unit: e.unit, qty: q, since: since });
+    });
+    items.push({ id: id, name: e.name, unit: e.unit, warehouse: e.warehouse, location: e.location, objects: objs });
+  });
+  return { status: 'ok', items: items, byObject: byObj };
 }
 // Отправка машины на объект: позиции списываются со склада (не больше остатка),
 // в журнал — «Отправка на объект …» с номером; шапка — в лист «Отправки».
