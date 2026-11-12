@@ -1,3 +1,4 @@
+// v116: перенос старых расходов прорабов — и при открытии «Расходов» администратором.
 // v115: расходы прораба из подотчёта (и комиссия за ИП) пишутся в главную таблицу расходов: «Оплачено», «Оплатил» — прораб; старые из «Расходы прорабов» переносятся.
 // v114: «Сотрудники» — колонки ищутся по заголовкам; роли — чекбоксы «Прораб», «Кладовщик», «Снабжение» (плюс старая текстовая «Роли»).
 // v113: расход «Прочее» (без работника и бригадира — объект, сумма, комментарий, статус); у прораба «Оплачено» пишет его в «Оплатил».
@@ -4491,6 +4492,7 @@ function expFmSummary_(summary, rows) {
 function adminExpenseOverview(phone) {
   var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
+  try { fmMigrateOldExp_(); } catch (e) { /* перенос — в следующий раз */ }
   var lay = expenseLayout_();
   if (lay.error) return { status: 'error', message: lay.error };
   var sheet = lay.sheet, cols = lay.cols;
@@ -4601,7 +4603,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v115';
+var CODE_VERSION = 'v116';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
