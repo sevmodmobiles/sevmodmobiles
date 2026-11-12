@@ -1,3 +1,4 @@
+// v123: автоприход ставится временем первого появления в сети объекта; начало открытых смен сверяется с журналом «Учет» (правки в таблице подхватываются).
 // v122: автоприход по Wi-Fi — в любое время суток; ночное закрытие не трогает смену, пока человек в сети объекта, и закрывает и ночные смены.
 // v121: последнее время в сети объекта, если его нет в состоянии, — из журнала «Wi-Fi присутствие» («вышел из сети объекта»).
 // v120: Wi-Fi — появился в сети другого объекта: смена на прежнем закрывается последним временем в его сети (даже если сеть уже потеряна), затем приход.
@@ -4611,7 +4612,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v122';
+var CODE_VERSION = 'v123';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4795,6 +4796,7 @@ function autoUpdateHourly() {
   try { apkCleanupInviteCopies_(); } catch (e) { /* не мешаем автообновлению */ }
   try { fmReportReminder_(); } catch (e) { /* не мешаем автообновлению */ }
   try { fmDailyReportTasks_(); } catch (e) { /* не мешаем автообновлению */ }
+  try { reconcileOpenShiftSince_(); } catch (e) { /* не мешаем автообновлению */ }
   selfUpdate_('проверка раз в час', '');
 }
 
@@ -5047,6 +5049,23 @@ function adminSalaryReport(phone, month) {
 // Время прихода открытой смены, если его нет в карте (смена открыта до v68):
 // последний «Приход» этого телефона в журнале «Учет». Найденное время
 // сохраняется в карту, чтобы больше не искать.
+// Раз в час: начало открытых смен — по последнему «Приходу» в журнале «Учет»
+// (если время прихода поправили в таблице, приложение покажет исправленное).
+function reconcileOpenShiftSince_() {
+  var map = getOpenShiftsMap_(), phones = Object.keys(map);
+  if (!phones.length) return;
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var n = Math.min(sheet.getLastRow() - 1, 1500), data = sheet.getRange(sheet.getLastRow() - n + 1, 1, n, 5).getValues(), seen = {}, changed = false;
+  for (var i = data.length - 1; i >= 0; i--) {
+    var p = normalizePhone_(data[i][2]); if (!map[p] || seen[p]) continue;
+    seen[p] = true;
+    if (data[i][4] === 'Приход' && data[i][0] instanceof Date && Math.abs((Number(map[p].since) || 0) - data[i][0].getTime()) > 60000) {
+      map[p].since = data[i][0].getTime(); changed = true;
+    }
+  }
+  if (changed) saveOpenShiftsMap_(map);
+}
 function openShiftSinceFromLog_(phone) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Учет');
   if (!sheet || sheet.getLastRow() < 2) return null;
@@ -5911,7 +5930,9 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
       }
     }
     if (!os.open && !hadArrivalToday_(p, office)) {
-      var r = logEvent(emp.name, p, office, 'Приход', null, now.getTime(), 'wifi' + p + toIsoDate_(now).replace(/-/g, '') + '_' + objKey_(office).replace(/[^a-zа-я0-9]/gi, '').slice(0, 20), ip, ssid, bssid);
+      // время прихода — первое появление в сети объекта (если приход ставится позже, например после закрытия прежней смены)
+      var inAt = cur.since && cur.since < now.getTime() && toIsoDate_(new Date(cur.since)) === toIsoDate_(now) ? cur.since : now.getTime();
+      var r = logEvent(emp.name, p, office, 'Приход', null, inAt, 'wifi' + p + toIsoDate_(now).replace(/-/g, '') + '_' + objKey_(office).replace(/[^a-zа-я0-9]/gi, '').slice(0, 20), ip, ssid, bssid);
       var okIn = r && r.status === 'ok';
       // отказ — в журнал не чаще раза в день (телефон проверяет каждые ~15 минут)
       if (okIn || cur.failDay !== toIsoDate_(now)) {
@@ -5919,7 +5940,7 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
         if (!okIn) { cur.failDay = toIsoDate_(now); st[p] = cur; wifiSave_(WIFI_STATE_KEY, st); }
       }
       res.checkedIn = !!(r && r.status === 'ok');
-      if (res.checkedIn) sendPush_([p], 'Приход отмечен автоматически', office + ', ' + clockStr_(now) + ' — по Wi-Fi объекта', { screen: 'scan', tag: 'shift' });
+      if (res.checkedIn) sendPush_([p], 'Приход отмечен автоматически', office + ', ' + clockStr_(new Date(inAt)) + ' — по Wi-Fi объекта', { screen: 'scan', tag: 'shift' });
     }
   } else if (cur.in) {
     // время — последнее присутствие в сети; когда заметили выход — в примечании
