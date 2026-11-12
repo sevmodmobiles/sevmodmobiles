@@ -1,3 +1,4 @@
+// v119: ежедневная задача прорабу «Фотоотчёт» по каждому его объекту (в 9:00 по будням), закрывается сама при загрузке фотоотчёта.
 // v118: авто-приход по Wi-Fi передаёт в отметку имя сети и роутер (раньше требовалась геолокация, если офис узнан не по IP); отказ пишется в журнал раз в день.
 // v117: расходы прораба из подотчёта — в «Работник» имя прораба, объект по умолчанию — последний закреплённый за ним.
 // v116: перенос старых расходов прорабов — и при открытии «Расходов» администратором.
@@ -4607,7 +4608,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v118';
+var CODE_VERSION = 'v119';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4790,6 +4791,7 @@ function autoUpdateHourly() {
   try { autoCloseStaleShifts_(); } catch (e) { /* не мешаем автообновлению */ }
   try { apkCleanupInviteCopies_(); } catch (e) { /* не мешаем автообновлению */ }
   try { fmReportReminder_(); } catch (e) { /* не мешаем автообновлению */ }
+  try { fmDailyReportTasks_(); } catch (e) { /* не мешаем автообновлению */ }
   selfUpdate_('проверка раз в час', '');
 }
 
@@ -6473,6 +6475,79 @@ function fmAddExpense(phone, ex) {
   if (res.status !== 'ok') return res;
   return { status: 'ok', balance: fmBalanceOf_(emp.name, p).balance };
 }
+// ----- Ежедневная задача «Фотоотчёт» -----
+// По будням с 9:00 (раз в день) у прораба в «Задачах» — по задаче на каждый его
+// объект. Задача одна на объект: невыполненная вчерашняя переносится на сегодня.
+// Закрывается сама, когда по объекту загружен фотоотчёт (fmReport).
+var FM_REP_TASK_PREFIX = 'rep_';
+function fmRepTaskId_(phone, obj) {
+  var h = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, objKey_(obj), Utilities.Charset.UTF_8)).slice(0, 10);
+  return FM_REP_TASK_PREFIX + phone + '_' + h;
+}
+function fmRepTaskText_(day) {
+  return 'Ежедневный фотоотчёт за ' + Utilities.formatDate(day, 'Europe/Moscow', 'dd.MM') +
+    ': сфотографируйте, что сделано за день, и загрузите в «Объекты → Фотоотчёт» (или кнопкой ниже).';
+}
+function fmDailyReportTasks_() {
+  var now = new Date(), h = Number(Utilities.formatDate(now, 'Europe/Moscow', 'H')), dow = now.getDay();
+  if (h < 9 || dow === 0 || dow === 6) return;
+  var props = PropertiesService.getScriptProperties(), today = toIsoDate_(now);
+  if (props.getProperty('fmRepTasks') === today) return;
+  props.setProperty('fmRepTasks', today);
+  var objSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
+  if (!objSh || objSh.getLastRow() < 2) return;
+  var byForeman = {};
+  objSh.getRange(2, 1, objSh.getLastRow() - 1, OBJ_COL.FOREMAN).getValues().forEach(function (r) {
+    var fp = normalizePhone_(r[OBJ_COL.FOREMAN - 1]), o = String(r[0]).trim();
+    if (fp && o && (byForeman[fp] = byForeman[fp] || []).indexOf(o) < 0) byForeman[fp].push(o);
+  });
+  var sheet = getOrCreateTasksSheet_(), n = sheet.getLastRow() - 1;
+  var data = n > 0 ? sheet.getRange(2, 1, n, TASKS_SHEET_COLUMNS.length).getValues() : [], rowOf = {};
+  data.forEach(function (r, i) { if (String(r[TASK_COL.ID - 1]).indexOf(FM_REP_TASK_PREFIX) === 0) rowOf[String(r[TASK_COL.ID - 1])] = { i: i, status: r[TASK_COL.STATUS - 1] }; });
+  var day = startOfDay_(now);
+  Object.keys(byForeman).forEach(function (fp) {
+    var emp = findEmployeeByPhone(fp); if (!emp) return;
+    var made = [];
+    byForeman[fp].forEach(function (obj) {
+      var id = fmRepTaskId_(fp, obj), ex = rowOf[id];
+      if (ex && ex.status !== TASK_STATUS.DONE) {
+        // вчерашняя не выполнена — переносим на сегодня
+        var rr = ex.i + 2;
+        sheet.getRange(rr, TASK_COL.TEXT).setValue(fmRepTaskText_(day));
+        sheet.getRange(rr, TASK_COL.CREATED).setValue(now);
+        made.push(obj); return;
+      }
+      if (ex) { // выполнена раньше — открываем заново на сегодня
+        var r2 = ex.i + 2;
+        sheet.getRange(r2, 1, 1, TASKS_SHEET_COLUMNS.length).setValues([[id, fp, emp.name, obj, fmRepTaskText_(day), '', TASK_STATUS.NEW, now, '', '', '', '', '', 'Нет']]);
+        made.push(obj); return;
+      }
+      var row = [];
+      row[TASK_COL.ID - 1] = id; row[TASK_COL.PHONE - 1] = fp; row[TASK_COL.NAME - 1] = emp.name; row[TASK_COL.OBJECT - 1] = obj;
+      row[TASK_COL.TEXT - 1] = fmRepTaskText_(day); row[TASK_COL.PHOTOS_TASK - 1] = ''; row[TASK_COL.STATUS - 1] = TASK_STATUS.NEW;
+      row[TASK_COL.CREATED - 1] = now; row[TASK_COL.PHOTOS_BEFORE - 1] = ''; row[TASK_COL.STARTED - 1] = ''; row[TASK_COL.PHOTOS_AFTER - 1] = '';
+      row[TASK_COL.COMMENT - 1] = ''; row[TASK_COL.COMPLETED - 1] = ''; row[TASK_COL.PHOTO_REPORT - 1] = 'Нет';
+      sheet.appendRow(row);
+      made.push(obj);
+    });
+    if (made.length) sendPush_([fp], 'Фотоотчёт за сегодня', (made.length === 1 ? 'Объект: ' : 'Объекты: ') + made.join(', ') + '. Задача — в «Задачах».', { screen: 'tasks', tag: 'rep-task' });
+  });
+}
+// Фотоотчёт загружен — закрыть задачу по этому объекту.
+function fmCloseReportTask_(phone, obj, photos, comment) {
+  var sheet = getOrCreateTasksSheet_(), n = sheet.getLastRow() - 1; if (n < 1) return;
+  var id = fmRepTaskId_(phone, obj), ids = sheet.getRange(2, TASK_COL.ID, n, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) !== id) continue;
+    var r = i + 2;
+    if (sheet.getRange(r, TASK_COL.STATUS).getValue() === TASK_STATUS.DONE) return;
+    sheet.getRange(r, TASK_COL.STATUS).setValue(TASK_STATUS.DONE);
+    sheet.getRange(r, TASK_COL.PHOTOS_AFTER).setValue((photos || []).join(', '));
+    sheet.getRange(r, TASK_COL.COMMENT).setValue('Фотоотчёт: ' + (photos || []).length + ' фото' + (comment ? ' · ' + comment : ''));
+    sheet.getRange(r, TASK_COL.COMPLETED).setValue(new Date());
+    return;
+  }
+}
 // ----- Фотоотчёты прораба -----
 // Фото загружаются по одному (uploadPhoto, label 'report') в «Фотоотчёты»,
 // при сохранении отчёта переезжают в «Фотоотчёты / Объект / ГГГГ-ММ-ДД».
@@ -6512,6 +6587,7 @@ function fmReport(phone, rep) {
     sh.setFrozenRows(1);
   }
   sh.appendRow([day, obj, emp.name, photos.length, String(rep.comment || '').trim().slice(0, 1000), photos.join(', '), folder.getUrl(), new Date()]);
+  if (dayIso === toIsoDate_(new Date())) { try { fmCloseReportTask_(p, obj, photos, String(rep.comment || '').trim().slice(0, 300)); } catch (e) {} }
   var r = sh.getLastRow();
   sh.getRange(r, 1).setNumberFormat('dd.MM.yyyy'); sh.getRange(r, 8).setNumberFormat('dd.MM.yyyy HH:mm');
   return { status: 'ok', folder: folder.getUrl() };

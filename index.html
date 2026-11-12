@@ -2005,6 +2005,11 @@
           <div id="taskDetailCompletedMeta" class="taskDate"></div>
         </div>
 
+        <!-- Ежедневный фотоотчёт прораба: вместо «приступить / выполнить» — сразу форма отчёта -->
+        <div id="taskRepAction" style="display:none; margin-top:16px;">
+          <button id="taskRepBtn" type="button">Сделать фотоотчёт</button>
+          <div class="ctHint" style="margin-top:6px;">Задача закроется сама, когда фотоотчёт по объекту будет загружен.</div>
+        </div>
         <!-- Шаг 1: приступить к выполнению -->
         <div id="taskStartAction" style="display:none; margin-top:16px;">
           <button id="taskStartBtn" type="button">Приступить к выполнению</button>
@@ -3415,7 +3420,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], fmReport: ['fmReports'], fmAddExpense: ['fmCash'], adminFmTransfer: ['adminFmCash', 'fmCash', 'adminExpenseOverview'], whReceive: ['whGetItems', 'whEquipment', 'whTrucks'], whShip: ['whGetItems', 'whEquipment', 'whTrucks'], whMove: ['whEquipment', 'whTrucks']
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], fmReport: ['fmReports', 'getMyTasks', 'getTaskById', 'adminGetTasks'], fmAddExpense: ['fmCash'], adminFmTransfer: ['adminFmCash', 'fmCash', 'adminExpenseOverview'], whReceive: ['whGetItems', 'whEquipment', 'whTrucks'], whShip: ['whGetItems', 'whEquipment', 'whTrucks'], whMove: ['whEquipment', 'whTrucks']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -5010,7 +5015,8 @@
     document.getElementById('screenFmRep').style.display = 'block';
     showBottomNav(); setActiveNav('fmRep'); pushScreenState('fmRep');
     var sel = document.getElementById('fmrObj');
-    var list = fmMyObjects.length ? fmMyObjects : (fmLastAtt && fmLastAtt.groups || []).map(function (g) { return g.object; });
+    var list = (fmMyObjects.length ? fmMyObjects : (fmLastAtt && fmLastAtt.groups || []).map(function (g) { return g.object; })).slice();
+    if (obj && list.indexOf(obj) < 0) list.push(obj);
     sel.innerHTML = (list.length > 1 ? '<option value="">— выберите объект —</option>' : '') + list.map(function (o) {
       return '<option value="' + escapeHtml(o) + '"' + (o === obj ? ' selected' : '') + '>' + escapeHtml(o) + '</option>';
     }).join('');
@@ -7206,7 +7212,12 @@
       document.getElementById('taskDetailCompletedMeta').textContent = 'Выполнено: ' + (t.completedAt || '');
     }
     if (!mine) { startAction.style.display = 'none'; completeAction.style.display = 'none'; }
+    var isRep = String(t.id || '').indexOf('rep_') === 0;
+    document.getElementById('taskRepAction').style.display = isRep && mine && t.status !== 'Выполнена' ? 'block' : 'none';
+    document.getElementById('taskRepBtn').setAttribute('data-obj', t.objectName || '');
+    if (isRep) { startAction.style.display = 'none'; completeAction.style.display = 'none'; }
   }
+  document.getElementById('taskRepBtn').addEventListener('click', function () { openFmRep_(this.getAttribute('data-obj')); });
 
   document.getElementById('taskDetailBackLink').addEventListener('click', function () {
     showTasksScreen();
