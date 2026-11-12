@@ -1696,6 +1696,15 @@
   .fmCnt { display: flex; gap: 6px; flex-wrap: wrap; }
   .fmObj .tmRow { margin-bottom: 6px; }
   .fmObj .tmRow:last-child { margin-bottom: 0; }
+  .fmRepBtn { margin: 10px 0 0; padding: 10px; font-size: 14.5px; background: var(--blue); }
+  .fmRepHas { margin-top: 10px; }
+  .fmRepHas .photoGrid { display: flex; margin-top: 6px; }
+  .frCard { border: 1px solid var(--border); border-radius: 16px; padding: 12px; margin-top: 10px; }
+  .frHead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .frHead b { font-size: 15.5px; }
+  .frHead span { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .frCard .photoGrid { display: flex; margin-top: 8px; }
+  .frCmt { margin-top: 8px; font-size: 14px; line-height: 1.4; }
   .whTag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: rgba(66,133,244,.13); color: var(--blue); margin-left: 6px; vertical-align: 1px; }
   #bottomNavInner {
     width: 100%;
@@ -2703,7 +2712,18 @@
       <h1 style="margin-top:0;">Мои объекты</h1>
       <div class="whoami" id="fmSummary">&nbsp;</div>
     </div>
-    <div class="card tasksCard">
+    <div class="card" style="padding:6px;">
+      <div class="segCtl" id="fmTab" style="margin:0;">
+        <button type="button" data-t="att" class="on">Посещаемость</button>
+        <button type="button" data-t="rep">Фотоотчёты</button>
+      </div>
+    </div>
+    <div class="card tasksCard" id="fmRepBox" style="display:none;">
+      <button id="fmRepNew" type="button">Сделать фотоотчёт</button>
+      <div id="fmRepChips" class="expChips" style="margin-top:10px;"></div>
+      <div id="fmRepList"></div>
+    </div>
+    <div class="card tasksCard" id="fmAttBox">
       <div class="fmDateRow">
         <div class="segCtl" id="fmDaySeg" style="margin:0; flex:1;">
           <button type="button" data-d="0" class="on">Сегодня</button>
@@ -2712,6 +2732,28 @@
         <input id="fmDate" type="date" aria-label="Другая дата">
       </div>
       <div id="fmList"></div>
+    </div>
+  </div>
+
+  <!-- Прораб: новый фотоотчёт -->
+  <div id="screenFmRep" style="display:none;">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Фотоотчёт</h1>
+      <div class="switchUser"><a id="fmrBack">← Мои объекты</a></div>
+    </div>
+    <div class="card">
+      <label for="fmrObj">Объект *</label>
+      <select id="fmrObj"></select>
+      <label for="fmrDate">Дата</label>
+      <input id="fmrDate" type="date">
+      <label>Фото *</label>
+      <input id="fmrPhotoInput" type="file" accept="image/*" multiple>
+      <div class="ctHint" style="margin:-4px 0 8px;">Можно выбрать сразу много фото из галереи или снять камерой — загружаются сразу.</div>
+      <div id="fmrPhotoPreview" class="photoPreviewRow"></div>
+      <label for="fmrComment">Что сделано за день</label>
+      <textarea id="fmrComment" rows="3" placeholder="Например: смонтирован каркас перегородок 2 этажа, начата обшивка"></textarea>
+      <button id="fmrSave" type="button">Сохранить фотоотчёт</button>
+      <div id="fmrStatus" style="margin-top:10px;"></div>
     </div>
   </div>
 
@@ -3240,7 +3282,7 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, fmAttendance: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, whTrucks: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, fmAttendance: 1, fmReports: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, whTrucks: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
@@ -3260,7 +3302,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], whReceive: ['whGetItems', 'whEquipment', 'whTrucks'], whShip: ['whGetItems', 'whEquipment', 'whTrucks'], whMove: ['whEquipment', 'whTrucks']
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], fmReport: ['fmReports'], whReceive: ['whGetItems', 'whEquipment', 'whTrucks'], whShip: ['whGetItems', 'whEquipment', 'whTrucks'], whMove: ['whEquipment', 'whTrucks']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -3670,6 +3712,7 @@
     if (name !== 'whRecv') { var w3 = document.getElementById('screenWhRecv'); if (w3) w3.style.display = 'none'; }
     if (name !== 'whTrucks') { var w4 = document.getElementById('screenWhTrucks'); if (w4) w4.style.display = 'none'; }
     if (name !== 'fm') { var w5 = document.getElementById('screenFm'); if (w5) w5.style.display = 'none'; }
+    if (name !== 'fmRep') { var w6 = document.getElementById('screenFmRep'); if (w6) w6.style.display = 'none'; }
     // Если show*Screen() сейчас вызван ИЗ обработчика popstate (то есть
     // браузер уже сам переместил указатель истории назад/вперёд) — заново
     // ничего не пушим, иначе история будет расти в обе стороны одновременно.
@@ -3738,6 +3781,7 @@
       case 'whRecv': showWarehouseScreen(); break;
       case 'whTrucks': showWarehouseScreen(); break;
       case 'fm': showFmScreen_(); break;
+      case 'fmRep': showFmScreen_(); break;
         default: showScanScreen();
       }
   }
@@ -3894,7 +3938,7 @@
     profile: 'navProfileBtn',
     absence: 'navProfileBtn',
     expenses: 'navExpBtn',
-    wh: 'navExpBtn', whItem: 'navExpBtn', fm: 'navExpBtn'
+    wh: 'navExpBtn', whItem: 'navExpBtn', fm: 'navExpBtn', fmRep: 'navExpBtn'
   };
   function setActiveNav(screenName) {
     var activeId = NAV_ACTIVE_MAP[screenName] || null;
@@ -4780,8 +4824,91 @@
     document.getElementById('screenFm').style.display = 'block';
     showBottomNav(); setActiveNav('fm'); pushScreenState('fm');
     if (!fmDate) fmDate = tmToday_();
-    loadFm_();
+    fmApplyTab_();
+    if (fmTab === 'rep') loadFmReports_(); else loadFm_();
   }
+  // ----- Фотоотчёты -----
+  var fmTab = 'att', fmRepDays = 7, fmRepObj = '', fmRepRes = null, fmDayRep = {}, fmMyObjects = [];
+  try { fmTab = localStorage.getItem('sevmod_fm_tab') || 'att'; } catch (e) {}
+  function fmApplyTab_() {
+    segSet_('fmTab', fmTab);
+    document.getElementById('fmRepBox').style.display = fmTab === 'rep' ? '' : 'none';
+    document.getElementById('fmAttBox').style.display = fmTab === 'att' ? '' : 'none';
+  }
+  document.getElementById('fmTab').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-t]'); if (!b) return;
+    fmTab = b.getAttribute('data-t');
+    try { localStorage.setItem('sevmod_fm_tab', fmTab); } catch (err) {}
+    fmApplyTab_(); if (fmTab === 'rep') loadFmReports_(); else loadFm_();
+  });
+  function loadFmReports_() {
+    var t = tmToday_(), from = new Date(t.getFullYear(), t.getMonth(), t.getDate() - (fmRepDays - 1));
+    var body = { action: 'fmReports', phone: currentUser && currentUser.phone, from: tmIso_(from), to: tmIso_(t) }, list = document.getElementById('fmRepList');
+    if (!swrHas_(body)) list.innerHTML = skeletonHtml_(3);
+    swrLoad_(body, function (res) {
+      if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
+      fmRepRes = res; fmMyObjects = res.objects || []; renderFmReports_();
+    }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+  }
+  function fmDayLabel_(iso) {
+    var p = iso.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]), diff = Math.round((tmToday_() - d) / 86400000);
+    return (diff === 0 ? 'Сегодня, ' : diff === 1 ? 'Вчера, ' : '') + tmFmt_(d) + ', ' + TM_DOW[d.getDay()];
+  }
+  function renderFmReports_() {
+    var res = fmRepRes; if (!res) return;
+    var objs = {}; res.items.forEach(function (x) { objs[x.object] = (objs[x.object] || 0) + 1; });
+    document.getElementById('fmRepChips').innerHTML = [[7, '7 дней'], [30, '30 дней'], [90, '3 месяца']].map(function (p) {
+      return '<button type="button" class="expChip' + (fmRepDays === p[0] ? ' on' : '') + '" data-days="' + p[0] + '">' + p[1] + '</button>';
+    }).join('') + (Object.keys(objs).length > 1 ? Object.keys(objs).sort(function (a, b) { return a.localeCompare(b, 'ru'); }).map(function (o) {
+      return '<button type="button" class="expChip' + (fmRepObj === o ? ' on' : '') + '" data-obj="' + escapeHtml(o) + '">' + escapeHtml(o) + ' ' + objs[o] + '</button>';
+    }).join('') : '');
+    var shown = res.items.filter(function (x) { return !fmRepObj || x.object === fmRepObj; }), last = '';
+    document.getElementById('fmRepList').innerHTML = shown.length ? shown.map(function (x) {
+      var head = '';
+      if (x.date !== last) { last = x.date; head = '<div class="tmShHead">' + escapeHtml(fmDayLabel_(x.date)) + '</div>'; }
+      return head + '<div class="frCard"><div class="frHead"><b>' + escapeHtml(x.object) + '</b><span>' + x.photos.length + ' фото · ' + escapeHtml(personShort_(x.by) || x.by) + (x.at ? ', ' + escapeHtml(x.at) : '') + '</span></div>' +
+        '<div class="photoGrid">' + photoStripInner_(x.photos) + '</div>' + (x.comment ? '<div class="frCmt">' + escapeHtml(x.comment) + '</div>' : '') + '</div>';
+    }).join('') : '<div class="statsEmpty">' + (fmMyObjects.length ? 'За этот период фотоотчётов нет' : 'За вами пока не закреплён ни один объект') + '</div>';
+  }
+  document.getElementById('fmRepChips').addEventListener('click', function (e) {
+    var b = e.target.closest('.expChip'); if (!b) return;
+    if (b.hasAttribute('data-days')) { fmRepDays = Number(b.getAttribute('data-days')); loadFmReports_(); return; }
+    var o = b.getAttribute('data-obj'); fmRepObj = fmRepObj === o ? '' : o; renderFmReports_();
+  });
+  // форма нового фотоотчёта
+  var fmrUp = photoUploader_('fmrPhotoInput', 'fmrPhotoPreview', 'report');
+  function openFmRep_(obj) {
+    hideAllScreens_();
+    document.getElementById('screenFmRep').style.display = 'block';
+    showBottomNav(); setActiveNav('fmRep'); pushScreenState('fmRep');
+    var sel = document.getElementById('fmrObj');
+    var list = fmMyObjects.length ? fmMyObjects : (fmLastAtt && fmLastAtt.groups || []).map(function (g) { return g.object; });
+    sel.innerHTML = (list.length > 1 ? '<option value="">— выберите объект —</option>' : '') + list.map(function (o) {
+      return '<option value="' + escapeHtml(o) + '"' + (o === obj ? ' selected' : '') + '>' + escapeHtml(o) + '</option>';
+    }).join('');
+    document.getElementById('fmrDate').value = tmIso_(tmToday_());
+    document.getElementById('fmrDate').max = tmIso_(tmToday_());
+    document.getElementById('fmrComment').value = '';
+    document.getElementById('fmrStatus').textContent = '';
+    fmrUp.reset();
+  }
+  document.getElementById('fmRepNew').addEventListener('click', function () { openFmRep_(fmRepObj || ''); });
+  document.getElementById('fmrBack').addEventListener('click', function () { showFmScreen_(); });
+  document.getElementById('fmrSave').addEventListener('click', function () {
+    var st = document.getElementById('fmrStatus'), btn = this, obj = document.getElementById('fmrObj').value;
+    if (!obj) { st.textContent = 'Выберите объект'; st.className = 'error'; return; }
+    withUploadedPhotos_(fmrUp, st, btn, function (urls) {
+      if (!urls.length) { st.textContent = 'Добавьте хотя бы одно фото'; st.className = 'error'; return; }
+      btn.disabled = true; st.className = ''; st.textContent = 'Сохраняю…';
+      apiPost({ action: 'fmReport', phone: currentUser.phone, report: { object: obj, date: document.getElementById('fmrDate').value, comment: document.getElementById('fmrComment').value.trim(), photos: urls } }).then(function (res) {
+        btn.disabled = false;
+        if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не сохранилось'; st.className = 'error'; return; }
+        toast_('Фотоотчёт сохранён: ' + obj + ', ' + urls.length + ' фото', 'ok');
+        fmrUp.reset(); fmTab = 'rep'; showFmScreen_();
+      }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
+    });
+  });
+  var fmLastAtt = null;
   function loadFm_() {
     var t = tmToday_(), diff = Math.round((t - fmDate) / 86400000);
     segSet_('fmDaySeg', '');
@@ -4793,14 +4920,21 @@
     swrLoad_(body, function (res) {
       if (JSON.stringify({ action: 'fmAttendance', phone: currentUser && currentUser.phone, date: tmIso_(fmDate) }) !== key) return;
       if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
-      renderFm_(res);
+      fmLastAtt = res; renderFm_(res);
     }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+    var rb = { action: 'fmReports', phone: currentUser && currentUser.phone, from: tmIso_(fmDate), to: tmIso_(fmDate) };
+    swrLoad_(rb, function (r) {
+      if (!r || r.status !== 'ok' || r.from !== tmIso_(fmDate)) return;
+      fmDayRep = {}; (r.items || []).forEach(function (x) { (fmDayRep[x.object] = fmDayRep[x.object] || []).push.apply(fmDayRep[x.object], x.photos); });
+      if (!fmMyObjects.length) fmMyObjects = r.objects || [];
+      if (fmLastAtt) renderFm_(fmLastAtt);
+    }, function () {});
   }
   function renderFm_(res) {
     var list = document.getElementById('fmList'), isToday = res.date === res.today;
     if (res.note) { list.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.note) + '</div>'; document.getElementById('fmSummary').textContent = ''; return; }
     var totalNow = 0, totalCame = 0;
-    var html = (res.all ? '<div class="ctHint" style="margin-top:8px;">За вами не закреплены объекты — показаны все (вы администратор).</div>' : '') + res.groups.map(function (g) {
+    var html = res.groups.map(function (g) {
       var now = g.people.filter(function (x) { return x.onShift !== undefined; }).length, late = g.people.filter(function (x) { return x.late > 0; }).length;
       totalNow += now; totalCame += g.people.length;
       var cnt = (isToday ? '<span class="tmPill g">на смене ' + now + '</span>' : '') + '<span class="tmPill b">был' + (g.people.length === 1 ? '' : 'и') + ' ' + g.people.length + '</span>' + (late ? '<span class="tmPill o">опозд. ' + late + '</span>' : '');
@@ -4813,13 +4947,19 @@
         if (x.closeNote === 'auto') sub.push('<span class="warn">уход не отмечен</span>');
         return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(x.name) + '</span>' + pill + '</div><div class="tmSub">' + sub.join('') + '</div></div>';
       }).join('');
+      var ph = fmDayRep[g.object] || [];
+      var rep = ph.length ? '<div class="fmRepHas"><span class="tmPill g">фотоотчёт · ' + ph.length + ' фото</span><div class="photoGrid">' + photoStripInner_(ph.slice(0, 12)) + '</div></div>' : '';
       return '<div class="fmObj"><div class="fmObjHead"><b>' + escapeHtml(g.object) + '</b><div class="fmCnt">' + cnt + '</div></div>' +
-        (rows || '<div class="ctHint">' + (isToday ? 'Сегодня пока никто не отмечался' : 'В этот день никто не отмечался') + '</div>') + '</div>';
+        (rows || '<div class="ctHint">' + (isToday ? 'Сегодня пока никто не отмечался' : 'В этот день никто не отмечался') + '</div>') + rep +
+        (isToday ? '<button type="button" class="fmRepBtn" data-obj="' + escapeHtml(g.object) + '">' + (ph.length ? 'Добавить фото в отчёт' : 'Сделать фотоотчёт') + '</button>' : '') + '</div>';
     }).join('');
     list.innerHTML = html || '<div class="statsEmpty">Нет объектов</div>';
     var d = fmDate;
     document.getElementById('fmSummary').textContent = (isToday ? 'Сейчас на смене: ' + totalNow + ' · ' : '') + 'отметились ' + (isToday ? 'сегодня' : ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2)) + ': ' + totalCame;
   }
+  document.getElementById('fmList').addEventListener('click', function (e) {
+    var b = e.target.closest('.fmRepBtn'); if (b) openFmRep_(b.getAttribute('data-obj'));
+  });
   document.getElementById('fmDaySeg').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-d]'); if (!b) return;
     var t = tmToday_(); fmDate = new Date(t.getFullYear(), t.getMonth(), t.getDate() - Number(b.getAttribute('data-d'))); loadFm_();

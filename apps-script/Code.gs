@@ -1,4 +1,5 @@
-// v108: прораб — «Мои объекты» (fmAttendance): кто на объектах, где он ответственный, за день.
+// v109: прораб — ежедневные фотоотчёты по объектам: Диск «Фотоотчёты/Объект/дата», лист «Фотоотчёты», напоминание в 17:00.
+// v108: прораб — «Мои объекты» (fmAttendance): кто на объектах, где он ответственный (только они), за день.
 // v107: история машин (whTrucks) — приёмки, отправки и переезды из листов «Приёмки» и «Отправки».
 // v106: переезд оборудования с объекта на объект (whMove), учёт в whEquipment.
 // v105: учёт оборудования по объектам (whEquipment) — по журналу отправок и приёмок.
@@ -535,6 +536,8 @@ function doPost(e) {
     if (data.action === 'adminApkSetup') return jsonOutput(adminApkSetup(data.phone));
     if (data.action === 'adminCreateInvite') return jsonOutput(adminCreateInvite(data.phone, data.employee));
     if (data.action === 'whObjects') return jsonOutput(whObjects(data.phone));
+    if (data.action === 'fmReport') return jsonOutput(fmReport(data.phone, data.report));
+    if (data.action === 'fmReports') return jsonOutput(fmReports(data.phone, data.from, data.to));
     if (data.action === 'fmAttendance') return jsonOutput(fmAttendance(data.phone, data.date));
     if (data.action === 'whTrucks') return jsonOutput(whTrucks(data.phone));
     if (data.action === 'whMove') return jsonOutput(whMove(data.phone, data.move));
@@ -2259,9 +2262,9 @@ function uploadPhoto(phone, photo, label) {
   if (typeof photo !== 'string' || photo.indexOf('data:image/') !== 0 || photo.length > 12000000) {
     return { status: 'error', message: 'Неверный файл фото' };
   }
-  var kind = { task: 'задача', before: 'до', after: 'после', wh: 'склад' }[label] || 'фото';
+  var kind = { task: 'задача', before: 'до', after: 'после', wh: 'склад', report: 'отчёт' }[label] || 'фото';
   try {
-    return { status: 'ok', url: savePhoto(photo, emp.name + '_' + kind, label === 'wh' ? 'Фото склада' : 'Фото задач') };
+    return { status: 'ok', url: savePhoto(photo, emp.name + '_' + kind, label === 'wh' ? 'Фото склада' : label === 'report' ? FM_REP_ROOT : 'Фото задач') };
   } catch (e) {
     return { status: 'error', message: 'Не удалось сохранить фото: ' + (e && e.message || e) };
   }
@@ -4520,7 +4523,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v108';
+var CODE_VERSION = 'v109';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -4702,6 +4705,7 @@ function autoUpdateHourly() {
   try { wifiCloseDay_(); } catch (e) { /* не мешаем автообновлению */ }
   try { autoCloseStaleShifts_(); } catch (e) { /* не мешаем автообновлению */ }
   try { apkCleanupInviteCopies_(); } catch (e) { /* не мешаем автообновлению */ }
+  try { fmReportReminder_(); } catch (e) { /* не мешаем автообновлению */ }
   selfUpdate_('проверка раз в час', '');
 }
 
@@ -6127,8 +6131,9 @@ function fmAttendance(phone, dateIso) {
   var p = normalizePhone_(phone);
   if (!p || !findEmployeeByPhone_(p)) return { status: 'error', message: 'Сотрудник не найден' };
   if (!hasRole_(p, 'foreman')) return { status: 'error', message: 'Раздел для прорабов' };
-  var mine = fmObjects_(p), all = !mine.length && adminAuth_(p).ok;
-  if (!mine.length && !all) return { status: 'ok', objects: [], groups: [], note: 'За вами пока не закреплён ни один объект — попросите администратора указать вас ответственным прорабом в «Объекты».' };
+  // только объекты, где он назначен ответственным прорабом
+  var mine = fmObjects_(p), all = false;
+  if (!mine.length) return { status: 'ok', objects: [], groups: [], note: 'За вами пока не закреплён ни один объект — попросите администратора указать вас ответственным прорабом в «Объекты».' };
   var res = adminAttendance(p, dateIso, 'day', '', true);
   if (res.status !== 'ok') return res;
   var set = {}; mine.forEach(function (o) { set[objKey_(o)] = o; });
@@ -6150,6 +6155,95 @@ function fmAttendance(phone, dateIso) {
   var names = all ? Object.keys(groups) : mine;
   return { status: 'ok', date: res.date, today: res.today, all: all,
     groups: names.sort(function (a, b) { return a.localeCompare(b, 'ru'); }).map(function (n) { return { object: n, people: groups[n] || [] }; }) };
+}
+// ----- Фотоотчёты прораба -----
+// Фото загружаются по одному (uploadPhoto, label 'report') в «Фотоотчёты»,
+// при сохранении отчёта переезжают в «Фотоотчёты / Объект / ГГГГ-ММ-ДД».
+var FM_REP_ROOT = 'Фотоотчёты', FM_REP_SHEET = 'Фотоотчёты';
+var FM_REP_HEADERS = ['Дата', 'Объект', 'Кто', 'Фото, шт', 'Комментарий', 'Фото', 'Папка', 'Записано'];
+function fmCanSee_(p) {
+  var mine = fmObjects_(p);
+  return { mine: mine, all: false, ok: hasRole_(p, 'foreman') };
+}
+function fmSubFolder_(parent, name) {
+  var it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+function fmReport(phone, rep) {
+  var p = normalizePhone_(phone), emp = p && findEmployeeByPhone_(p);
+  if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
+  if (!hasRole_(p, 'foreman')) return { status: 'error', message: 'Фотоотчёты — для прорабов' };
+  rep = rep || {};
+  var obj = String(rep.object || '').trim().slice(0, 120);
+  var photos = (Array.isArray(rep.photos) ? rep.photos : []).filter(isUploadedPhotoUrl_).slice(0, 60);
+  if (!obj) return { status: 'error', message: 'Выберите объект' };
+  if (!fmObjects_(p).some(function (o) { return objKey_(o) === objKey_(obj); })) return { status: 'error', message: 'Вы не ответственный прораб объекта «' + obj + '»' };
+  if (!photos.length) return { status: 'error', message: 'Добавьте фото' };
+  var day = parseIsoDate_(rep.date) || startOfDay_(new Date()), dayIso = toIsoDate_(day);
+  var root = fmSubFolder_(DriveApp.getRootFolder(), FM_REP_ROOT);
+  var folder = fmSubFolder_(fmSubFolder_(root, obj.replace(/[\\/]/g, '-')), dayIso);
+  var stamp = Utilities.formatDate(new Date(), 'Europe/Moscow', 'HHmm');
+  photos.forEach(function (u, i) {
+    var m = /\/d\/([A-Za-z0-9_-]{20,})/.exec(u) || /[?&]id=([A-Za-z0-9_-]{20,})/.exec(u);
+    if (!m) return;
+    try { var f = DriveApp.getFileById(m[1]); f.moveTo(folder); f.setName(obj.replace(/[\\/]/g, '-') + '_' + dayIso + '_' + stamp + '_' + (i + 1) + '.jpg'); } catch (e) {}
+  });
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(FM_REP_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(FM_REP_SHEET);
+    sh.getRange(1, 1, 1, FM_REP_HEADERS.length).setValues([FM_REP_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  sh.appendRow([day, obj, emp.name, photos.length, String(rep.comment || '').trim().slice(0, 1000), photos.join(', '), folder.getUrl(), new Date()]);
+  var r = sh.getLastRow();
+  sh.getRange(r, 1).setNumberFormat('dd.MM.yyyy'); sh.getRange(r, 8).setNumberFormat('dd.MM.yyyy HH:mm');
+  return { status: 'ok', folder: folder.getUrl() };
+}
+// Фотоотчёты за период: прораб — по своим объектам (и свои), администратор — все.
+function fmReports(phone, fromIso, toIso) {
+  var p = normalizePhone_(phone);
+  if (!p || !findEmployeeByPhone_(p)) return { status: 'error', message: 'Сотрудник не найден' };
+  var see = fmCanSee_(p);
+  if (!see.ok) return { status: 'error', message: 'Нет доступа' };
+  var emp = findEmployeeByPhone_(p), keys = {};
+  see.mine.forEach(function (o) { keys[objKey_(o)] = 1; });
+  var to = parseIsoDate_(toIso) || startOfDay_(new Date()), from = parseIsoDate_(fromIso) || new Date(to.getTime() - 13 * 86400000);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FM_REP_SHEET), out = [];
+  if (sh && sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, FM_REP_HEADERS.length).getValues().forEach(function (r) {
+      var d = r[0]; if (!(d instanceof Date)) return;
+      var ds = startOfDay_(d); if (ds < from || ds > to) return;
+      if (!keys[objKey_(r[1])]) return;
+      out.push({ date: toIsoDate_(d), object: String(r[1]), by: String(r[2]), comment: String(r[4] || ''), photos: urlsToArray_(r[5]), folder: String(r[6] || ''),
+        at: r[7] instanceof Date ? Utilities.formatDate(r[7], 'Europe/Moscow', 'HH:mm') : '' });
+    });
+  }
+  out.sort(function (a, b) { return b.date.localeCompare(a.date) || a.object.localeCompare(b.object) || b.at.localeCompare(a.at); });
+  return { status: 'ok', from: toIsoDate_(from), to: toIsoDate_(to), objects: see.mine, items: out };
+}
+// В 17:00 по будням — напомнить прорабу о фотоотчёте по объектам, где сегодня
+// работали, но отчёта ещё нет (раз в день).
+function fmReportReminder_() {
+  var now = new Date(), h = Number(Utilities.formatDate(now, 'Europe/Moscow', 'H')), dow = now.getDay();
+  if (h !== 17 || dow === 0 || dow === 6) return;
+  var props = PropertiesService.getScriptProperties(), today = toIsoDate_(now);
+  if (props.getProperty('fmRemind') === today) return;
+  props.setProperty('fmRemind', today);
+  var objSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
+  if (!objSh || objSh.getLastRow() < 2) return;
+  var byForeman = {};
+  objSh.getRange(2, 1, objSh.getLastRow() - 1, OBJ_COL.FOREMAN).getValues().forEach(function (r) {
+    var fp = normalizePhone_(r[OBJ_COL.FOREMAN - 1]), o = String(r[0]).trim();
+    if (fp && o) (byForeman[fp] = byForeman[fp] || []).push(o);
+  });
+  var done = {}, rs = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FM_REP_SHEET);
+  if (rs && rs.getLastRow() > 1) rs.getRange(2, 1, rs.getLastRow() - 1, 2).getValues().forEach(function (r) { if (r[0] instanceof Date && toIsoDate_(r[0]) === today) done[objKey_(r[1])] = 1; });
+  var att = adminAttendance('', today, 'day', '', true), worked = {};
+  (att.items || []).forEach(function (it) { (it.objects || []).forEach(function (o) { worked[objKey_(o)] = 1; }); if (it.onShift) worked[objKey_(it.onShift.object)] = 1; });
+  Object.keys(byForeman).forEach(function (fp) {
+    var need = byForeman[fp].filter(function (o) { return worked[objKey_(o)] && !done[objKey_(o)]; });
+    if (need.length) sendPush_([fp], 'Фотоотчёт за сегодня', 'Нет фотоотчёта: ' + need.join(', ') + '. Объекты → «Фотоотчёт».', { screen: 'fm', tag: 'report' });
+  });
 }
 // История машин: приёмки (лист «Приёмки») и отправки / переезды («Отправки»), новые сверху.
 function whTrucks(phone) {
