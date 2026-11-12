@@ -1,3 +1,4 @@
+// v118: авто-приход по Wi-Fi передаёт в отметку имя сети и роутер (раньше требовалась геолокация, если офис узнан не по IP); отказ пишется в журнал раз в день.
 // v117: расходы прораба из подотчёта — в «Работник» имя прораба, объект по умолчанию — последний закреплённый за ним.
 // v116: перенос старых расходов прорабов — и при открытии «Расходов» администратором.
 // v115: расходы прораба из подотчёта (и комиссия за ИП) пишутся в главную таблицу расходов: «Оплачено», «Оплатил» — прораб; старые из «Расходы прорабов» переносятся.
@@ -4606,7 +4607,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v117';
+var CODE_VERSION = 'v118';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5883,7 +5884,7 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
     var prevObj = cur.in ? cur.object : '', prevSeen = cur.lastSeen;
     if (prevObj && prevObj !== office) wifiLog_(emp.name, p, 'вышел из сети объекта', prevObj, ip, 'перешёл в сеть «' + office + '»', new Date(prevSeen || now));
     if (!cur.in || cur.object !== office) wifiLog_(emp.name, p, 'в сети объекта', office, ip, (ssid ? '«' + ssid + '» ' : '') + 'узнан по: ' + found.by + (reason ? ', ' + reason : ''));
-    cur = { in: true, object: office, since: (cur.in && cur.object === office) ? cur.since : now.getTime(), lastSeen: now.getTime(), ip: ip, last: lastReport };
+    cur = { in: true, object: office, since: (cur.in && cur.object === office) ? cur.since : now.getTime(), lastSeen: now.getTime(), ip: ip, last: lastReport, failDay: cur.failDay, hiddenDay: cur.hiddenDay, unkKey: cur.unkKey };
     st[p] = cur; wifiSave_(WIFI_STATE_KEY, st);
     // авто-приход: первый за день, в разумное время
     var h = Number(Utilities.formatDate(now, 'Europe/Moscow', 'H'));
@@ -5898,8 +5899,13 @@ function wifiPresence(phone, ip, onWifi, reason, ssid, bssid) {
       }
     }
     if (!os.open && h >= 6 && h < WIFI_DAY_CLOSE_HOUR && !hadArrivalToday_(p, office)) {
-      var r = logEvent(emp.name, p, office, 'Приход', null, now.getTime(), 'wifi' + p + toIsoDate_(now).replace(/-/g, ''), ip);
-      wifiLog_(emp.name, p, r && r.status === 'ok' ? 'авто-приход' : 'авто-приход не принят', office, ip, r && r.status === 'ok' ? '' : (r && r.message || ''));
+      var r = logEvent(emp.name, p, office, 'Приход', null, now.getTime(), 'wifi' + p + toIsoDate_(now).replace(/-/g, ''), ip, ssid, bssid);
+      var okIn = r && r.status === 'ok';
+      // отказ — в журнал не чаще раза в день (телефон проверяет каждые ~15 минут)
+      if (okIn || cur.failDay !== toIsoDate_(now)) {
+        wifiLog_(emp.name, p, okIn ? 'авто-приход' : 'авто-приход не принят', office, ip, okIn ? '' : (r && r.message || ''));
+        if (!okIn) { cur.failDay = toIsoDate_(now); st[p] = cur; wifiSave_(WIFI_STATE_KEY, st); }
+      }
       res.checkedIn = !!(r && r.status === 'ok');
       if (res.checkedIn) sendPush_([p], 'Приход отмечен автоматически', office + ', ' + clockStr_(now) + ' — по Wi-Fi объекта', { screen: 'scan', tag: 'shift' });
     }
