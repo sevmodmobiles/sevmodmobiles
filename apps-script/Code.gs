@@ -1,3 +1,4 @@
+// v115: расходы прораба из подотчёта (и комиссия за ИП) пишутся в главную таблицу расходов: «Оплачено», «Оплатил» — прораб; старые из «Расходы прорабов» переносятся.
 // v114: «Сотрудники» — колонки ищутся по заголовкам; роли — чекбоксы «Прораб», «Кладовщик», «Снабжение» (плюс старая текстовая «Роли»).
 // v113: расход «Прочее» (без работника и бригадира — объект, сумма, комментарий, статус); у прораба «Оплачено» пишет его в «Оплатил».
 // v112: подотчёт прораба учитывает и оплаты работникам, где он в «Оплатил»; в «Расходах» прораба — его остаток.
@@ -4411,8 +4412,7 @@ function cashOverview_(rows) {
     var h = h_(r[10]);
     if (h) h.paid += Number(r[5]) || 0;
   });
-  // расходы прорабов из подотчёта (включая комиссию за ведение ИП)
-  fmExpRows_().forEach(function (e) { var h = holders[e.by]; if (h) h.paid += e.amount; });
+
   return {
     holders: order.map(function (k) {
       var h = holders[k];
@@ -4540,7 +4540,7 @@ function adminExpenseOverview(phone) {
   }
   var cash;
   if (auth.foreman) {
-    rows = rows.filter(function (r) { return expObjAllowed_(auth, r[3]); });
+    rows = rows.filter(function (r) { return expObjAllowed_(auth, r[3]) || String(r[10] || '').trim() === auth.name; });
     summary = expFmSummary_(summary, rows);
     var b = fmBalanceOf_(auth.name, auth.phone);
     cash = { holders: [{ name: auth.name, received: b.received, given: b.given, paid: b.spent, balance: b.balance }], moves: [], company: CASH_COMPANY, fm: true };
@@ -4601,7 +4601,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v114';
+var CODE_VERSION = 'v115';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6296,6 +6296,25 @@ function fmAddExpRow_(date, emp, phone, obj, cat, amount, method, comment, photo
   var r = sh.getLastRow();
   sh.getRange(r, 1).setNumberFormat('dd.MM.yyyy'); sh.getRange(r, 6).setNumberFormat('#,##0.00 ₽'); sh.getRange(r, 10).setNumberFormat('dd.MM.yyyy HH:mm');
 }
+// Расход прораба из подотчёта — строкой главной таблицы расходов: без работника,
+// статус «Оплачено», в «Оплатил» — прораб (так он уменьшает его подотчёт).
+function fmMainExpense_(date, name, obj, sum, comment) {
+  var lists = getExpenseRefLists_();
+  var po = obj ? pickFromList_(lists.objects, obj) : '';
+  return writeExpenseRows_(lists, [{ date: date, worker: '', rate: sum, brigadier: '', object: po || '', comment: String(comment || '').slice(0, 500), status: 'ОПЛАЧЕНО', payer: name }]);
+}
+// Разовый перенос записей из старого листа «Расходы прорабов» в главную таблицу.
+function fmMigrateOldExp_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FM_EXP_SHEET);
+  if (!sh || sh.getLastRow() < 2) return;
+  var n = sh.getLastRow() - 1, v = sh.getRange(2, 1, n, FM_EXP_HEADERS.length).getValues();
+  for (var i = 0; i < n; i++) {
+    var r = v[i]; if (!(Number(r[5]) > 0) || String(r[10]).indexOf('перенесено') === 0) continue;
+    var cm = String(r[4] || '') + (r[7] ? ' · ' + r[7] : '') + (r[6] ? ' · ' + r[6] : '') + (r[8] ? ' · чек: ' + r[8] : '');
+    var res = fmMainExpense_(r[0] instanceof Date ? r[0] : new Date(), String(r[1]).trim(), String(r[3] || ''), Number(r[5]), cm);
+    if (res.status === 'ok') sh.getRange(i + 2, 11).setValue('перенесено в «Расходы»');
+  }
+}
 function fmMoney_(v) { var n = Math.round(Number(String(v === undefined || v === null ? '' : v).replace(/\s/g, '').replace(',', '.')) * 100) / 100; return isFinite(n) ? n : NaN; }
 // Прорабы для выдачи: у кого роль «прораб» в «Сотрудниках» или кто ответственный на объекте.
 function fmForemen_() {
@@ -6321,9 +6340,9 @@ function fmBalanceOf_(name, phone, exps) {
     if (t === name) { received += amt; moves.push({ kind: 'in', date: v[0] instanceof Date ? toIsoDate_(v[0]) : '', amount: amt, from: f, method: String(v[4] || ''), comment: String(v[5] || '') }); }
     else if (f === name) { given += amt; moves.push({ kind: 'out', date: v[0] instanceof Date ? toIsoDate_(v[0]) : '', amount: amt, to: t, method: String(v[4] || ''), comment: String(v[5] || '') }); }
   });
-  var mine = (exps || fmExpRows_()).filter(function (e) { return e.phone === phone || (!e.phone && e.by === name); });
-  mine.forEach(function (e) { spent += e.amount; });
-  // оплаты работникам из общей таблицы расходов, где он указан в «Оплатил»
+  try { fmMigrateOldExp_(); } catch (e) { /* перенос — в следующий раз */ }
+  var mine = [];
+  // всё, что он оплатил из подотчёта, — строки главной таблицы расходов, где он в «Оплатил»
   var labor = 0;
   try {
     var lay = expenseLayout_();
@@ -6332,11 +6351,16 @@ function fmBalanceOf_(name, phone, exps) {
       if (last >= first) lay.sheet.getRange(first, 1, last - first + 1, lay.sheet.getLastColumn()).getValues().forEach(function (row) {
         if (String(row[c.status - 1]).trim().toLowerCase() !== 'оплачено' || String(row[c.payer - 1]).trim() !== name) return;
         var rate = Number(row[c.rate - 1]) || 0, cnt = c.count ? Number(row[c.count - 1]) || 1 : 1, tot = c.total ? Number(row[c.total - 1]) : NaN;
-        labor += isFinite(tot) && (c.total && row[c.total - 1] !== '') ? tot : rate * cnt;
+        var amt = isFinite(tot) && (c.total && row[c.total - 1] !== '') ? tot : rate * cnt;
+        labor += amt;
+        var d = row[c.date - 1];
+        mine.push({ date: d instanceof Date ? toIsoDate_(d) : '', object: c.object ? String(row[c.object - 1] || '') : '', cat: String(row[c.worker - 1] || '').trim() || 'Прочее',
+          amount: amt, method: '', comment: c.comment ? String(row[c.comment - 1] || '') : '', photos: [] });
       });
     }
   } catch (e) { /* без оплат работникам */ }
-  spent += labor;
+  spent = labor;
+  mine.sort(function (a, b) { return a.date.localeCompare(b.date); });
   var r2 = function (x) { return Math.round(x * 100) / 100; };
   return { received: r2(received), given: r2(given), spent: r2(spent), labor: r2(labor), balance: r2(received - given - spent), moves: moves, expenses: mine };
 }
@@ -6357,9 +6381,12 @@ function adminFmTransfer(phone, foremanPhone, amount, method, taxPct, dateIso, c
     sh.getRange(row, 1, 1, CASH_HEADERS.length).setValues([[date, CASH_COMPANY, emp.name, sum, cash ? 'наличные' : 'безнал (ИП)',
       (note ? note + ' · ' : '') + (fee ? 'комиссия ' + String(pct).replace('.', ',') + '% = ' + fee : 'без комиссии'), whoName, new Date()]]);
     sh.getRange(row, 1).setNumberFormat('dd.MM.yyyy'); sh.getRange(row, 4).setNumberFormat('#,##0 ₽'); sh.getRange(row, 8).setNumberFormat('dd.MM.yyyy HH:mm');
-    if (fee > 0) fmAddExpRow_(date, emp.name, fp, '', FM_FEE_CAT, fee, cash ? 'наличные' : 'безнал', String(pct).replace('.', ',') + '% от ' + sum, [], 'авто');
     SpreadsheetApp.flush();
   } finally { lock.releaseLock(); }
+  if (fee > 0) {
+    var fr = fmMainExpense_(date, emp.name, '', fee, FM_FEE_CAT + ' · ' + String(pct).replace('.', ',') + '% от ' + sum + ' · ' + (cash ? 'наличные' : 'безнал'));
+    if (fr.status !== 'ok') return { status: 'error', message: 'Перевод записан, но комиссия не попала в «Расходы»: ' + fr.message };
+  }
   var b = fmBalanceOf_(emp.name, fp);
   try { sendPush_([fp], 'Подотчётные средства', 'Получено ' + sum + ' ₽' + (fee ? ', комиссия ' + fee + ' ₽' : '') + '. Остаток: ' + b.balance + ' ₽', { screen: 'fm', tag: 'cash' }); } catch (e) {}
   return { status: 'ok', fee: fee, net: Math.round((sum - fee) * 100) / 100, balance: b.balance };
@@ -6413,10 +6440,9 @@ function fmAddExpense(phone, ex) {
   var cat = FM_EXP_CATS.indexOf(String(ex.cat)) >= 0 ? String(ex.cat) : 'Прочее';
   var photos = (Array.isArray(ex.photos) ? ex.photos : []).filter(isUploadedPhotoUrl_).slice(0, 10);
   var date = parseIsoDate_(ex.date) || startOfDay_(new Date());
-  var lock = LockService.getScriptLock(); lock.waitLock(15000);
-  try {
-    fmAddExpRow_(date, emp.name, p, obj, cat, sum, ex.method === 'безнал' ? 'безнал' : 'наличные', String(ex.comment || '').trim().slice(0, 500), photos, emp.name);
-  } finally { lock.releaseLock(); }
+  var cm = cat + (ex.comment ? ' · ' + String(ex.comment).trim().slice(0, 300) : '') + ' · ' + (ex.method === 'безнал' ? 'безнал' : 'наличные') + (photos.length ? ' · чек: ' + photos.join(', ') : '');
+  var res = fmMainExpense_(date, emp.name, obj, sum, cm);
+  if (res.status !== 'ok') return res;
   return { status: 'ok', balance: fmBalanceOf_(emp.name, p).balance };
 }
 // ----- Фотоотчёты прораба -----
