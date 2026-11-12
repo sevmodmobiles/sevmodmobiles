@@ -1711,6 +1711,7 @@
   .fcBal b { display: block; font-size: 36px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
   .fcBal b.neg { color: var(--red); }
   .fcBal span { font-size: 13px; color: var(--muted); }
+  .fcOwe { margin-top: 8px; font-size: 13.5px; font-weight: 700; color: var(--red); }
   .fcOp { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
   .fcOp:last-child { border-bottom: 0; }
   .fcOp .fcM { flex: 1; min-width: 0; }
@@ -9105,6 +9106,8 @@
     var fmx = expFmMode_();
     document.getElementById('expHubBackLink').textContent = fmx ? '← Мои объекты' : '← Панель администратора';
     document.getElementById('cashMoveBtn').style.display = fmx ? 'none' : '';
+    document.getElementById('expGoContractBtn').style.display = fmx ? 'none' : '';
+    document.getElementById('expGoPayBtn').style.display = fmx ? 'none' : '';
     var nt = document.getElementById('ctNewObjToggle'); if (nt) nt.style.display = fmx ? 'none' : '';
     showBottomNav();
     setActiveNav('expenses');
@@ -9141,6 +9144,18 @@
   }
   function renderCash_() {
     var c = cashData_(), card = document.getElementById('cashCard');
+    var head = card.querySelector('.cashHead');
+    if (expFmMode_()) {
+      // прораб: крупно его подотчёт (может быть в минусе — потратил свои)
+      var h = c && c.holders && c.holders[0];
+      card.hidden = !h; if (head) head.style.display = 'none';
+      if (!h) return;
+      document.getElementById('cashList').innerHTML = '<div class="fcBal"><span>Подотчётные средства</span><b' + (h.balance < 0 ? ' class="neg"' : '') + '>' + signedMoney_(h.balance) + '</b>' +
+        '<span>получено ' + money_(h.received) + ' · потрачено ' + money_(h.paid + h.given) + '</span>' +
+        (h.balance < 0 ? '<div class="fcOwe">Потрачено своих ' + money_(-h.balance) + ' — компания должна вам</div>' : '') + '</div>';
+      return;
+    }
+    if (head) head.style.display = '';
     card.hidden = !c || !c.holders.length;
     if (card.hidden) return;
     var me = cashMe_();

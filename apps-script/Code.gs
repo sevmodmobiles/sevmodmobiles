@@ -1,3 +1,4 @@
+// v112: подотчёт прораба учитывает и оплаты работникам, где он в «Оплатил»; в «Расходах» прораба — его остаток.
 // v111: раздел «Расходы» для прораба (asForeman) — те же действия, но только по его объектам; сводка и подотчёт — по нему.
 // v110: подотчёт прорабов — выдача администратором (нал / безнал на ИП, комиссия % — первым расходом), расходы прораба, баланс, расходы по его объектам.
 // v109: прораб — ежедневные фотоотчёты по объектам: Диск «Фотоотчёты/Объект/дата», лист «Фотоотчёты», напоминание в 17:00.
@@ -4520,8 +4521,8 @@ function adminExpenseOverview(phone) {
   if (auth.foreman) {
     rows = rows.filter(function (r) { return expObjAllowed_(auth, r[3]); });
     summary = expFmSummary_(summary, rows);
-    var full = cashOverview_([]), me = auth.name;
-    cash = { holders: full.holders.filter(function (h) { return h.name === me; }), moves: full.moves.filter(function (m) { return m.from === me || m.to === me; }), company: full.company };
+    var b = fmBalanceOf_(auth.name, auth.phone);
+    cash = { holders: [{ name: auth.name, received: b.received, given: b.given, paid: b.spent, balance: b.balance }], moves: [], company: CASH_COMPANY, fm: true };
   } else cash = cashOverview_(rows);
   return {
     status: 'ok',
@@ -4579,7 +4580,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v111';
+var CODE_VERSION = 'v112';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6273,8 +6274,22 @@ function fmBalanceOf_(name, phone, exps) {
   });
   var mine = (exps || fmExpRows_()).filter(function (e) { return e.phone === phone || (!e.phone && e.by === name); });
   mine.forEach(function (e) { spent += e.amount; });
+  // оплаты работникам из общей таблицы расходов, где он указан в «Оплатил»
+  var labor = 0;
+  try {
+    var lay = expenseLayout_();
+    if (!lay.error && lay.cols.payer && lay.cols.status) {
+      var first = lay.headerRow + 1, last = expenseLastDataRow_(lay.sheet, lay), c = lay.cols;
+      if (last >= first) lay.sheet.getRange(first, 1, last - first + 1, lay.sheet.getLastColumn()).getValues().forEach(function (row) {
+        if (String(row[c.status - 1]).trim().toLowerCase() !== 'оплачено' || String(row[c.payer - 1]).trim() !== name) return;
+        var rate = Number(row[c.rate - 1]) || 0, cnt = c.count ? Number(row[c.count - 1]) || 1 : 1, tot = c.total ? Number(row[c.total - 1]) : NaN;
+        labor += isFinite(tot) && (c.total && row[c.total - 1] !== '') ? tot : rate * cnt;
+      });
+    }
+  } catch (e) { /* без оплат работникам */ }
+  spent += labor;
   var r2 = function (x) { return Math.round(x * 100) / 100; };
-  return { received: r2(received), given: r2(given), spent: r2(spent), balance: r2(received - given - spent), moves: moves, expenses: mine };
+  return { received: r2(received), given: r2(given), spent: r2(spent), labor: r2(labor), balance: r2(received - given - spent), moves: moves, expenses: mine };
 }
 function adminFmTransfer(phone, foremanPhone, amount, method, taxPct, dateIso, comment) {
   var auth = adminAuth_(phone); if (!auth.ok) return { status: 'error', message: auth.error };
