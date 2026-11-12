@@ -1688,6 +1688,14 @@
   .wtBody .wtL:last-of-type { border-bottom: 0; }
   .wtMeta { margin-top: 8px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
   .wtMeta b { color: var(--text); font-weight: 600; }
+  .fmDateRow { display: flex; gap: 8px; align-items: stretch; margin-bottom: 6px; }
+  .fmDateRow input { width: 150px; margin: 0; }
+  .fmObj { border: 1px solid var(--border); border-radius: 16px; padding: 12px; margin-top: 12px; }
+  .fmObjHead { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+  .fmObjHead b { font-size: 16px; }
+  .fmCnt { display: flex; gap: 6px; flex-wrap: wrap; }
+  .fmObj .tmRow { margin-bottom: 6px; }
+  .fmObj .tmRow:last-child { margin-bottom: 0; }
   .whTag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: rgba(66,133,244,.13); color: var(--blue); margin-left: 6px; vertical-align: 1px; }
   #bottomNavInner {
     width: 100%;
@@ -2689,6 +2697,24 @@
     <button id="whAddFab" type="button" class="fabAdd" aria-label="Добавить позицию" title="Добавить позицию"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
   </div>
 
+  <!-- Прораб: мои объекты — кто сегодня на объектах -->
+  <div id="screenFm" style="display:none;">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">Мои объекты</h1>
+      <div class="whoami" id="fmSummary">&nbsp;</div>
+    </div>
+    <div class="card tasksCard">
+      <div class="fmDateRow">
+        <div class="segCtl" id="fmDaySeg" style="margin:0; flex:1;">
+          <button type="button" data-d="0" class="on">Сегодня</button>
+          <button type="button" data-d="1">Вчера</button>
+        </div>
+        <input id="fmDate" type="date" aria-label="Другая дата">
+      </div>
+      <div id="fmList"></div>
+    </div>
+  </div>
+
   <!-- История машин: приёмки, отправки, переезды -->
   <div id="screenWhTrucks" style="display:none;">
     <div class="card logo-card">
@@ -3214,7 +3240,7 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, whTrucks: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, fmAttendance: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, whTrucks: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
@@ -3643,6 +3669,7 @@
     if (name !== 'whItem') { var w2 = document.getElementById('screenWhItem'); if (w2) w2.style.display = 'none'; }
     if (name !== 'whRecv') { var w3 = document.getElementById('screenWhRecv'); if (w3) w3.style.display = 'none'; }
     if (name !== 'whTrucks') { var w4 = document.getElementById('screenWhTrucks'); if (w4) w4.style.display = 'none'; }
+    if (name !== 'fm') { var w5 = document.getElementById('screenFm'); if (w5) w5.style.display = 'none'; }
     // Если show*Screen() сейчас вызван ИЗ обработчика popstate (то есть
     // браузер уже сам переместил указатель истории назад/вперёд) — заново
     // ничего не пушим, иначе история будет расти в обе стороны одновременно.
@@ -3710,6 +3737,7 @@
       case 'whItem': showWarehouseScreen(); break;
       case 'whRecv': showWarehouseScreen(); break;
       case 'whTrucks': showWarehouseScreen(); break;
+      case 'fm': showFmScreen_(); break;
         default: showScanScreen();
       }
   }
@@ -3854,7 +3882,7 @@
     // Значок «Расходы» — по сохранённому статусу администратора, на любом
     // экране (а не только после захода на «Приход», где статус обновляется).
     var navExp = document.getElementById('navExpBtn');
-    if (navExp && currentUser && currentUser.phone) navExp.classList.toggle('isAdmin', !!loadAdminStatusCache(currentUser.phone) || activeRole_() === 'storekeeper');
+    if (navExp && currentUser && currentUser.phone) navExp.classList.toggle('isAdmin', !!loadAdminStatusCache(currentUser.phone) || (activeRole_() === 'storekeeper' || activeRole_() === 'foreman'));
     applyRoleNav_();
   }
   function hideBottomNav() { bottomNav.classList.remove('visible'); }
@@ -3866,7 +3894,7 @@
     profile: 'navProfileBtn',
     absence: 'navProfileBtn',
     expenses: 'navExpBtn',
-    wh: 'navExpBtn', whItem: 'navExpBtn'
+    wh: 'navExpBtn', whItem: 'navExpBtn', fm: 'navExpBtn'
   };
   function setActiveNav(screenName) {
     var activeId = NAV_ACTIVE_MAP[screenName] || null;
@@ -4153,7 +4181,7 @@
 
   // ===== Роли: администратор / кладовщик / прораб / снабжение =====
   var ROLE_LABEL = { admin: 'Администратор', storekeeper: 'Кладовщик', foreman: 'Прораб', supply: 'Снабжение' };
-  var ROLE_READY = { admin: true, storekeeper: true };   // прораб и снабжение — скоро
+  var ROLE_READY = { admin: true, storekeeper: true, foreman: true };   // снабжение — скоро
   function myRoles_() {
     try { return JSON.parse(localStorage.getItem('sevmod_roles_' + (currentUser && currentUser.phone)) || '[]'); } catch (e) { return []; }
   }
@@ -4163,6 +4191,7 @@
     if (r && roles.indexOf(r) >= 0 && ROLE_READY[r]) return r;
     if (roles.indexOf('admin') >= 0) return 'admin';
     if (roles.indexOf('storekeeper') >= 0) return 'storekeeper';
+    if (roles.indexOf('foreman') >= 0) return 'foreman';
     return '';
   }
   function setActiveRole_(r) {
@@ -4183,9 +4212,10 @@
   function applyRoleNav_() {
     var b = document.getElementById('navExpBtn'); if (!b) return;
     if (NAV_EXP_HTML === null) NAV_EXP_HTML = b.innerHTML;
-    var wh = activeRole_() === 'storekeeper';
-    b.innerHTML = wh ? '<svg viewBox="0 0 24 24"><path d="M3 9l9-5 9 5v11H3z"/><path d="M7 20v-7h10v7"/><path d="M7 16.5h10"/></svg>Склад' : NAV_EXP_HTML;
-    if (wh) b.classList.add('isAdmin');
+    var r = activeRole_(), wh = r === 'storekeeper', fm = r === 'foreman';
+    b.innerHTML = wh ? '<svg viewBox="0 0 24 24"><path d="M3 9l9-5 9 5v11H3z"/><path d="M7 20v-7h10v7"/><path d="M7 16.5h10"/></svg>Склад'
+      : fm ? '<svg viewBox="0 0 24 24"><path d="M4 21V8l6-4v17"/><path d="M10 21V10l10 3v8"/><path d="M2 21h20"/><path d="M7 11h0.01M7 15h0.01M14 15h2M14 18h2"/></svg>Объекты' : NAV_EXP_HTML;
+    if (wh || fm) b.classList.add('isAdmin');
   }
   function renderRoleCard_() {
     var roles = myRoles_(), card = document.getElementById('roleCard');
@@ -4197,7 +4227,7 @@
       return '<button type="button" data-r="' + r + '"' + (r === cur ? ' class="on"' : '') + (ROLE_READY[r] ? '' : ' disabled') + '>' + ROLE_LABEL[r] +
         (ROLE_READY[r] ? '' : '<small>скоро</small>') + '</button>';
     }).join('');
-    document.getElementById('roleHint').textContent = cur === 'storekeeper' ? 'В нижней панели — «Склад»: остатки и ввод позиций.' : cur === 'admin' ? 'В нижней панели — «Расходы».' : '';
+    document.getElementById('roleHint').textContent = cur === 'storekeeper' ? 'В нижней панели — «Склад»: остатки и ввод позиций.' : cur === 'foreman' ? 'В нижней панели — «Объекты»: кто сегодня на ваших объектах.' : cur === 'admin' ? 'В нижней панели — «Расходы».' : '';
   }
   document.getElementById('roleSeg').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-r]'); if (!b || b.disabled) return;
@@ -4743,6 +4773,62 @@
     });
   });
 
+  // ===== Прораб: мои объекты =====
+  var fmDate = null;
+  function showFmScreen_() {
+    hideAllScreens_();
+    document.getElementById('screenFm').style.display = 'block';
+    showBottomNav(); setActiveNav('fm'); pushScreenState('fm');
+    if (!fmDate) fmDate = tmToday_();
+    loadFm_();
+  }
+  function loadFm_() {
+    var t = tmToday_(), diff = Math.round((t - fmDate) / 86400000);
+    segSet_('fmDaySeg', '');
+    Array.prototype.forEach.call(document.getElementById('fmDaySeg').children, function (b) { b.classList.toggle('on', +b.getAttribute('data-d') === diff); });
+    document.getElementById('fmDate').value = tmIso_(fmDate);
+    var body = { action: 'fmAttendance', phone: currentUser && currentUser.phone, date: tmIso_(fmDate) }, list = document.getElementById('fmList');
+    if (!swrHas_(body)) list.innerHTML = skeletonHtml_(3);
+    var key = JSON.stringify(body);
+    swrLoad_(body, function (res) {
+      if (JSON.stringify({ action: 'fmAttendance', phone: currentUser && currentUser.phone, date: tmIso_(fmDate) }) !== key) return;
+      if (!res || res.status !== 'ok') { list.innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
+      renderFm_(res);
+    }, function (err) { list.innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+  }
+  function renderFm_(res) {
+    var list = document.getElementById('fmList'), isToday = res.date === res.today;
+    if (res.note) { list.innerHTML = '<div class="statsEmpty">' + escapeHtml(res.note) + '</div>'; document.getElementById('fmSummary').textContent = ''; return; }
+    var totalNow = 0, totalCame = 0;
+    var html = (res.all ? '<div class="ctHint" style="margin-top:8px;">За вами не закреплены объекты — показаны все (вы администратор).</div>' : '') + res.groups.map(function (g) {
+      var now = g.people.filter(function (x) { return x.onShift !== undefined; }).length, late = g.people.filter(function (x) { return x.late > 0; }).length;
+      totalNow += now; totalCame += g.people.length;
+      var cnt = (isToday ? '<span class="tmPill g">на смене ' + now + '</span>' : '') + '<span class="tmPill b">был' + (g.people.length === 1 ? '' : 'и') + ' ' + g.people.length + '</span>' + (late ? '<span class="tmPill o">опозд. ' + late + '</span>' : '');
+      var rows = g.people.slice().sort(function (a, b) { return (a.onShift !== undefined ? 0 : 1) - (b.onShift !== undefined ? 0 : 1) || (a.arrival || a.onShift || '99').localeCompare(b.arrival || b.onShift || '99'); }).map(function (x) {
+        var pill = x.onShift !== undefined ? '<span class="tmPill g">на смене</span>' : x.hours ? '<span class="tmPill b">' + escapeHtml(x.hours) + ' ч</span>' : '<span class="tmPill">был</span>';
+        var sub = [];
+        var from = x.arrival || x.onShift || '';
+        sub.push('<span class="tmTime">' + escapeHtml(from || '—') + ' – ' + escapeHtml(x.departure || (x.onShift !== undefined ? 'сейчас' : '—')) + '</span>');
+        if (x.late > 0) sub.push('<span class="late">опоздание ' + x.late + ' мин</span>');
+        if (x.closeNote === 'auto') sub.push('<span class="warn">уход не отмечен</span>');
+        return '<div class="tmRow"><div class="tmTop"><span class="tmName">' + escapeHtml(x.name) + '</span>' + pill + '</div><div class="tmSub">' + sub.join('') + '</div></div>';
+      }).join('');
+      return '<div class="fmObj"><div class="fmObjHead"><b>' + escapeHtml(g.object) + '</b><div class="fmCnt">' + cnt + '</div></div>' +
+        (rows || '<div class="ctHint">' + (isToday ? 'Сегодня пока никто не отмечался' : 'В этот день никто не отмечался') + '</div>') + '</div>';
+    }).join('');
+    list.innerHTML = html || '<div class="statsEmpty">Нет объектов</div>';
+    var d = fmDate;
+    document.getElementById('fmSummary').textContent = (isToday ? 'Сейчас на смене: ' + totalNow + ' · ' : '') + 'отметились ' + (isToday ? 'сегодня' : ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2)) + ': ' + totalCame;
+  }
+  document.getElementById('fmDaySeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-d]'); if (!b) return;
+    var t = tmToday_(); fmDate = new Date(t.getFullYear(), t.getMonth(), t.getDate() - Number(b.getAttribute('data-d'))); loadFm_();
+  });
+  document.getElementById('fmDate').addEventListener('change', function () {
+    var p = this.value.split('-'); if (p.length !== 3) return;
+    fmDate = new Date(+p[0], +p[1] - 1, +p[2]); loadFm_();
+  });
+
   // ===== История машин =====
   var wtItems = null, wtKind = '';
   var WT_ICO = {
@@ -5157,7 +5243,7 @@
     var tasksFab = document.getElementById('tasksAddFab');
     if (tasksFab) tasksFab.style.display = isAdmin ? 'flex' : 'none';
     var navExp = document.getElementById('navExpBtn');
-    if (navExp) navExp.classList.toggle('isAdmin', !!isAdmin || activeRole_() === 'storekeeper');
+    if (navExp) navExp.classList.toggle('isAdmin', !!isAdmin || activeRole_() === 'storekeeper' || activeRole_() === 'foreman');
   }
 
   function refreshAdminStatus() {
@@ -7985,7 +8071,8 @@
 
   // ===== Нижняя навигация — обработчики =====
   document.getElementById('navExpBtn').addEventListener('click', function () {
-    if (activeRole_() === 'storekeeper') showWarehouseScreen(); else showExpHubScreen();
+    var r = activeRole_();
+    if (r === 'storekeeper') showWarehouseScreen(); else if (r === 'foreman') showFmScreen_(); else showExpHubScreen();
   });
   document.getElementById('navTasksBtn').addEventListener('click', function () {
     showTasksScreen();

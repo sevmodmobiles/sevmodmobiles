@@ -1,3 +1,4 @@
+// v108: прораб — «Мои объекты» (fmAttendance): кто на объектах, где он ответственный, за день.
 // v107: история машин (whTrucks) — приёмки, отправки и переезды из листов «Приёмки» и «Отправки».
 // v106: переезд оборудования с объекта на объект (whMove), учёт в whEquipment.
 // v105: учёт оборудования по объектам (whEquipment) — по журналу отправок и приёмок.
@@ -534,6 +535,7 @@ function doPost(e) {
     if (data.action === 'adminApkSetup') return jsonOutput(adminApkSetup(data.phone));
     if (data.action === 'adminCreateInvite') return jsonOutput(adminCreateInvite(data.phone, data.employee));
     if (data.action === 'whObjects') return jsonOutput(whObjects(data.phone));
+    if (data.action === 'fmAttendance') return jsonOutput(fmAttendance(data.phone, data.date));
     if (data.action === 'whTrucks') return jsonOutput(whTrucks(data.phone));
     if (data.action === 'whMove') return jsonOutput(whMove(data.phone, data.move));
     if (data.action === 'whEquipment') return jsonOutput(whEquipment(data.phone));
@@ -4518,7 +4520,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v107';
+var CODE_VERSION = 'v108';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -5413,9 +5415,11 @@ function setupPush() {
 // дату (кто пришёл/ушёл, где, опоздания, кто сейчас на смене, кто в
 // отгуле, кто не отмечался); 'month' — итоги за месяц по каждому.
 // mode 'range' — период dateIso..dateTo (итоги, как за месяц).
-function adminAttendance(adminPhone, dateIso, mode, dateTo) {
-  var auth = adminAuth_(adminPhone);
-  if (!auth.ok) return { status: 'error', message: auth.error };
+function adminAttendance(adminPhone, dateIso, mode, dateTo, internal) {
+  if (internal !== true) {
+    var auth = adminAuth_(adminPhone);
+    if (!auth.ok) return { status: 'error', message: auth.error };
+  }
   mode = mode === 'month' || mode === 'range' ? mode : 'day';
   var tz = 'Europe/Moscow';
   var day = parseIsoDate_(dateIso) || startOfDay_(new Date());
@@ -6107,6 +6111,45 @@ function whEquipment(phone) {
     items.push({ id: id, name: e.name, unit: e.unit, warehouse: e.warehouse, location: e.location, objects: objs });
   });
   return { status: 'ok', items: items, byObject: byObj };
+}
+// ===================== ПРОРАБ (v108) =====================
+// Объекты, где человек — ответственный прораб («Объекты», колонка J — телефон).
+function fmObjects_(phone) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Объекты');
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, OBJ_COL.FOREMAN).getValues()
+    .filter(function (r) { return String(r[0]).trim() && normalizePhone_(r[OBJ_COL.FOREMAN - 1]) === phone; })
+    .map(function (r) { return String(r[0]).trim(); });
+}
+// Посещаемость за день по объектам прораба: кто на смене, кто был, опоздания.
+// Администратор без своих объектов видит все объекты.
+function fmAttendance(phone, dateIso) {
+  var p = normalizePhone_(phone);
+  if (!p || !findEmployeeByPhone_(p)) return { status: 'error', message: 'Сотрудник не найден' };
+  if (!hasRole_(p, 'foreman')) return { status: 'error', message: 'Раздел для прорабов' };
+  var mine = fmObjects_(p), all = !mine.length && adminAuth_(p).ok;
+  if (!mine.length && !all) return { status: 'ok', objects: [], groups: [], note: 'За вами пока не закреплён ни один объект — попросите администратора указать вас ответственным прорабом в «Объекты».' };
+  var res = adminAttendance(p, dateIso, 'day', '', true);
+  if (res.status !== 'ok') return res;
+  var set = {}; mine.forEach(function (o) { set[objKey_(o)] = o; });
+  var groups = {};
+  (res.items || []).forEach(function (it) {
+    var objs = [];
+    if (it.onShift && it.onShift.object) objs.push(it.onShift.object);
+    (it.objects || []).forEach(function (o) { if (objs.indexOf(o) < 0) objs.push(o); });
+    objs.forEach(function (o) {
+      var name = all ? o : set[objKey_(o)];
+      if (!name) return;
+      var g = groups[name] || (groups[name] = []);
+      var row = { name: it.name, phone: it.phone, late: it.late || 0, closeNote: it.closeNote || '' };
+      if (it.onShift && objKey_(it.onShift.object) === objKey_(o)) row.onShift = it.onShift.since || '';
+      if (it.object && objKey_(it.object) === objKey_(o) || (it.objects || []).length === 1) { row.arrival = it.arrival || ''; row.departure = it.departure || ''; row.hours = it.hours || ''; }
+      g.push(row);
+    });
+  });
+  var names = all ? Object.keys(groups) : mine;
+  return { status: 'ok', date: res.date, today: res.today, all: all,
+    groups: names.sort(function (a, b) { return a.localeCompare(b, 'ru'); }).map(function (n) { return { object: n, people: groups[n] || [] }; }) };
 }
 // История машин: приёмки (лист «Приёмки») и отправки / переезды («Отправки»), новые сверху.
 function whTrucks(phone) {
