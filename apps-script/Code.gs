@@ -1,3 +1,4 @@
+// v106: переезд оборудования с объекта на объект (whMove), учёт в whEquipment.
 // v105: учёт оборудования по объектам (whEquipment) — по журналу отправок и приёмок.
 // v104: склад — отправка машины на объект (whShip): списание со склада, лист «Отправки».
 // v103: склад — тип «Материал / Оборудование», приёмка машины с объекта (whObjects, whReceive, лист «Приёмки»).
@@ -532,6 +533,7 @@ function doPost(e) {
     if (data.action === 'adminApkSetup') return jsonOutput(adminApkSetup(data.phone));
     if (data.action === 'adminCreateInvite') return jsonOutput(adminCreateInvite(data.phone, data.employee));
     if (data.action === 'whObjects') return jsonOutput(whObjects(data.phone));
+    if (data.action === 'whMove') return jsonOutput(whMove(data.phone, data.move));
     if (data.action === 'whEquipment') return jsonOutput(whEquipment(data.phone));
     if (data.action === 'whShip') return jsonOutput(whShip(data.phone, data.shipment));
     if (data.action === 'whReceive') return jsonOutput(whReceive(data.phone, data.receipt));
@@ -4514,7 +4516,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v105';
+var CODE_VERSION = 'v106';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6083,6 +6085,10 @@ function whEquipment(phone) {
       } else if ((m = /^Приёмка с объекта «(.+)»$/.exec(op))) {
         var o2 = e.objects[m[1]] || (e.objects[m[1]] = { qty: 0, since: null });
         o2.qty -= d;
+      } else if ((m = /^Переезд «(.+)» → «(.+)»$/.exec(op))) {
+        var of = e.objects[m[1]] || (e.objects[m[1]] = { qty: 0, since: null });
+        var ot = e.objects[m[2]] || (e.objects[m[2]] = { qty: 0, since: null });
+        of.qty -= d; ot.qty += d; if (r[0] instanceof Date) ot.since = r[0];
       }
     });
   }
@@ -6099,6 +6105,49 @@ function whEquipment(phone) {
     items.push({ id: id, name: e.name, unit: e.unit, warehouse: e.warehouse, location: e.location, objects: objs });
   });
   return { status: 'ok', items: items, byObject: byObj };
+}
+// Переезд оборудования с объекта на объект (минуя склад): остаток склада не
+// меняется, в журнал — «Переезд «откуда» → «куда»» на каждую позицию.
+function whMove(phone, mv) {
+  var a = whAuth_(phone); if (!a.ok) return { status: 'error', message: a.error };
+  mv = mv || {};
+  var from = String(mv.from || '').trim().slice(0, 120), to = String(mv.object || '').trim().slice(0, 120);
+  var items = (Array.isArray(mv.items) ? mv.items : []).slice(0, 200);
+  if (!from || !to) return { status: 'error', message: 'Укажите, откуда и куда' };
+  if (from === to) return { status: 'error', message: 'Объекты «откуда» и «куда» совпадают' };
+  if (!items.length) return { status: 'error', message: 'Добавьте хотя бы одну позицию' };
+  var photos = (Array.isArray(mv.photos) ? mv.photos : []).filter(isUploadedPhotoUrl_).slice(0, 20);
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var eq = whEquipment(phone), have = {};
+    (eq.byObject[from] || []).forEach(function (x) { have[x.id] = x; });
+    var need = {};
+    for (var k = 0; k < items.length; k++) {
+      var it = items[k] || {}, q = whNum_(it.qty), h = have[String(it.id || '')];
+      if (!h) return { status: 'error', message: '«' + (it.name || '?') + '» не числится на объекте «' + from + '»' };
+      if (!isFinite(q) || q <= 0) return { status: 'error', message: '«' + h.name + '»: укажите количество' };
+      need[it.id] = Math.round(((need[it.id] || 0) + q) * 1000) / 1000;
+      if (need[it.id] > h.qty) return { status: 'error', message: '«' + h.name + '»: на объекте ' + String(h.qty).replace('.', ',') + ' ' + h.unit };
+    }
+    var sh = whSheet_(), n = sh.getLastRow() - 1, data = n > 0 ? sh.getRange(2, 1, n, WH_HEADERS.length).getValues() : [], cur = {};
+    data.forEach(function (r) { cur[String(r[WH.ID - 1])] = whRowToItem_(r); });
+    var now = new Date(), num = 'О-' + Utilities.formatDate(now, 'Europe/Moscow', 'yyMMdd-HHmm'), lines = [];
+    Object.keys(need).forEach(function (id) {
+      var c = cur[id] || { id: id, name: have[id].name, unit: have[id].unit, qty: 0, type: 'Оборудование' };
+      whLog_(a.name, c, 'Переезд «' + from + '» → «' + to + '»', need[id], c.qty, num + (mv.driver ? ', ' + String(mv.driver).slice(0, 80) : ''));
+      lines.push(c.name + ' — ' + String(need[id]).replace('.', ',') + ' ' + c.unit + ' [обор.]');
+    });
+    var ss = SpreadsheetApp.getActiveSpreadsheet(), rs = ss.getSheetByName(WH_SHIP_SHEET);
+    if (!rs) {
+      rs = ss.insertSheet(WH_SHIP_SHEET);
+      rs.getRange(1, 1, 1, 10).setValues([['№', 'Дата', 'На объект', 'Прораб', 'Машина / водитель', 'Отправил', 'Позиций', 'Состав', 'Комментарий', 'Фото']]).setFontWeight('bold');
+      rs.setFrozenRows(1);
+    }
+    rs.appendRow([num, now, to, String(mv.foreman || '').slice(0, 80), String(mv.driver || '').slice(0, 120), a.name, lines.length,
+      'Переезд с объекта «' + from + '»:\n' + lines.join('\n'), String(mv.comment || '').slice(0, 500), photos.join(', ')]);
+    rs.getRange(rs.getLastRow(), 2).setNumberFormat('dd.MM.yyyy HH:mm');
+    return { status: 'ok', id: num, count: lines.length };
+  } finally { lock.releaseLock(); }
 }
 // Отправка машины на объект: позиции списываются со склада (не больше остатка),
 // в журнал — «Отправка на объект …» с номером; шапка — в лист «Отправки».

@@ -1661,7 +1661,7 @@
   .fabAdd svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
   .fabAdd:active { transform: scale(0.94); }
   .fabTruck { bottom: calc(162px + env(safe-area-inset-bottom, 0px)); background: var(--green); }
-  .fabTruck svg { stroke-width: 1.9; stroke-linejoin: round; }
+  .fabTruck svg { width: 32px; height: 32px; stroke-width: 1.7; stroke-linejoin: round; }
   #screenWh { padding-bottom: 170px; }
   .fabTruck2 { bottom: calc(232px + env(safe-area-inset-bottom, 0px)); }
   .wrItem { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 6px; }
@@ -2667,8 +2667,8 @@
       <div id="whChips" class="expChips" style="margin-top:8px;"></div>
       <div id="whList"></div>
     </div>
-    <button id="whSendFab" type="button" class="fabAdd fabTruck fabTruck2" aria-label="Отправка машины" title="Отправка машины на объект"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h11v11H2z"/><path d="M13 8.5h4.5l3.5 3.5V16h-8"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/><path d="M7.5 13.6v-6M5.2 9.9l2.3-2.3 2.3 2.3"/></svg></button>
-    <button id="whRecvFab" type="button" class="fabAdd fabTruck" aria-label="Приёмка машины" title="Приёмка машины с объекта"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h11v11H2z"/><path d="M13 8.5h4.5l3.5 3.5V16h-8"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/><path d="M7.5 7.3v6M5.2 11l2.3 2.3 2.3-2.3"/></svg></button>
+    <button id="whSendFab" type="button" class="fabAdd fabTruck fabTruck2" aria-label="Отправка машины" title="Отправка машины на объект"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.8 8.6V1.4M7.8 4.4l3-3 3 3"/><path d="M3 10.6 h9 v7 H3z"/><path d="M12 13.0 h3.6 l2.9 2.9 V 17.6 H12"/><circle cx="6.3" cy="19.2" r="1.5"/><circle cx="15.3" cy="19.2" r="1.5"/></svg></button>
+    <button id="whRecvFab" type="button" class="fabAdd fabTruck" aria-label="Приёмка машины" title="Приёмка машины с объекта"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 1.6 h9 v7 H3z"/><path d="M12 4.0 h3.6 l2.9 2.9 V 8.6 H12"/><circle cx="6.3" cy="10.2" r="1.5"/><circle cx="15.3" cy="10.2" r="1.5"/><path d="M10.8 15.4v7.2M7.8 19.6l3 3 3-3"/></svg></button>
     <button id="whAddFab" type="button" class="fabAdd" aria-label="Добавить позицию" title="Добавить позицию"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
   </div>
 
@@ -2679,6 +2679,14 @@
       <div class="switchUser"><a id="wrBack">← Склад</a></div>
     </div>
     <div class="card">
+      <div id="wrFromWrap" style="display:none;">
+        <label>Откуда</label>
+        <div class="segCtl" id="wrFromSeg" style="margin:0 0 10px;">
+          <button type="button" data-t="" class="on">Со склада</button>
+          <button type="button" data-t="obj">С объекта (переезд)</button>
+        </div>
+        <select id="wrFrom" style="display:none;"><option value="">— с какого объекта —</option></select>
+      </div>
       <label for="wrObj" id="wrObjLbl">С какого объекта *</label>
       <select id="wrObj"><option value="">— выберите объект —</option></select>
       <label for="wrForeman">Ответственный прораб</label>
@@ -3195,7 +3203,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], whReceive: ['whGetItems', 'whEquipment'], whShip: ['whGetItems', 'whEquipment']
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], whReceive: ['whGetItems', 'whEquipment'], whShip: ['whGetItems', 'whEquipment'], whMove: ['whEquipment']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -4197,6 +4205,7 @@
     swrLoad_({ action: 'whEquipment', phone: currentUser && currentUser.phone }, function (res) {
       if (!res || res.status !== 'ok') return;
       whEq = res; if (screenWh.style.display === 'block') renderWh_();
+      if (document.getElementById('screenWhRecv').style.display === 'block' && wrMode === 'send') wrFromRender_();
     }, function () {});
     swrLoad_({ action: 'whObjects', phone: currentUser && currentUser.phone }, function (res) {
       if (!res || res.status !== 'ok') return;
@@ -4487,12 +4496,12 @@
   }
   // ===== Приёмка машины с объекта =====
   // Черновик (объект, водитель, список) хранится на телефоне, пока машину не приняли.
-  var WR_KEY = 'sevmod_wh_recv_draft_v1', WS_KEY = 'sevmod_wh_send_draft_v1', wrMode = 'recv', wrItems = [], wrObjects = [], wrHitList = [], wrPick = null;
+  var WR_KEY = 'sevmod_wh_recv_draft_v1', WS_KEY = 'sevmod_wh_send_draft_v1', wrMode = 'recv', wrFrom = '', wrItems = [], wrObjects = [], wrHitList = [], wrPick = null;
   function wrKey_() { return wrMode === 'send' ? WS_KEY : WR_KEY; }
   var wrUp = photoUploader_('wrPhotoInput', 'wrPhotoPreview', 'wh');
   function wrSaveDraft_() {
     try {
-      localStorage.setItem(wrKey_(), JSON.stringify({ obj: document.getElementById('wrObj').value, foreman: document.getElementById('wrForeman').value,
+      localStorage.setItem(wrKey_(), JSON.stringify({ from: wrFrom, obj: document.getElementById('wrObj').value, foreman: document.getElementById('wrForeman').value,
         driver: document.getElementById('wrDriver').value, loc: document.getElementById('wrLoc').value, comment: document.getElementById('wrComment').value, items: wrItems }));
     } catch (e) {}
   }
@@ -4512,6 +4521,7 @@
     document.getElementById('wrType').style.display = send ? 'none' : '';
     document.getElementById('wrName').placeholder = send ? 'Начните вводить — выберите позицию со склада' : 'Наименование: начните вводить или код (ПП-60, ГД-35…)';
     document.getElementById('wrUnit').disabled = send;
+    document.getElementById('wrFromWrap').style.display = send ? '' : 'none';
     wrPick = null;
     hideAllScreens_();
     document.getElementById('screenWhRecv').style.display = 'block';
@@ -4519,6 +4529,8 @@
     var d = null; try { d = JSON.parse(localStorage.getItem(wrKey_()) || 'null'); } catch (e) {}
     d = d || {};
     wrItems = d.items || [];
+    wrFrom = send ? (d.from || '') : '';
+    wrFromRender_();
     document.getElementById('wrForeman').value = d.foreman || '';
     document.getElementById('wrDriver').value = d.driver || '';
     document.getElementById('wrLoc').value = d.loc || '';
@@ -4530,10 +4542,39 @@
     wrClearEntry_();
     wrRender_();
     loadWhCatalog_();
+    if (send) loadWhEq_();
     swrLoad_({ action: 'whObjects', phone: currentUser && currentUser.phone }, function (res) {
       if (!res || res.status !== 'ok') return;
       wrObjects = res.objects || []; wrFillObjects_();
     }, function () {});
+  }
+  // Отправка: со склада или переезд оборудования с объекта (список — что там числится)
+  function wrFromRender_() {
+    segSet_('wrFromSeg', wrFrom ? 'obj' : '');
+    var sel = document.getElementById('wrFrom'), by = (whEq && whEq.byObject) || {};
+    sel.style.display = document.querySelector('#wrFromSeg button.on').getAttribute('data-t') === 'obj' ? '' : 'none';
+    sel.innerHTML = '<option value="">— с какого объекта —</option>' + Object.keys(by).sort(function (a, b) { return a.localeCompare(b, 'ru'); }).map(function (o) {
+      return '<option value="' + escapeHtml(o) + '"' + (o === wrFrom ? ' selected' : '') + '>' + escapeHtml(o) + ' (' + by[o].length + ' поз.)</option>';
+    }).join('') + (wrFrom && !by[wrFrom] ? '<option selected>' + escapeHtml(wrFrom) + '</option>' : '');
+    document.getElementById('wrHead').textContent = wrMode !== 'send' ? 'Что привезли' : wrFrom ? 'Что переезжает (оборудование с объекта)' : 'Что отправляем (со склада)';
+    document.getElementById('wrName').placeholder = wrMode !== 'send' ? 'Наименование: начните вводить или код (ПП-60, ГД-35…)' : wrFrom ? 'Начните вводить — оборудование с этого объекта' : 'Начните вводить — выберите позицию со склада';
+  }
+  function wrSetFrom_(v) {
+    if (v === wrFrom) { wrFromRender_(); return; }
+    if (wrItems.length) toast_('Список очищен: позиции были ' + (wrFrom ? 'с объекта «' + wrFrom + '»' : 'со склада'), 'ok');
+    wrFrom = v; wrItems = []; wrClearEntry_(); wrFromRender_(); wrRender_(); wrSaveDraft_();
+  }
+  document.getElementById('wrFromSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-t]'); if (!b) return;
+    segSet_('wrFromSeg', b.getAttribute('data-t'));
+    if (b.getAttribute('data-t') === 'obj') { document.getElementById('wrFrom').style.display = ''; if (!whEq) loadWhEq_(); }
+    else wrSetFrom_('');
+  });
+  document.getElementById('wrFrom').addEventListener('change', function () { wrSetFrom_(this.value); });
+  function wrSrcQty_(id) {
+    if (!wrFrom) { var sv = whItems.filter(function (x) { return x.id === id; })[0]; return sv ? sv.qty : 0; }
+    var r = (((whEq && whEq.byObject) || {})[wrFrom] || []).filter(function (x) { return x.id === id; })[0];
+    return r ? r.qty : 0;
   }
   function wrClearEntry_() {
     document.getElementById('wrName').value = ''; document.getElementById('wrQty').value = ''; wrPick = null;
@@ -4543,7 +4584,7 @@
     var box = document.getElementById('wrList'), n = wrItems.length;
     box.innerHTML = n ? '<div class="whHitsHead">В списке · ' + n + '</div>' + wrItems.map(function (it, i) {
       var stockLeft = '';
-      if (wrMode === 'send') { var sv = whItems.filter(function (x) { return x.id === it.id; })[0]; stockLeft = sv ? ' · на складе ' + whFmtQty_(sv.qty) + ' ' + escapeHtml(sv.unit) : ''; }
+      if (wrMode === 'send') stockLeft = ' · ' + (wrFrom ? 'на объекте ' : 'на складе ') + whFmtQty_(wrSrcQty_(it.id)) + ' ' + escapeHtml(it.unit);
       return '<div class="wrItem"><div class="wrN">' + escapeHtml(it.name) + '<small>' + escapeHtml(it.type) + (it.category ? ' · ' + escapeHtml(it.category) : '') + stockLeft + '</small></div>' +
         '<span class="wrQ">' + whFmtQty_(it.qty) + ' ' + escapeHtml(it.unit) + '</span><button type="button" class="wrDel" data-i="' + i + '" aria-label="Убрать">×</button></div>';
     }).join('') : '<div class="ctHint">Добавляйте позиции по одной — они соберутся в список, потом нажмите «Принять машину».</div>';
@@ -4555,12 +4596,14 @@
     if (q.length < 2) { hits.innerHTML = ''; wrHitList = []; return; }
     var qw = whCatNorm_(q).split(' ').filter(Boolean);
     if (wrMode === 'send') {
-      // отправка — только то, что есть на складе
-      wrHitList = whItems.filter(function (it) { var k = whCatNorm_(it.name); return it.qty > 0 && qw.every(function (w) { return k.indexOf(w) >= 0; }); }).slice(0, 8)
+      // отправка — только то, что есть на складе (или числится на объекте при переезде)
+      var src = wrFrom ? (((whEq && whEq.byObject) || {})[wrFrom] || []).map(function (x) { return { id: x.id, name: x.name, unit: x.unit, qty: x.qty, category: '', type: 'Оборудование', location: x.since ? 'с ' + x.since : '' }; }) : whItems;
+      wrHitList = src.filter(function (it) { var k = whCatNorm_(it.name); return it.qty > 0 && qw.every(function (w) { return k.indexOf(w) >= 0; }); }).slice(0, 8)
         .map(function (it) { return { n: it.name, u: it.unit, c: it.category, t: it.type || 'Материал', stock: it }; });
-      hits.innerHTML = wrHitList.length ? '<div class="whHitsHead">На складе</div>' + wrHitList.map(function (x, i) {
+      var where = wrFrom ? 'На объекте' : 'На складе';
+      hits.innerHTML = wrHitList.length ? '<div class="whHitsHead">' + where + '</div>' + wrHitList.map(function (x, i) {
         return '<button type="button" data-w="' + i + '">' + escapeHtml(x.n) + '<small>' + whFmtQty_(x.stock.qty) + ' ' + escapeHtml(x.u) + (x.stock.location ? ' · ' + escapeHtml(x.stock.location) : '') + '</small></button>';
-      }).join('') : '<div class="whHitsHead">На складе такого нет</div>';
+      }).join('') : '<div class="whHitsHead">' + where + ' такого нет</div>';
       return;
     }
     var stock = whItems.filter(function (it) { var k = whCatNorm_(it.name); return qw.every(function (w) { return k.indexOf(w) >= 0; }); }).slice(0, 4)
@@ -4601,11 +4644,12 @@
     if (!name) { toast_('Введите наименование', 'error'); nameEl.focus(); return; }
     if (!isFinite(qty) || qty <= 0) { toast_('Укажите количество', 'error'); document.getElementById('wrQty').focus(); return; }
     if (wrMode === 'send') {
-      var pk = wrPick && whCatNorm_(wrPick.name) === whCatNorm_(name) ? wrPick : whItems.filter(function (it) { return whCatNorm_(it.name) === whCatNorm_(name); })[0];
-      if (!pk) { toast_('Выберите позицию со склада из подсказок', 'error'); nameEl.focus(); return; }
+      if (wrFrom === '' && document.querySelector('#wrFromSeg button.on').getAttribute('data-t') === 'obj') { toast_('Выберите, с какого объекта', 'error'); return; }
+      var pk = wrPick && whCatNorm_(wrPick.name) === whCatNorm_(name) ? wrPick : (wrFrom ? [] : whItems).filter(function (it) { return whCatNorm_(it.name) === whCatNorm_(name); })[0];
+      if (!pk) { toast_(wrFrom ? 'Выберите оборудование из подсказок' : 'Выберите позицию со склада из подсказок', 'error'); nameEl.focus(); return; }
       var inList = wrItems.filter(function (it) { return it.id === pk.id; })[0];
-      var total = Math.round(((inList ? inList.qty : 0) + qty) * 1000) / 1000;
-      if (total > pk.qty) { toast_('На складе только ' + whFmtQty_(pk.qty) + ' ' + pk.unit + (inList ? ' (в списке уже ' + whFmtQty_(inList.qty) + ')' : ''), 'error'); return; }
+      var total = Math.round(((inList ? inList.qty : 0) + qty) * 1000) / 1000, avail = wrSrcQty_(pk.id);
+      if (total > avail) { toast_((wrFrom ? 'На объекте только ' : 'На складе только ') + whFmtQty_(avail) + ' ' + pk.unit + (inList ? ' (в списке уже ' + whFmtQty_(inList.qty) + ')' : ''), 'error'); return; }
       if (inList) inList.qty = total;
       else wrItems.push({ id: pk.id, name: pk.name, unit: pk.unit, qty: qty, type: pk.type || 'Материал', category: pk.category || '' });
       wrClearEntry_(); wrRender_(); wrSaveDraft_();
@@ -4642,13 +4686,15 @@
     var st = document.getElementById('wrStatus'), btn = this, obj = document.getElementById('wrObj').value;
     var send = wrMode === 'send';
     if (!obj) { st.textContent = send ? 'Выберите объект, куда едет машина' : 'Выберите объект, с которого приехала машина'; st.className = 'error'; return; }
+    if (send && wrFrom && wrFrom === obj) { st.textContent = 'Объекты «откуда» и «куда» совпадают'; st.className = 'error'; return; }
     if (document.getElementById('wrName').value.trim()) { st.textContent = 'В поле наименования осталась позиция — нажмите «Добавить в список» или очистите поле'; st.className = 'error'; return; }
     if (!wrItems.length) { st.textContent = 'Добавьте хотя бы одну позицию'; st.className = 'error'; return; }
     withUploadedPhotos_(wrUp, st, btn, function (urls) {
       btn.disabled = true; st.className = ''; st.textContent = (send ? 'Отправляю ' : 'Принимаю ') + wrItems.length + ' поз.…';
       var receipt = { object: obj, foreman: document.getElementById('wrForeman').value.trim(), driver: document.getElementById('wrDriver').value.trim(),
         location: document.getElementById('wrLoc').value.trim(), comment: document.getElementById('wrComment').value.trim(), photos: urls, items: wrItems };
-      var body = send ? { action: 'whShip', phone: currentUser.phone, shipment: receipt } : { action: 'whReceive', phone: currentUser.phone, receipt: receipt };
+      if (send && wrFrom) receipt.from = wrFrom;
+      var body = send ? (wrFrom ? { action: 'whMove', phone: currentUser.phone, move: receipt } : { action: 'whShip', phone: currentUser.phone, shipment: receipt }) : { action: 'whReceive', phone: currentUser.phone, receipt: receipt };
       apiPost(body).then(function (res) {
         btn.disabled = false;
         if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не сохранилось'; st.className = 'error'; return; }
@@ -4658,7 +4704,7 @@
         });
         try { localStorage.removeItem(wrKey_()); } catch (e) {}
         wrItems = []; wrUp.reset();
-        toast_((send ? 'Машина отправлена: ' : 'Машина принята: ') + res.id + ', позиций ' + (res.items || []).length, 'ok');
+        toast_((send ? (wrFrom ? 'Переезд оформлен: ' : 'Машина отправлена: ') : 'Машина принята: ') + res.id + ', позиций ' + (res.items ? res.items.length : res.count || 0), 'ok');
         showWarehouseScreen();
       }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err + '. Список сохранён — попробуйте ещё раз.'; st.className = 'error'; });
     });
