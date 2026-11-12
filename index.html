@@ -1672,6 +1672,22 @@
   .eqObj { margin: 14px 2px 6px; display: flex; align-items: baseline; gap: 8px; }
   .eqObj b { font-size: 15px; } .eqObj span { font-size: 12.5px; color: var(--muted); }
   .whItem .eqSince { font-size: 12px; color: var(--muted); }
+  .wtCard { border: 1px solid var(--border); border-radius: 14px; padding: 11px 12px; margin-bottom: 8px; cursor: pointer; }
+  .wtTop { display: flex; align-items: center; gap: 10px; }
+  .wtIco { flex: none; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; }
+  .wtIco svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .wtIco.recv { background: var(--green); } .wtIco.send { background: var(--blue); } .wtIco.move { background: #F29900; }
+  .wtMain { flex: 1; min-width: 0; }
+  .wtTitle { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wtSub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .wtCnt { flex: none; font-weight: 800; font-size: 15px; text-align: right; }
+  .wtCnt small { display: block; font-size: 11px; font-weight: 600; color: var(--muted); }
+  .wtBody { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13.5px; }
+  .wtCard.open .wtBody { display: block; }
+  .wtBody .wtL { padding: 4px 0; border-bottom: 1px dashed var(--border); }
+  .wtBody .wtL:last-of-type { border-bottom: 0; }
+  .wtMeta { margin-top: 8px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+  .wtMeta b { color: var(--text); font-weight: 600; }
   .whTag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: rgba(66,133,244,.13); color: var(--blue); margin-left: 6px; vertical-align: 1px; }
   #bottomNavInner {
     width: 100%;
@@ -2652,6 +2668,7 @@
     <div class="card logo-card">
       <h1 style="margin-top:0;">Склад</h1>
       <div class="whoami" id="whSummary">&nbsp;</div>
+      <div class="switchUser"><a id="whTrucksLink">История машин</a></div>
     </div>
     <div class="card tasksCard">
       <div class="segCtl" id="whTypeSeg" style="margin-bottom:10px;">
@@ -2670,6 +2687,20 @@
     <button id="whSendFab" type="button" class="fabAdd fabTruck fabTruck2" aria-label="Отправка машины" title="Отправка машины на объект"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.8 8.6V1.4M7.8 4.4l3-3 3 3"/><path d="M3 10.6 h9 v7 H3z"/><path d="M12 13.0 h3.6 l2.9 2.9 V 17.6 H12"/><circle cx="6.3" cy="19.2" r="1.5"/><circle cx="15.3" cy="19.2" r="1.5"/></svg></button>
     <button id="whRecvFab" type="button" class="fabAdd fabTruck" aria-label="Приёмка машины" title="Приёмка машины с объекта"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 1.6 h9 v7 H3z"/><path d="M12 4.0 h3.6 l2.9 2.9 V 8.6 H12"/><circle cx="6.3" cy="10.2" r="1.5"/><circle cx="15.3" cy="10.2" r="1.5"/><path d="M10.8 15.4v7.2M7.8 19.6l3 3 3-3"/></svg></button>
     <button id="whAddFab" type="button" class="fabAdd" aria-label="Добавить позицию" title="Добавить позицию"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+  </div>
+
+  <!-- История машин: приёмки, отправки, переезды -->
+  <div id="screenWhTrucks" style="display:none;">
+    <div class="card logo-card">
+      <h1 style="margin-top:0;">История машин</h1>
+      <div class="whoami" id="wtSummary">&nbsp;</div>
+      <div class="switchUser"><a id="wtBack">← Склад</a></div>
+    </div>
+    <div class="card tasksCard">
+      <div id="wtChips" class="expChips"></div>
+      <input id="wtSearch" type="search" placeholder="Поиск: объект, позиция, водитель, №" autocomplete="off" style="margin-top:8px;">
+      <div id="wtList"></div>
+    </div>
   </div>
 
   <!-- Приёмка машины с объекта: шапка + список привезённого -->
@@ -3183,7 +3214,7 @@
     getMyTasks: 1, getTaskById: 1, getMyAbsences: 1, stats: 1, status: 1,
     adminGetTasks: 1, adminGetObjects: 1, adminGetEmployees: 1, adminGetAbsences: 1,
     adminExpenseOverview: 1, adminExpenseLookups: 1, adminServerVersion: 1,
-    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
+    adminCheckAccess: 1, adminAbsencePending: 1, version: 1, adminAttendance: 1, whGetItems: 1, whObjects: 1, whEquipment: 1, whTrucks: 1, getMyRoles: 1, adminGetAdminList: 1, login: 1, adminSalaryReport: 1
   };
   // Какие сохранённые ответы устаревают после изменения. Неизвестное
   // изменение сбрасывает всё.
@@ -3203,7 +3234,7 @@
     adminSelfUpdate: ['adminServerVersion'],
     // пришло уведомление: задачи и заявки могли измениться
     pushReceived: ['getMyTasks', 'getTaskById', 'getMyAbsences', 'adminGetAbsences', 'adminGetTasks', 'adminAbsencePending'],
-    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], whReceive: ['whGetItems', 'whEquipment'], whShip: ['whGetItems', 'whEquipment'], whMove: ['whEquipment']
+    registerPush: [], unregisterPush: [], adminTestPush: [], uploadPhoto: [], setWifiAuto: [], getWifiAuto: [], wifiPresence: [], adminLearnWifi: ['adminGetObjects'], whAddItem: ['whGetItems', 'whEquipment'], whUpdateItem: ['whGetItems', 'whEquipment'], whCatalog: [], whReceive: ['whGetItems', 'whEquipment', 'whTrucks'], whShip: ['whGetItems', 'whEquipment', 'whTrucks'], whMove: ['whEquipment', 'whTrucks']
   };
   var SWR_PREFIX = 'sevmod_swr1|';
   function swrKey_(body) {
@@ -3611,6 +3642,7 @@
     if (name !== 'wh') { var w1 = document.getElementById('screenWh'); if (w1) w1.style.display = 'none'; }
     if (name !== 'whItem') { var w2 = document.getElementById('screenWhItem'); if (w2) w2.style.display = 'none'; }
     if (name !== 'whRecv') { var w3 = document.getElementById('screenWhRecv'); if (w3) w3.style.display = 'none'; }
+    if (name !== 'whTrucks') { var w4 = document.getElementById('screenWhTrucks'); if (w4) w4.style.display = 'none'; }
     // Если show*Screen() сейчас вызван ИЗ обработчика popstate (то есть
     // браузер уже сам переместил указатель истории назад/вперёд) — заново
     // ничего не пушим, иначе история будет расти в обе стороны одновременно.
@@ -3677,6 +3709,7 @@
       case 'wh': showWarehouseScreen(); break;
       case 'whItem': showWarehouseScreen(); break;
       case 'whRecv': showWarehouseScreen(); break;
+      case 'whTrucks': showWarehouseScreen(); break;
         default: showScanScreen();
       }
   }
@@ -4708,6 +4741,68 @@
         showWarehouseScreen();
       }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err + '. Список сохранён — попробуйте ещё раз.'; st.className = 'error'; });
     });
+  });
+
+  // ===== История машин =====
+  var wtItems = null, wtKind = '';
+  var WT_ICO = {
+    recv: '<svg viewBox="0 0 24 24"><path d="M3 3.6h9v7H3z"/><path d="M12 6h3.6l2.9 2.9v1.7H12"/><circle cx="6.3" cy="12.2" r="1.5"/><circle cx="15.3" cy="12.2" r="1.5"/><path d="M10.8 15.4v6.6M7.8 19l3 3 3-3"/></svg>',
+    send: '<svg viewBox="0 0 24 24"><path d="M10.8 8.6V2M7.8 5l3-3 3 3"/><path d="M3 10.6h9v7H3z"/><path d="M12 13h3.6l2.9 2.9v1.7H12"/><circle cx="6.3" cy="19.2" r="1.5"/><circle cx="15.3" cy="19.2" r="1.5"/></svg>',
+    move: '<svg viewBox="0 0 24 24"><path d="M3 8h9v7H3z"/><path d="M12 10.4h3.6l2.9 2.9V15H12"/><circle cx="6.3" cy="16.6" r="1.5"/><circle cx="15.3" cy="16.6" r="1.5"/><path d="M4 4h15M16 1.5L18.5 4 16 6.5"/></svg>'
+  };
+  var WT_NAME = { recv: 'Приёмки', send: 'Отправки', move: 'Переезды' };
+  function showWhTrucks_() {
+    hideAllScreens_();
+    document.getElementById('screenWhTrucks').style.display = 'block';
+    showBottomNav(); setActiveNav('whItem'); pushScreenState('whTrucks');
+    var body = { action: 'whTrucks', phone: currentUser && currentUser.phone };
+    if (!wtItems && !swrHas_(body)) document.getElementById('wtList').innerHTML = skeletonHtml_(4);
+    swrLoad_(body, function (res) {
+      if (!res || res.status !== 'ok') { document.getElementById('wtList').innerHTML = '<div class="statsEmpty">' + escapeHtml((res && res.message) || 'Ошибка загрузки') + '</div>'; return; }
+      wtItems = res.items || []; renderWhTrucks_();
+    }, function (err) { document.getElementById('wtList').innerHTML = '<div class="statsEmpty">Ошибка соединения: ' + escapeHtml(String(err)) + '</div>'; });
+  }
+  function renderWhTrucks_() {
+    if (!wtItems) return;
+    var q = document.getElementById('wtSearch').value.trim().toLowerCase(), cnt = { recv: 0, send: 0, move: 0 };
+    wtItems.forEach(function (x) { cnt[x.kind] = (cnt[x.kind] || 0) + 1; });
+    document.getElementById('wtChips').innerHTML = '<button type="button" class="expChip' + (!wtKind ? ' on' : '') + '" data-k="">Все ' + wtItems.length + '</button>' +
+      ['recv', 'send', 'move'].filter(function (k) { return cnt[k]; }).map(function (k) {
+        return '<button type="button" class="expChip' + (wtKind === k ? ' on' : '') + '" data-k="' + k + '">' + WT_NAME[k] + ' ' + cnt[k] + '</button>';
+      }).join('');
+    var shown = wtItems.filter(function (x) {
+      if (wtKind && x.kind !== wtKind) return false;
+      return !q || [x.id, x.object, x.from, x.foreman, x.driver, x.by, x.comment, x.lines.join(' ')].join(' ').toLowerCase().indexOf(q) >= 0;
+    });
+    document.getElementById('wtSummary').textContent = 'Приёмок ' + cnt.recv + ' · отправок ' + cnt.send + (cnt.move ? ' · переездов ' + cnt.move : '');
+    var lastDay = '';
+    document.getElementById('wtList').innerHTML = shown.length ? shown.map(function (x, i) {
+      var day = x.date.slice(0, 10), head = '';
+      if (day !== lastDay) { lastDay = day; head = '<div class="tmShHead">' + escapeHtml(day) + '</div>'; }
+      var title = x.kind === 'recv' ? 'С объекта «' + x.object + '»' : x.kind === 'move' ? '«' + x.from + '» → «' + x.object + '»' : 'На объект «' + x.object + '»';
+      var meta = [];
+      if (x.foreman) meta.push('Прораб: <b>' + escapeHtml(personShort_(x.foreman) || x.foreman) + '</b>');
+      if (x.driver) meta.push('Машина: <b>' + escapeHtml(x.driver) + '</b>');
+      if (x.by) meta.push((x.kind === 'recv' ? 'Принял: ' : 'Отправил: ') + '<b>' + escapeHtml(personShort_(x.by) || x.by) + '</b>');
+      if (x.comment) meta.push('Комментарий: ' + escapeHtml(x.comment));
+      return head + '<div class="wtCard" data-i="' + i + '"><div class="wtTop"><span class="wtIco ' + x.kind + '">' + WT_ICO[x.kind] + '</span>' +
+        '<div class="wtMain"><div class="wtTitle">' + escapeHtml(title) + '</div><div class="wtSub">' + escapeHtml(x.id) + ' · ' + escapeHtml(x.date.slice(11)) + '</div></div>' +
+        '<div class="wtCnt">' + x.count + '<small>поз.</small></div></div>' +
+        '<div class="wtBody">' + x.lines.map(function (l) { return '<div class="wtL">' + escapeHtml(l.replace(' [обор.]', '')) + (/\[обор\.\]/.test(l) ? '<span class="whTag">обор.</span>' : '') + '</div>'; }).join('') +
+        (meta.length ? '<div class="wtMeta">' + meta.join('<br>') + '</div>' : '') +
+        (x.photos.length ? '<div class="photoGrid" style="display:flex; margin-top:8px;">' + photoStripInner_(x.photos) + '</div>' : '') + '</div></div>';
+    }).join('') : '<div class="statsEmpty">' + (wtItems.length ? 'Ничего не найдено' : 'Машин пока не было — приёмки и отправки появятся здесь') + '</div>';
+  }
+  document.getElementById('whTrucksLink').addEventListener('click', showWhTrucks_);
+  document.getElementById('wtBack').addEventListener('click', function () { showWarehouseScreen(); });
+  document.getElementById('wtSearch').addEventListener('input', renderWhTrucks_);
+  document.getElementById('wtChips').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-k]'); if (!b) return;
+    wtKind = b.getAttribute('data-k'); renderWhTrucks_();
+  });
+  document.getElementById('wtList').addEventListener('click', function (e) {
+    if (e.target.closest('.ph')) return;
+    var c = e.target.closest('.wtCard'); if (c) c.classList.toggle('open');
   });
 
   document.getElementById('whSave').addEventListener('click', function () { whSave_(false); });

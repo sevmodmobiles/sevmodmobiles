@@ -1,3 +1,4 @@
+// v107: история машин (whTrucks) — приёмки, отправки и переезды из листов «Приёмки» и «Отправки».
 // v106: переезд оборудования с объекта на объект (whMove), учёт в whEquipment.
 // v105: учёт оборудования по объектам (whEquipment) — по журналу отправок и приёмок.
 // v104: склад — отправка машины на объект (whShip): списание со склада, лист «Отправки».
@@ -533,6 +534,7 @@ function doPost(e) {
     if (data.action === 'adminApkSetup') return jsonOutput(adminApkSetup(data.phone));
     if (data.action === 'adminCreateInvite') return jsonOutput(adminCreateInvite(data.phone, data.employee));
     if (data.action === 'whObjects') return jsonOutput(whObjects(data.phone));
+    if (data.action === 'whTrucks') return jsonOutput(whTrucks(data.phone));
     if (data.action === 'whMove') return jsonOutput(whMove(data.phone, data.move));
     if (data.action === 'whEquipment') return jsonOutput(whEquipment(data.phone));
     if (data.action === 'whShip') return jsonOutput(whShip(data.phone, data.shipment));
@@ -4516,7 +4518,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v106';
+var CODE_VERSION = 'v107';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6105,6 +6107,26 @@ function whEquipment(phone) {
     items.push({ id: id, name: e.name, unit: e.unit, warehouse: e.warehouse, location: e.location, objects: objs });
   });
   return { status: 'ok', items: items, byObject: byObj };
+}
+// История машин: приёмки (лист «Приёмки») и отправки / переезды («Отправки»), новые сверху.
+function whTrucks(phone) {
+  var a = whAuth_(phone); if (!a.ok) return { status: 'error', message: a.error };
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), out = [];
+  [[WH_RECV_SHEET, 'recv'], [WH_SHIP_SHEET, 'send']].forEach(function (p) {
+    var sh = ss.getSheetByName(p[0]); if (!sh || sh.getLastRow() < 2) return;
+    sh.getRange(2, 1, sh.getLastRow() - 1, 10).getValues().forEach(function (r) {
+      if (!String(r[0]).trim()) return;
+      var text = String(r[7] || ''), kind = p[1], from = '';
+      var m = /^Переезд с объекта «(.+)»:\n?/.exec(text);
+      if (m) { kind = 'move'; from = m[1]; text = text.slice(m[0].length); }
+      out.push({ id: String(r[0]), kind: kind, ts: r[1] instanceof Date ? r[1].getTime() : 0,
+        date: r[1] instanceof Date ? Utilities.formatDate(r[1], 'Europe/Moscow', 'dd.MM.yyyy HH:mm') : String(r[1] || ''),
+        object: String(r[2] || ''), from: from, foreman: String(r[3] || ''), driver: String(r[4] || ''), by: String(r[5] || ''),
+        count: Number(r[6]) || 0, lines: text.split('\n').filter(String), comment: String(r[8] || ''), photos: urlsToArray_(r[9]) });
+    });
+  });
+  out.sort(function (x, y) { return y.ts - x.ts; });
+  return { status: 'ok', items: out.slice(0, 500) };
 }
 // Переезд оборудования с объекта на объект (минуя склад): остаток склада не
 // меняется, в журнал — «Переезд «откуда» → «куда»» на каждую позицию.
