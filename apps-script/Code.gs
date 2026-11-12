@@ -1,3 +1,4 @@
+// v117: расходы прораба из подотчёта — в «Работник» имя прораба, объект по умолчанию — последний закреплённый за ним.
 // v116: перенос старых расходов прорабов — и при открытии «Расходов» администратором.
 // v115: расходы прораба из подотчёта (и комиссия за ИП) пишутся в главную таблицу расходов: «Оплачено», «Оплатил» — прораб; старые из «Расходы прорабов» переносятся.
 // v114: «Сотрудники» — колонки ищутся по заголовкам; роли — чекбоксы «Прораб», «Кладовщик», «Снабжение» (плюс старая текстовая «Роли»).
@@ -3545,7 +3546,8 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     if (!expObjAllowed_(auth, po)) return { status: 'error', message: 'Объект «' + po + '» — не ваш' };
     var sum = Number(String(rate).replace(/\s/g, '').replace(',', '.'));
     if (!isFinite(sum) || sum <= 0) return { status: 'error', message: 'Укажите сумму' };
-    var resO = writeExpenseRows_(lists, [{ date: date, worker: '', rate: sum, brigadier: '', object: po, comment: String(comment || '').trim().slice(0, 500), status: status, payer: payerFm }]);
+    if (auth.foreman) { fmEnsureWorker_(auth.name); lists = getExpenseRefLists_(); }
+    var resO = writeExpenseRows_(lists, [{ date: date, worker: auth.foreman ? fmWorkerName_(lists, auth.name) : '', rate: sum, brigadier: '', object: po, comment: String(comment || '').trim().slice(0, 500), status: status, payer: payerFm }]);
     if (resO.status === 'ok') { resO.days = 1; resO.people = 1; }
     return resO;
   }
@@ -4582,6 +4584,7 @@ function adminExpenseLookups(phone) {
     workers: sorted_(lists.workers),
     brigadiers: sorted_(lists.brigadiers),
     objects: sorted_(lists.objects).filter(function (o) { return expObjAllowed_(auth, o); }),
+    defaultObject: auth.foreman ? fmDefaultObject_(auth.phone) : '',
     brigades: hist.brigades,
     lastRates: hist.lastRates,
     statuses: statuses,
@@ -4603,7 +4606,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v116';
+var CODE_VERSION = 'v117';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6300,11 +6303,27 @@ function fmAddExpRow_(date, emp, phone, obj, cat, amount, method, comment, photo
 }
 // Расход прораба из подотчёта — строкой главной таблицы расходов: без работника,
 // статус «Оплачено», в «Оплатил» — прораб (так он уменьшает его подотчёт).
-function fmMainExpense_(date, name, obj, sum, comment) {
+function fmMainExpense_(date, name, obj, sum, comment, phone) {
+  fmEnsureWorker_(name);
   var lists = getExpenseRefLists_();
+  if (!obj && phone) obj = fmDefaultObject_(phone);
   var po = obj ? pickFromList_(lists.objects, obj) : '';
-  return writeExpenseRows_(lists, [{ date: date, worker: '', rate: sum, brigadier: '', object: po || '', comment: String(comment || '').slice(0, 500), status: 'ОПЛАЧЕНО', payer: name }]);
+  return writeExpenseRows_(lists, [{ date: date, worker: fmWorkerName_(lists, name), rate: sum, brigadier: '', object: po || '', comment: String(comment || '').slice(0, 500), status: 'ОПЛАЧЕНО', payer: name }]);
 }
+// Объект по умолчанию — последний закреплённый за прорабом (ниже всех в «Объектах»).
+function fmDefaultObject_(phone) { var o = fmObjects_(normalizePhone_(phone)); return o.length ? o[o.length - 1] : ''; }
+// Прораб в «Работник»: имя должно быть в справочнике работников (строгий список).
+function fmEnsureWorker_(name) {
+  name = String(name || '').trim(); if (!name) return;
+  var ref = getExpenseRefSheet_();
+  if (pickFromList_(expenseRefColumn_(ref, 1), name)) return;
+  var lr = ref.getLastRow(), vals = lr >= 2 ? ref.getRange(2, 1, lr - 1, 1).getValues() : [], row = 2;
+  for (var i = vals.length - 1; i >= 0; i--) if (String(vals[i][0]).trim()) { row = i + 3; break; }
+  if (row > ref.getMaxRows()) ref.insertRowsAfter(ref.getMaxRows(), row - ref.getMaxRows());
+  ref.getRange(row, 1).setValue(name);
+  SpreadsheetApp.flush();
+}
+function fmWorkerName_(lists, name) { return pickFromList_(lists.workers, name) || ''; }
 // Разовый перенос записей из старого листа «Расходы прорабов» в главную таблицу.
 function fmMigrateOldExp_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FM_EXP_SHEET);
@@ -6313,7 +6332,7 @@ function fmMigrateOldExp_() {
   for (var i = 0; i < n; i++) {
     var r = v[i]; if (!(Number(r[5]) > 0) || String(r[10]).indexOf('перенесено') === 0) continue;
     var cm = String(r[4] || '') + (r[7] ? ' · ' + r[7] : '') + (r[6] ? ' · ' + r[6] : '') + (r[8] ? ' · чек: ' + r[8] : '');
-    var res = fmMainExpense_(r[0] instanceof Date ? r[0] : new Date(), String(r[1]).trim(), String(r[3] || ''), Number(r[5]), cm);
+    var res = fmMainExpense_(r[0] instanceof Date ? r[0] : new Date(), String(r[1]).trim(), String(r[3] || ''), Number(r[5]), cm, normalizePhone_(r[2]));
     if (res.status === 'ok') sh.getRange(i + 2, 11).setValue('перенесено в «Расходы»');
   }
 }
@@ -6356,7 +6375,8 @@ function fmBalanceOf_(name, phone, exps) {
         var amt = isFinite(tot) && (c.total && row[c.total - 1] !== '') ? tot : rate * cnt;
         labor += amt;
         var d = row[c.date - 1];
-        mine.push({ date: d instanceof Date ? toIsoDate_(d) : '', object: c.object ? String(row[c.object - 1] || '') : '', cat: String(row[c.worker - 1] || '').trim() || 'Прочее',
+        var wk = String(row[c.worker - 1] || '').trim();
+        mine.push({ date: d instanceof Date ? toIsoDate_(d) : '', object: c.object ? String(row[c.object - 1] || '') : '', cat: wk && wk !== name ? wk : 'Расход',
           amount: amt, method: '', comment: c.comment ? String(row[c.comment - 1] || '') : '', photos: [] });
       });
     }
@@ -6386,7 +6406,7 @@ function adminFmTransfer(phone, foremanPhone, amount, method, taxPct, dateIso, c
     SpreadsheetApp.flush();
   } finally { lock.releaseLock(); }
   if (fee > 0) {
-    var fr = fmMainExpense_(date, emp.name, '', fee, FM_FEE_CAT + ' · ' + String(pct).replace('.', ',') + '% от ' + sum + ' · ' + (cash ? 'наличные' : 'безнал'));
+    var fr = fmMainExpense_(date, emp.name, '', fee, FM_FEE_CAT + ' · ' + String(pct).replace('.', ',') + '% от ' + sum + ' · ' + (cash ? 'наличные' : 'безнал'), fp);
     if (fr.status !== 'ok') return { status: 'error', message: 'Перевод записан, но комиссия не попала в «Расходы»: ' + fr.message };
   }
   var b = fmBalanceOf_(emp.name, fp);
@@ -6426,7 +6446,7 @@ function fmCash(phone) {
   if (!emp) return { status: 'error', message: 'Сотрудник не найден' };
   if (!hasRole_(p, 'foreman')) return { status: 'error', message: 'Раздел для прорабов' };
   var b = fmBalanceOf_(emp.name, p), objs = fmObjects_(p);
-  return { status: 'ok', name: emp.name, objects: objs, cats: FM_EXP_CATS, balance: b.balance, received: b.received, spent: b.spent, given: b.given,
+  return { status: 'ok', name: emp.name, objects: objs, defaultObject: objs.length ? objs[objs.length - 1] : '', cats: FM_EXP_CATS, balance: b.balance, received: b.received, spent: b.spent, given: b.given,
     moves: b.moves.reverse().slice(0, 100), expenses: b.expenses.reverse().slice(0, 300).map(function (e) { delete e.phone; return e; }),
     labor: objs.length ? fmLaborRows_(objs) : [] };
 }
@@ -6443,7 +6463,7 @@ function fmAddExpense(phone, ex) {
   var photos = (Array.isArray(ex.photos) ? ex.photos : []).filter(isUploadedPhotoUrl_).slice(0, 10);
   var date = parseIsoDate_(ex.date) || startOfDay_(new Date());
   var cm = cat + (ex.comment ? ' · ' + String(ex.comment).trim().slice(0, 300) : '') + ' · ' + (ex.method === 'безнал' ? 'безнал' : 'наличные') + (photos.length ? ' · чек: ' + photos.join(', ') : '');
-  var res = fmMainExpense_(date, emp.name, obj, sum, cm);
+  var res = fmMainExpense_(date, emp.name, obj, sum, cm, p);
   if (res.status !== 'ok') return res;
   return { status: 'ok', balance: fmBalanceOf_(emp.name, p).balance };
 }

@@ -5074,7 +5074,7 @@
     var r = fmCashRes || { objects: [], cats: ['Материалы', 'Прочее'], balance: 0 };
     document.getElementById('fmeBal').textContent = 'Остаток подотчёта: ' + fmRub_(r.balance);
     document.getElementById('fmeCat').innerHTML = (r.cats || []).map(function (c) { return '<option>' + escapeHtml(c) + '</option>'; }).join('');
-    document.getElementById('fmeObj').innerHTML = (r.objects || []).map(function (o) { return '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>'; }).join('') + '<option value="">Без объекта (общие)</option>';
+    document.getElementById('fmeObj').innerHTML = (r.objects || []).map(function (o) { return '<option value="' + escapeHtml(o) + '"' + (o === r.defaultObject ? ' selected' : '') + '>' + escapeHtml(o) + '</option>'; }).join('') + '<option value="">Без объекта (общие)</option>';
     document.getElementById('fmeAmount').value = ''; document.getElementById('fmeComment').value = '';
     document.getElementById('fmeDate').value = tmIso_(tmToday_()); document.getElementById('fmeDate').max = tmIso_(tmToday_());
     document.getElementById('fmeStatus').textContent = '';
@@ -8524,6 +8524,7 @@
     document.getElementById('expKindSeg').style.display = expFmMode_() ? '' : 'none';
     if (!expFmMode_()) expKind = 'work';
     applyExpKind_();
+    expFillDefaultObj_();
     if (!expRange.from) { expRange.from = isoToday_(); expRange.to = expRange.from; }
     renderExpDateField();
     setExpStatus('');
@@ -8557,17 +8558,23 @@
     var b = e.target.closest('button[data-t]'); if (!b) return;
     expKind = b.getAttribute('data-t'); applyExpKind_(); setExpStatus('');
   });
+  // У прораба объект по умолчанию — последний закреплённый за ним
+  function expFillDefaultObj_() {
+    var el = document.getElementById('expObject');
+    if (expFmMode_() && !el.value && expLookups && expLookups.defaultObject) el.value = expLookups.defaultObject;
+  }
   function loadExpLookups() {
     swrLoad_({ action: 'adminExpenseLookups', phone: currentUser && currentUser.phone }, function (res) {
         if (res && res.status === 'ok') {
           expLookups = {
             workers: res.workers || [], brigadiers: res.brigadiers || [], objects: res.objects || [],
-            brigades: res.brigades || {}, lastRates: res.lastRates || {}, loaded: true,
+            brigades: res.brigades || {}, lastRates: res.lastRates || {}, loaded: true, defaultObject: res.defaultObject || '',
             statuses: res.statuses || [], defaultStatus: res.defaultStatus || 'НЕ ОПЛАЧЕНО',
             statusColors: res.statusColors || {},
             payers: res.payers || null, banks: res.banks || null
           };
           renderPayStatusOptions();
+          if (screenAdminExpense.style.display === 'block') expFillDefaultObj_();
           if (!expLookups.workers.length) {
             showPickError('expWorker', 'Список работников пуст — заполните колонку «Работники» на листе «' +
               (res.refSheet || 'Справочник расходов') + '» в таблице.');
