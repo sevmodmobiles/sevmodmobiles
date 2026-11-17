@@ -243,6 +243,7 @@
     font-family: inherit;
   }
   textarea { resize: vertical; }
+  textarea.autogrow { resize: none; overflow: hidden; min-height: 50px; line-height: 1.35; }
   button {
     width: 100%;
     padding: 15px;
@@ -1595,6 +1596,7 @@
   .pcAddBank input { flex: 1; min-width: 0; margin: 0; padding: 8px 10px; font-size: 14px; }
   .pcAddBank button { width: auto; margin: 0; padding: 8px 12px; font-size: 13px; }
   .pcNote { margin: 0; padding: 9px 10px; font-size: 14px; }
+  .pcNote.autogrow { min-height: 40px; }
   .pcPeople { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
   .pcPerson { border-bottom: 1px solid var(--border); padding: 9px 12px; }
   .pcPerson:last-child { border-bottom: none; }
@@ -2492,7 +2494,7 @@
       <div class="ctAct">Оплата по акту (статус «По Акту»): <span id="ctActSum" class="ctActSum">—</span></div>
 
       <label for="ctComment">Комментарий</label>
-      <input id="ctComment" type="text" maxlength="400" placeholder="Необязательно">
+      <textarea id="ctComment" class="autogrow" rows="1" placeholder="Необязательно"></textarea>
       <div id="ctNote" class="ctHint" style="margin-top:0;"></div>
       <button id="ctSubmit" type="button" style="margin-top:10px; background: #8e5bd8;">Добавить контракт</button>
       <div id="ctStatus"></div>
@@ -2665,7 +2667,7 @@
       </div>
       <div id="expCommentBlock">
       <label for="expComment" style="margin-top:10px;">Комментарий</label>
-      <input id="expComment" type="text" maxlength="500" placeholder="Необязательно">
+      <textarea id="expComment" class="autogrow" rows="1" placeholder="Необязательно"></textarea>
       </div>
       <div id="expPeriodNote" hidden></div>
       <button id="expSubmitBtn" type="button" style="margin-top:10px;">Добавить в таблицу</button>
@@ -2704,7 +2706,7 @@
         <input id="absenceTimeFrom" type="time">
       </div>
       <label for="absenceComment" style="margin-top:10px;">Комментарий (необязательно)</label>
-      <input id="absenceComment" type="text" maxlength="200" placeholder="Например: к врачу">
+      <textarea id="absenceComment" class="autogrow" rows="1" placeholder="Например: к врачу"></textarea>
       <button id="absenceSubmitBtn" type="button" style="margin-top:10px;">Отправить заявку</button>
       <div id="absenceStatus"></div>
     </div>
@@ -2835,7 +2837,7 @@
       <label for="fcaDate">Дата</label>
       <input id="fcaDate" type="date">
       <label for="fcaComment">Комментарий</label>
-      <input id="fcaComment" type="text" maxlength="200" placeholder="Необязательно: на что">
+      <textarea id="fcaComment" class="autogrow" rows="1" placeholder="Необязательно: на что"></textarea>
       <button id="fcaSend" type="button">Передать</button>
       <div id="fcaStatus" style="margin-top:10px;"></div>
     </div>
@@ -2958,7 +2960,7 @@
       </div>
       <div id="whReasonWrap" style="display:none;">
         <label for="whReason">Причина корректировки</label>
-        <input id="whReason" type="text" maxlength="200" placeholder="Пересчёт, пересорт, брак…">
+        <textarea id="whReason" class="autogrow" rows="1" placeholder="Пересчёт, пересорт, брак…"></textarea>
       </div>
 
       <label for="whLoc">Место хранения</label>
@@ -3043,9 +3045,9 @@
     <div class="modalBox">
       <h2 id="awTitle" style="margin-top:0; color: var(--text);">Новый работник</h2>
       <label for="awFirst">Имя *</label>
-      <input id="awFirst" type="text" autocomplete="off" maxlength="60">
+      <input id="awFirst" type="text" autocomplete="off">
       <label for="awLast">Фамилия</label>
-      <input id="awLast" type="text" autocomplete="off" maxlength="60" placeholder="Необязательно">
+      <input id="awLast" type="text" autocomplete="off" placeholder="Необязательно">
       <label for="awPhone">Телефон</label>
       <input id="awPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="Необязательно">
       <div id="awStatus"></div>
@@ -3099,7 +3101,7 @@
       <div id="cfText" class="modalText" style="font-size:14px;"></div>
       <div id="cfReasonWrap" hidden>
         <label id="cfReasonLabel" for="cfReason" style="margin-top:10px;">Причина удаления *</label>
-        <input id="cfReason" type="text" maxlength="500" autocomplete="off" placeholder="Например: дубль, ошибка в ставке">
+        <textarea id="cfReason" class="autogrow" rows="1" autocomplete="off" placeholder="Например: дубль, ошибка в ставке"></textarea>
         <div id="cfReasonHint" class="ctHint" style="margin-top:-8px;">Удаление, причина и все данные записи сохраняются в журнале изменений.</div>
       </div>
       <div id="cfStatus"></div>
@@ -3151,7 +3153,7 @@
       <div id="stOpts" class="stOpts" role="radiogroup" aria-label="Новый статус"></div>
       <div id="stReasonWrap" hidden>
         <label for="stReason">Причина снятия «ОПЛАЧЕНО» *</label>
-        <input id="stReason" type="text" maxlength="500" autocomplete="off" placeholder="Например: оплату вернули, ошибка">
+        <textarea id="stReason" class="autogrow" rows="1" autocomplete="off" placeholder="Например: оплату вернули, ошибка"></textarea>
         <div class="ctHint" style="margin-top:-8px;">Смена статуса и причина сохраняются в журнале изменений.</div>
       </div>
       <div id="stStatus"></div>
@@ -4025,6 +4027,11 @@
   });
   renderInstallCards_();
 
+  // Поля комментариев растут по мере ввода — весь текст виден (без maxlength:
+  // на Android он ломает ввод с подсказками клавиатуры)
+  function autoGrow_(el) { if (!el || !el.classList || !el.classList.contains('autogrow')) return; el.style.height = 'auto'; el.style.height = el.scrollHeight + 2 + 'px'; }
+  document.addEventListener('input', function (e) { autoGrow_(e.target); }, true);
+  document.addEventListener('focusin', function (e) { autoGrow_(e.target); }, true);
   // Поля даты и времени: календарь/часы открываются нажатием на всё поле,
   // а не только на значок справа (так интуитивнее). Работает и для полей,
   // которые создаются динамически (авансы в контрактах и т.п.).
@@ -9412,7 +9419,7 @@
       (mv.method === 'card' ? '<div class="pcRow"><span class="lbl">Банк</span>' + pcBanks_().map(function (b) {
         return '<button type="button" class="pcChip' + (mv.bank === b ? ' on' : '') + '" data-f="bank" data-v="' + escapeHtml(b) + '">' + escapeHtml(b) + '</button>';
       }).join('') + '</div>' : '') +
-      '<input id="cmComment" type="text" maxlength="300" placeholder="Комментарий (необязательно)" value="' + escapeHtml(mv.comment) + '">';
+      '<textarea id="cmComment" class="autogrow" rows="1" placeholder="Комментарий (необязательно)">' + escapeHtml(mv.comment) + '</textarea>';
   }
   cmModal.addEventListener('click', function (e) {
     if (e.target === cmModal) { cmModal.classList.remove('open'); return; }
@@ -9933,11 +9940,11 @@
     if (c.method === 'card') {
       html += '<div class="pcRow"><span class="lbl">Банк</span>' + chips(pcBanks_(), 'bank', c.bank) +
         (c.addingBank
-          ? '<div class="pcAddBank"><input type="text" class="pcBankInput" data-scope="' + escapeHtml(scope) + '" maxlength="40" placeholder="Название банка">' +
+          ? '<div class="pcAddBank"><input type="text" class="pcBankInput" data-scope="' + escapeHtml(scope) + '" placeholder="Название банка">' +
             '<button type="button" class="pcBankSave" data-scope="' + escapeHtml(scope) + '">Добавить</button></div>'
           : '<button type="button" class="pcChip add" data-scope="' + escapeHtml(scope) + '" data-f="addBank">+ Банк</button>') + '</div>';
     }
-    html += '<input type="text" class="pcNote" data-scope="' + escapeHtml(scope) + '" maxlength="300" placeholder="Уточнение (необязательно)" value="' + escapeHtml(c.note || '') + '">';
+    html += '<textarea class="pcNote autogrow" rows="1" data-scope="' + escapeHtml(scope) + '" placeholder="Уточнение (необязательно)">' + escapeHtml(c.note || '') + '</textarea>';
     return html;
   }
   function pcGet_(scope) { return scope === '*' ? pcCommon : pcOwn[scope]; }
