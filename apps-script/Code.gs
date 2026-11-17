@@ -1,3 +1,4 @@
+// v127: детали оплаты при добавлении расходов — общие ('*') для тех, кого нет в окне.
 // v126: добавление расхода сразу «Оплачено» — детали оплаты (кто, как, банк) в комментарий, «Оплатил», дата погашения.
 // v125: уход по Wi-Fi — когда телефон сообщил, что человек вне сети объекта, и он не вернулся 45 мин (уход = последнее время в сети); молчание телефона ночью смену не закрывает; проверка каждые 15 мин.
 // v124: несколько смен в день (разные объекты) — пары «приход → уход»: кабинеты, общий кабинет, лента; «на смене с» — по журналу.
@@ -3528,7 +3529,7 @@ var EXPENSE_MAX_ROWS = 600;
 function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso, entries, status, kind, pay) {
   pay = pay && typeof pay === 'object' ? pay : {};
   // детали оплаты по человеку (как в «Оплатах»): комментарий и кто оплатил
-  function payOf_(w) { var x = pay[w || 'Прочее'] || {}; return { comment: String(x.comment || '').slice(0, 300), payer: String(x.payer || '').trim().slice(0, 60) }; }
+  function payOf_(w) { var x = pay[w || 'Прочее'] || pay['*'] || {}; return { comment: String(x.comment || '').slice(0, 300), payer: String(x.payer || '').trim().slice(0, 60) }; }
   function withPay_(cm, w) { var x = payOf_(w).comment; return x ? (cm ? cm + ' · ' + x : x) : cm; }
   var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
@@ -4623,7 +4624,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v126';
+var CODE_VERSION = 'v127';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',

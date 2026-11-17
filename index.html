@@ -8861,6 +8861,34 @@
     document.getElementById('expPayStatusDot').style.background = c;
   }
   document.getElementById('expPayStatus').addEventListener('change', updatePayStatusDot);
+  // Выбрали «ОПЛАЧЕНО» — сразу окно с деталями оплаты (кто, как, откуда), как в «Оплатах»
+  var expPrevStatus = '';
+  document.getElementById('expPayStatus').addEventListener('focus', function () { expPrevStatus = this.value; });
+  document.getElementById('expPayStatus').addEventListener('change', function () {
+    var sel = this;
+    if (!isPaid_(sel.value)) { expPendingPay = null; return; }
+    var nDays = daysBetween_(expRange.from, expRange.to || expRange.from) || 1;
+    var entries;
+    if (expKind === 'other' && expFmMode_()) entries = [{ worker: '', rate: document.getElementById('expRate').value }];
+    else if (expBrigadeMode()) entries = expBrigade.filter(function (m) { return m.checked; }).map(function (m) { return { worker: m.worker, rate: m.rate }; });
+    else entries = [{ worker: document.getElementById('expWorker').value.trim(), rate: document.getElementById('expRate').value }];
+    if (!entries.length) entries = [{ worker: '', rate: 0 }];
+    var pr = entries.map(function (e, i) {
+      return { row: 'n' + i, worker: e.worker || '', total: (Number(String(e.rate || '').replace(/\s/g, '').replace(',', '.')) || 0) * nDays };
+    });
+    askPayComments_(pr, function (cm) {
+      var pay = {};
+      pr.forEach(function (r) { var x = cm[r.row] || {}; pay[r.worker || 'Прочее'] = { comment: x.comment || '', payer: x.payer || '' }; });
+      // общие детали — и для тех, кого добавят в форму позже
+      var any = cm[pr[0].row] || {}; pay['*'] = { comment: any.comment || '', payer: any.payer || '' };
+      expPendingPay = pay;
+      setExpStatus('Детали оплаты заполнены — нажмите «Добавить в таблицу».', 'success');
+    }, function () {
+      // отменили — возвращаем прежний статус
+      sel.value = expPrevStatus && !isPaid_(expPrevStatus) ? expPrevStatus : expDefaultStatus_();
+      updatePayStatusDot(); expPendingPay = null;
+    });
+  });
 
   // ----- Дата / период расходов -----
   var EXP_MAX_DAYS = 62;
