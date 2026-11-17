@@ -8985,6 +8985,7 @@
     showExpHubScreen();
   });
 
+  var expPendingPay = null; // детали оплаты, выбранные в окне перед записью «ОПЛАЧЕНО»
   document.getElementById('expSubmitBtn').addEventListener('click', function () {
     var btn = document.getElementById('expSubmitBtn');
     var payload = {
@@ -9025,6 +9026,24 @@
       whoText = payload.worker;
     }
     if (!payload.objectName) { setExpStatus('Укажите объект', 'error'); return; }
+    // Сразу «ОПЛАЧЕНО» — детали оплаты (кто, как, банк), как в «Оплатах»
+    if (isPaid_(payload.status)) {
+      if (!expPendingPay) {
+        var nDays = daysBetween_(payload.date, payload.dateTo) || 1;
+        var pr = (payload.entries || [{ worker: payload.worker, rate: payload.rate }]).map(function (e, i) {
+          return { row: 'n' + i, worker: e.worker || '', total: (Number(String(e.rate).replace(/\s/g, '').replace(',', '.')) || 0) * nDays };
+        });
+        askPayComments_(pr, function (cm) {
+          var pay = {};
+          pr.forEach(function (r) { var x = cm[r.row] || {}; pay[r.worker || 'Прочее'] = { comment: x.comment || '', payer: x.payer || '' }; });
+          expPendingPay = pay;
+          document.getElementById('expSubmitBtn').click();
+        });
+        return;
+      }
+      payload.pay = expPendingPay;
+    }
+    expPendingPay = null;
     // Сразу: форма очищена и готова к следующей записи, запись — в фоне.
     // Не записалось — поля вернутся, и появится понятная ошибка.
     var snapIds = ['expWorker', 'expBrigadier', 'expObject', 'expRate', 'expComment', 'expAddWorker', 'expPayStatus'];

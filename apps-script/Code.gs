@@ -1,3 +1,4 @@
+// v126: добавление расхода сразу «Оплачено» — детали оплаты (кто, как, банк) в комментарий, «Оплатил», дата погашения.
 // v125: уход по Wi-Fi — когда телефон сообщил, что человек вне сети объекта, и он не вернулся 45 мин (уход = последнее время в сети); молчание телефона ночью смену не закрывает; проверка каждые 15 мин.
 // v124: несколько смен в день (разные объекты) — пары «приход → уход»: кабинеты, общий кабинет, лента; «на смене с» — по журналу.
 // v123: автоприход ставится временем первого появления в сети объекта; начало открытых смен сверяется с журналом «Учет» (правки в таблице подхватываются).
@@ -653,7 +654,7 @@ function doPost(e) {
     }
     if (data.action === 'adminAddExpense') {
       return jsonOutput(adminAddExpense(data.phone, data.date, data.worker, data.brigadier,
-        data.objectName, data.rate, data.comment, data.dateTo, data.entries, data.status, data.kind));
+        data.objectName, data.rate, data.comment, data.dateTo, data.entries, data.status, data.kind, data.pay));
     }
     if (data.action === 'adminAddExpenseWorker') {
       return jsonOutput(adminAddExpenseWorker(data.phone, data.firstName, data.lastName, data.workerPhone, data.asBrigadier));
@@ -3524,7 +3525,11 @@ var EXPENSE_MAX_ROWS = 600;
 // Запись расходов. Работники — либо один (worker + rate), либо список entries
 // [{ worker, rate }] (бригада: у каждого своя ставка). dateToIso — конец
 // периода (включительно): на каждый день и каждого работника — своя строка.
-function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso, entries, status, kind) {
+function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, comment, dateToIso, entries, status, kind, pay) {
+  pay = pay && typeof pay === 'object' ? pay : {};
+  // детали оплаты по человеку (как в «Оплатах»): комментарий и кто оплатил
+  function payOf_(w) { var x = pay[w || 'Прочее'] || {}; return { comment: String(x.comment || '').slice(0, 300), payer: String(x.payer || '').trim().slice(0, 60) }; }
+  function withPay_(cm, w) { var x = payOf_(w).comment; return x ? (cm ? cm + ' · ' + x : x) : cm; }
   var auth = expAuth_(phone);
   if (!auth.ok) return { status: 'error', message: auth.error };
 
@@ -3553,7 +3558,8 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
     var sum = Number(String(rate).replace(/\s/g, '').replace(',', '.'));
     if (!isFinite(sum) || sum <= 0) return { status: 'error', message: 'Укажите сумму' };
     if (auth.foreman) { fmEnsureWorker_(auth.name); lists = getExpenseRefLists_(); }
-    var resO = writeExpenseRows_(lists, [{ date: date, worker: auth.foreman ? fmWorkerName_(lists, auth.name) : '', rate: sum, brigadier: '', object: po, comment: String(comment || '').trim().slice(0, 500), status: status, payer: payerFm }]);
+    var wO = auth.foreman ? fmWorkerName_(lists, auth.name) : '';
+    var resO = writeExpenseRows_(lists, [{ date: date, worker: wO, rate: sum, brigadier: '', object: po, comment: withPay_(String(comment || '').trim().slice(0, 500), ''), status: status, payer: payerFm || payOf_('').payer, payDate: new Date() }]);
     if (resO.status === 'ok') { resO.days = 1; resO.people = 1; }
     return resO;
   }
@@ -3589,7 +3595,7 @@ function adminAddExpense(phone, dateIso, worker, brigadier, objectName, rate, co
   dates.forEach(function (dt) {
     people.forEach(function (pp) {
       rowsData.push({ date: dt, worker: pp.worker, rate: pp.rate, brigadier: brigadier,
-        object: objectName, comment: comment, status: status, payer: payerFm });
+        object: objectName, comment: withPay_(comment, pp.worker), status: status, payer: payerFm || payOf_(pp.worker).payer, payDate: new Date() });
     });
   });
   var res = writeExpenseRows_(lists, rowsData);
@@ -3666,6 +3672,11 @@ function writeExpenseRows_(lists, rowsData) {
     if (anyPaidBy && !cols.payer) { try { cols.payer = ensurePayerCol_(sheet, lay); } catch (e) {} }
     if (cols.payer && anyPaidBy) {
       column_(cols.payer, function (x) { return x.payer && String(x.statusValue || '').toLowerCase() === 'оплачено' ? x.payer : ''; });
+    }
+    // «Оплачено» сразу при добавлении — дата погашения сегодня
+    if (cols.payDate && rowsData.some(function (x) { return x.payDate && String(x.statusValue || '').toLowerCase() === 'оплачено'; })) {
+      var pdr = column_(cols.payDate, function (x) { return x.payDate && String(x.statusValue || '').toLowerCase() === 'оплачено' ? x.payDate : ''; });
+      if (pdr) pdr.setNumberFormat('dd.MM.yyyy');
     }
     SpreadsheetApp.flush();
 
@@ -4612,7 +4623,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v125';
+var CODE_VERSION = 'v126';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6396,7 +6407,7 @@ function fmMainExpense_(date, name, obj, sum, comment, phone) {
   var lists = getExpenseRefLists_();
   if (!obj && phone) obj = fmDefaultObject_(phone);
   var po = obj ? pickFromList_(lists.objects, obj) : '';
-  return writeExpenseRows_(lists, [{ date: date, worker: fmWorkerName_(lists, name), rate: sum, brigadier: '', object: po || '', comment: String(comment || '').slice(0, 500), status: 'ОПЛАЧЕНО', payer: name }]);
+  return writeExpenseRows_(lists, [{ date: date, worker: fmWorkerName_(lists, name), rate: sum, brigadier: '', object: po || '', comment: String(comment || '').slice(0, 500), status: 'ОПЛАЧЕНО', payer: name, payDate: new Date() }]);
 }
 // Объект по умолчанию — последний закреплённый за прорабом (ниже всех в «Объектах»).
 function fmDefaultObject_(phone) { var o = fmObjects_(normalizePhone_(phone)); return o.length ? o[o.length - 1] : ''; }
