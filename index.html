@@ -1726,6 +1726,7 @@
   .fcaRow:last-child { border-bottom: 0; }
   .fcaRow b { white-space: nowrap; }
   .fcaRow small { display: block; color: var(--muted); font-size: 12px; }
+  .autocompleteItem.recent::after { content: 'недавно'; float: right; font-size: 11px; color: var(--muted); font-weight: 600; margin-left: 8px; }
   .whTag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: rgba(66,133,244,.13); color: var(--blue); margin-left: 6px; vertical-align: 1px; }
   #bottomNavInner {
     width: 100%;
@@ -8069,8 +8070,21 @@
     list.className = 'autocompleteList';
     wrap.appendChild(list);
 
+    // последние выбранные в этом поле — первыми в списке
+    var MRU_KEY = inputEl.id ? 'sevmod_mru_' + inputEl.id : '';
+    function mru_() { try { return MRU_KEY ? JSON.parse(localStorage.getItem(MRU_KEY) || '[]') : []; } catch (e) { return []; } }
+    function mruPush_(v) {
+      if (!MRU_KEY || !v) return;
+      var a = mru_().filter(function (x) { return x !== v; }); a.unshift(v);
+      try { localStorage.setItem(MRU_KEY, JSON.stringify(a.slice(0, 5))); } catch (e) {}
+    }
+    inputEl.addEventListener('change', function () {
+      var v = inputEl.value.trim(); if (v && (getItemsFn() || []).indexOf(v) >= 0) mruPush_(v);
+    });
     function render() {
       var items = getItemsFn() || [];
+      var recent = mru_().filter(function (x) { return items.indexOf(x) >= 0; });
+      if (recent.length) items = recent.concat(items.filter(function (x) { return recent.indexOf(x) < 0; }));
       var query = inputEl.value.trim().toLowerCase();
       // ищем по подписи и (если задано) по доп. тексту — например, полному ФИО
       var matches = query
@@ -8092,7 +8106,7 @@
         return;
       }
       list.innerHTML = matches.map(function (label) {
-        return '<div class="autocompleteItem">' + escapeHtml(label) + '</div>';
+        return '<div class="autocompleteItem' + (recent.indexOf(label) >= 0 ? ' recent' : '') + '">' + escapeHtml(label) + '</div>';
       }).join('');
       list.style.display = 'block';
     }
@@ -8124,6 +8138,7 @@
       }
       inputEl.value = item.textContent;
       list.style.display = 'none';
+      mruPush_(inputEl.value);
       inputEl.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
@@ -8132,6 +8147,32 @@
       setTimeout(function () { list.style.display = 'none'; }, 150);
     });
   }
+
+  // ===== Последний выбранный вариант в выпадающих списках =====
+  // Запоминаем выбор в каждом списке (по id). Когда список заполняется заново и
+  // в нём ничего не выбрано (пустой пункт «— выберите —»), ставим прошлый выбор.
+  // Фильтры, где пустое значение означает «все», не трогаем.
+  var LASTSEL_SKIP = { tmObjSel: 1, tmPersonSel: 1, expObjFilter: 1, expBrigFilter: 1, wrFrom: 1, whCat: 1 }; // whCat — категория склада сбрасывается для новой позиции (просили отдельно)
+  function lastSelKey_(el) { return 'sevmod_lastsel_' + el.id; }
+  function lastSelApply_(el) {
+    if (!el || el.tagName !== 'SELECT' || !el.id || LASTSEL_SKIP[el.id] || el.disabled || el.value !== '') return;
+    var v = null; try { v = localStorage.getItem(lastSelKey_(el)); } catch (e) {}
+    if (!v || !Array.prototype.some.call(el.options, function (o) { return o.value === v; })) return;
+    el.value = v;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  document.addEventListener('change', function (e) {
+    var el = e.target;
+    if (el && el.tagName === 'SELECT' && el.id && !LASTSEL_SKIP[el.id] && el.value !== '') { try { localStorage.setItem(lastSelKey_(el), el.value); } catch (err) {} }
+  }, true);
+  try {
+    new MutationObserver(function (muts) {
+      var seen = [];
+      muts.forEach(function (m) { var t = m.target; if (t && t.tagName === 'SELECT' && seen.indexOf(t) < 0) seen.push(t); });
+      seen.forEach(function (el) { setTimeout(function () { lastSelApply_(el); }, 0); });
+    }).observe(document.body, { childList: true, subtree: true });
+  } catch (e) {}
+  Array.prototype.forEach.call(document.querySelectorAll('select[id]'), lastSelApply_);
 
   // Идущее время открытой смены: «0:35», обновляется раз в 30 секунд.
   function liveDur_(since) {
