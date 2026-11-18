@@ -1,3 +1,4 @@
+// v128: передача подотчёта прорабу — защита от двойной записи (повтор того же запроса и такой же перевод за 15 минут).
 // v127: детали оплаты при добавлении расходов — общие ('*') для тех, кого нет в окне.
 // v126: добавление расхода сразу «Оплачено» — детали оплаты (кто, как, банк) в комментарий, «Оплатил», дата погашения.
 // v125: уход по Wi-Fi — когда телефон сообщил, что человек вне сети объекта, и он не вернулся 45 мин (уход = последнее время в сети); молчание телефона ночью смену не закрывает; проверка каждые 15 мин.
@@ -558,7 +559,7 @@ function doPost(e) {
     if (data.action === 'adminApkSetup') return jsonOutput(adminApkSetup(data.phone));
     if (data.action === 'adminCreateInvite') return jsonOutput(adminCreateInvite(data.phone, data.employee));
     if (data.action === 'whObjects') return jsonOutput(whObjects(data.phone));
-    if (data.action === 'adminFmTransfer') return jsonOutput(adminFmTransfer(data.phone, data.foreman, data.amount, data.method, data.taxPct, data.date, data.comment));
+    if (data.action === 'adminFmTransfer') return jsonOutput(adminFmTransfer(data.phone, data.foreman, data.amount, data.method, data.taxPct, data.date, data.comment, data.reqId, data.force));
     if (data.action === 'adminFmCash') return jsonOutput(adminFmCash(data.phone));
     if (data.action === 'fmCash') return jsonOutput(fmCash(data.phone));
     if (data.action === 'fmAddExpense') return jsonOutput(fmAddExpense(data.phone, data.expense));
@@ -4624,7 +4625,7 @@ function adminExpenseLookups(phone) {
 // (script.google.com/home/usersettings) и права script.projects /
 // script.deployments в манифесте (см. setupAutoUpdate).
 // Версия этого кода. Меняется вместе с первой строкой файла.
-var CODE_VERSION = 'v127';
+var CODE_VERSION = 'v128';
 
 var SELF_UPDATE = {
   REPO: 'sevmodmobiles/sevmodmobiles',
@@ -6486,7 +6487,7 @@ function fmBalanceOf_(name, phone, exps) {
   var r2 = function (x) { return Math.round(x * 100) / 100; };
   return { received: r2(received), given: r2(given), spent: r2(spent), labor: r2(labor), balance: r2(received - given - spent), moves: moves, expenses: mine };
 }
-function adminFmTransfer(phone, foremanPhone, amount, method, taxPct, dateIso, comment) {
+function adminFmTransfer(phone, foremanPhone, amount, method, taxPct, dateIso, comment, reqId, force) {
   var auth = adminAuth_(phone); if (!auth.ok) return { status: 'error', message: auth.error };
   var fp = normalizePhone_(foremanPhone), emp = fp && findEmployeeByPhone_(fp);
   if (!emp) return { status: 'error', message: 'Прораб не найден' };
@@ -6496,9 +6497,25 @@ function adminFmTransfer(phone, foremanPhone, amount, method, taxPct, dateIso, c
   var cash = method === 'нал';
   var date = parseIsoDate_(dateIso) || startOfDay_(new Date());
   var fee = Math.round(sum * pct) / 100, who = findEmployeeByPhone_(auth.phone), whoName = who ? who.name : auth.phone;
+  // Повтор того же запроса (телефон не дождался ответа и отправил снова) —
+  // ничего не пишем второй раз, отвечаем результатом первого.
+  var rk = reqId ? 'fmtr_' + String(reqId).replace(/[^\w-]/g, '').slice(0, 60) : '';
+  var cache = CacheService.getScriptCache();
+  if (rk) { var was = cache.get(rk); if (was) { try { return JSON.parse(was); } catch (e) { return { status: 'ok', fee: fee, net: sum - fee, balance: 0 }; } } }
   var lock = LockService.getScriptLock(); lock.waitLock(15000);
   try {
     var sh = getCashSheet_(), row = sh.getLastRow() + 1;
+    if (rk && cache.get(rk)) return JSON.parse(cache.get(rk));
+    // Такой же перевод тому же прорабу за последние 15 минут — спрашиваем подтверждение.
+    if (!force && row > 2) {
+      var from = Math.max(2, row - 20), recent = sh.getRange(from, 1, row - from, CASH_HEADERS.length).getValues();
+      var dup = recent.some(function (v) {
+        var at = v[7] instanceof Date ? v[7].getTime() : 0;
+        return String(v[2] || '').trim() === emp.name && Number(v[3]) === sum && at && Date.now() - at < 15 * 60000;
+      });
+      if (dup) return { status: 'dup', message: 'Такой же перевод ' + emp.name + ' на ' + sum + ' ₽ уже записан несколько минут назад.' };
+    }
+    if (rk) cache.put(rk, JSON.stringify({ status: 'ok', fee: fee, net: Math.round((sum - fee) * 100) / 100, balance: 0, repeated: true }), 6 * 3600);
     var note = String(comment || '').replace(/\s+/g, ' ').trim().slice(0, 200);
     sh.getRange(row, 1, 1, CASH_HEADERS.length).setValues([[date, CASH_COMPANY, emp.name, sum, cash ? 'наличные' : 'безнал (ИП)',
       (note ? note + ' · ' : '') + (fee ? 'комиссия ' + String(pct).replace('.', ',') + '% = ' + fee : 'без комиссии'), whoName, new Date()]]);
@@ -6510,6 +6527,7 @@ function adminFmTransfer(phone, foremanPhone, amount, method, taxPct, dateIso, c
     if (fr.status !== 'ok') return { status: 'error', message: 'Перевод записан, но комиссия не попала в «Расходы»: ' + fr.message };
   }
   var b = fmBalanceOf_(emp.name, fp);
+  if (rk) cache.put(rk, JSON.stringify({ status: 'ok', fee: fee, net: Math.round((sum - fee) * 100) / 100, balance: b.balance, repeated: true }), 6 * 3600);
   try { sendPush_([fp], 'Подотчётные средства', 'Получено ' + sum + ' ₽' + (fee ? ', комиссия ' + fee + ' ₽' : '') + '. Остаток: ' + b.balance + ' ₽', { screen: 'fm', tag: 'cash' }); } catch (e) {}
   return { status: 'ok', fee: fee, net: Math.round((sum - fee) * 100) / 100, balance: b.balance };
 }

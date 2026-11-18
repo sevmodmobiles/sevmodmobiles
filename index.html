@@ -5150,17 +5150,28 @@
   ['fcaAmount', 'fcaPct'].forEach(function (id) { document.getElementById(id).addEventListener('input', fcaCalc_); });
   document.getElementById('goToFmCashBtn').addEventListener('click', showFmCashAdm_);
   document.getElementById('fcaBack').addEventListener('click', function () { showAdminScreen(); });
-  document.getElementById('fcaSend').addEventListener('click', function () {
-    var st = document.getElementById('fcaStatus'), btn = this, who = document.getElementById('fcaWho').value;
+  // Один перевод — один reqId: повторная отправка после обрыва связи не запишет его дважды.
+  var fcaReqId = '';
+  ['fcaWho', 'fcaAmount', 'fcaPct', 'fcaDate', 'fcaComment'].forEach(function (id) { document.getElementById(id).addEventListener('input', function () { fcaReqId = ''; }); document.getElementById(id).addEventListener('change', function () { fcaReqId = ''; }); });
+  document.getElementById('fcaSend').addEventListener('click', function fcaSend_(ev, force) {
+    var st = document.getElementById('fcaStatus'), btn = document.getElementById('fcaSend'), who = document.getElementById('fcaWho').value;
+    if (btn.disabled) return;
+    if (!fcaReqId) fcaReqId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     var sum = Number(document.getElementById('fcaAmount').value.replace(/\s/g, '').replace(',', '.'));
     if (!who) { st.textContent = 'Выберите прораба'; st.className = 'error'; return; }
     if (!(sum > 0)) { st.textContent = 'Укажите сумму'; st.className = 'error'; return; }
     btn.disabled = true; st.className = ''; st.textContent = 'Передаю…';
     apiPost({ action: 'adminFmTransfer', phone: currentUser.phone, foreman: who, amount: sum, method: segGet_('fcaMethod'), taxPct: document.getElementById('fcaPct').value,
-      date: document.getElementById('fcaDate').value, comment: document.getElementById('fcaComment').value.trim() }).then(function (res) {
+      date: document.getElementById('fcaDate').value, comment: document.getElementById('fcaComment').value.trim(), reqId: fcaReqId, force: force ? 1 : '' }).then(function (res) {
       btn.disabled = false;
+      if (res && res.status === 'dup') {
+        st.textContent = ''; 
+        if (confirm(res.message + '\n\nЗаписать ещё один такой же перевод?')) fcaSend_(null, true);
+        return;
+      }
       if (!res || res.status !== 'ok') { st.textContent = (res && res.message) || 'Не получилось'; st.className = 'error'; return; }
       st.textContent = ''; toast_('Передано ' + fmRub_(sum) + (res.fee ? ', комиссия ' + fmRub_(res.fee) : '') + '. Остаток у прораба: ' + fmRub_(res.balance), 'ok');
+      fcaReqId = '';
       document.getElementById('fcaAmount').value = ''; document.getElementById('fcaComment').value = ''; fcaCalc_();
       showFmCashAdm_();
     }).catch(function (err) { btn.disabled = false; st.textContent = 'Ошибка соединения: ' + err; st.className = 'error'; });
