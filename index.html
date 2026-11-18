@@ -4029,9 +4029,17 @@
 
   // Поля комментариев растут по мере ввода — весь текст виден (без maxlength:
   // на Android он ломает ввод с подсказками клавиатуры)
-  function autoGrow_(el) { if (!el || !el.classList || !el.classList.contains('autogrow')) return; el.style.height = 'auto'; el.style.height = el.scrollHeight + 2 + 'px'; }
-  document.addEventListener('input', function (e) { autoGrow_(e.target); }, true);
-  document.addEventListener('focusin', function (e) { autoGrow_(e.target); }, true);
+  // Высоту меняем, только когда текст реально не влезает или поле стало слишком
+  // большим, и никогда во время набора слова клавиатурой (composition): лишняя
+  // перекладка поля на Android может сбить позицию курсора у клавиатуры.
+  function autoGrow_(el) {
+    if (!el || !el.classList || !el.classList.contains('autogrow')) return;
+    var need = el.scrollHeight + 2, cur = el.offsetHeight;
+    if (need > cur) { el.style.height = need + 'px'; return; }
+    if (el.value === '' && el.style.height) el.style.height = '';
+  }
+  document.addEventListener('input', function (e) { if (!e.isComposing) autoGrow_(e.target); }, true);
+  document.addEventListener('compositionend', function (e) { autoGrow_(e.target); }, true);
   // Поля даты и времени: календарь/часы открываются нажатием на всё поле,
   // а не только на значок справа (так интуитивнее). Работает и для полей,
   // которые создаются динамически (авансы в контрактах и т.п.).
